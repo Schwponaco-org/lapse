@@ -126,6 +126,7 @@ std::pair<double, double> fft_crosscorrelate(std::vector<int> activity_profile, 
 
 
 
+
 /* 
 // Finds the offset between the movie and subtitles
 std::tuple<double, double, float> cross_correlation(std::vector<int> activity_profile, std::vector<float> RMS) {

@@ -4,7 +4,8 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <algorithm>
 
-std::vector<std::pair<int, int>> read_srt(const char* filename);
-std::vector<int> activity(std::vector<std::pair<int, int>> timestamps);
-void write_srt(const char* input_path, const char* output_path, double slope, double intercept_s);
+std::pair<std::vector<std::pair<int,int>>, std::vector<int>> read_srt(const char* filename);
+std::vector<int> activity(std::vector<std::pair<int, int>> spans);
+void write_srt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);

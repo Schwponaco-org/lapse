@@ -24,17 +24,26 @@ int main(int argc, const char *argv[]) {
     pcm.clear();
     pcm.shrink_to_fit();
 
-    std::vector<std::pair<int, int>> timestamps = read_srt(argv[2]);
-    if (timestamps.empty()) {
+    auto [spans, mapping] = read_srt(argv[2]);
+    if (spans.empty()) {
         std::cerr << "No timestamps found in SRT: " << argv[2] << '\n';
         return 1;
     }
-    std::vector<int> activity_variable = activity(timestamps);
+    std::vector<int> activity_variable = activity(spans);
     std::vector<int> fvad_int(fvad.begin(), fvad.end());
+
+    /*
+    Something:
+    if (P == 0) {
+        subsnap OLS pipeline (fft_cross_correlate)
+    } else {
+        run span-alignment with penalty P
+    }
+    */
 
     auto [slope, intercept] = fft_crosscorrelate(fvad_int, activity_variable);
 
-    write_srt(argv[2], argv[2], slope, intercept);
+    write_srt_OLS(argv[2], argv[2], slope, intercept);
 
     std::cout << "Done: slope=" << slope << " intercept=" << intercept << "s -> " << argv[2] << '\n';
 

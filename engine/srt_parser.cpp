@@ -1,7 +1,8 @@
 #include "srt_parser.h"
 
-std::vector<std::pair<int, int>> read_srt(const char* filename) {
+std::pair<std::vector<std::pair<int,int>>, std::vector<int>> read_srt(const char* filename) {
     std::vector<std::pair<int, int>> timestamps;
+    std::vector<int> mapping;
     std::string line {};
     std::ifstream read_file(filename);
     while (getline (read_file, line)) {
@@ -30,19 +31,63 @@ std::vector<std::pair<int, int>> read_srt(const char* filename) {
             timestamps.push_back(std::make_pair(start_ms, end_ms));
         }
     }
-    return timestamps;
+
+    std::vector<std::pair<std::pair<int,int>, int>> ys;
+    for (int i = 0; i < timestamps.size(); i++) {
+        ys.push_back({timestamps[i], i});
+    }
+
+    std::sort(ys.begin(), ys.end());
+
+
+    for (int i = 0; i < ys.size(); i++) {
+        int place = 0;
+        if (ys[i].first.first - ys[i].first.second == 0) {
+            ys.erase(ys.begin() + i--);
+            //ys[i].second = -1;
+        }
+
+        if (ys[i].first.second < ys[i].first.first) {
+            place = ys[i].first.first;
+            ys[i].first.first = ys[i].first.second;
+            ys[i].first.second = place;
+        }
+    }
+    std::vector<std::pair<int,int>> spans;
+    std::vector<int> original_placement;
+    int new_end;
+    int n = 0;
+
+    for (int i = 0; i < ys.size(); i++) {
+        original_placement.push_back(n);
+
+
+        if (spans.empty() || ys[i].first.first >= spans.back().second) {
+            spans.push_back({ys[i].first.first, ys[i].first.second});
+            n += 1;
+        } else {
+            new_end = std::max(ys[i].first.second, spans.back().second);
+            spans.back().second = new_end;
+        }
+    }
+
+    for (int i = 0; i < ys.size(); i++) {
+        mapping.push_back(original_placement[ys[i].second]);
+    }
+
+    return {spans, mapping};
 }
 
 // Build some sort of activity profile that checks every 10ms for dialogue 
-std::vector<int> activity(std::vector<std::pair<int, int>> timestamps) {
-    if (timestamps.empty()) return {};
+std::vector<int> activity(std::vector<std::pair<int, int>> spans) {
+    if (spans.empty()) return {};
     std::vector<int> activity_profile = {};
     int j = 0;
-    for (int i = 0; i <= timestamps.back().second; i += 10) {
-        while (j < timestamps.size() && i > timestamps[j].second) {
+    for (int i = 0; i <= spans.back().second; i += 10) {
+        while (j < spans.size() && i > spans[j].second) {
             j++;
         }
-        if (i >= timestamps[j].first && i <= timestamps[j].second) {
+        if (i >= spans[j].first && i <= spans[j].second) {
             activity_profile.push_back(1);
         } else {
             activity_profile.push_back(0);
@@ -51,7 +96,7 @@ std::vector<int> activity(std::vector<std::pair<int, int>> timestamps) {
     return activity_profile;
 }
 
-void write_srt(const char* input_path, const char* output_path, double slope, double intercept_s) {
+void write_srt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
     std::ifstream in(input_path, std::ios::binary);
     if (!in) throw std::runtime_error("Cannot open SRT: " + std::string(input_path));
 
