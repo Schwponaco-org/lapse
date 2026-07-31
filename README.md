@@ -1,4 +1,6 @@
-# subsnap
+# LAPSE
+
+**Language-Agnostic Playback Synchronization Engine**
 
 Automatically fixes subtitle sync in your media library. Detects how far off your subtitles are and corrects them, including linear drift caused by framerate mismatches between the video and the subtitle file.
 
@@ -19,10 +21,12 @@ Built in C++ using FFmpeg for audio decoding, libfvad for voice activity detecti
 
 ## repo structure
 
-subsnap/
+```
+lapse/
 ├── engine/       C++ source for the CLI binary
 ├── docker/       Python orchestrator, Dockerfile, compose file
 └── .github/      CI workflows for Docker image and binary releases
+```
 
 ---
 
@@ -34,7 +38,7 @@ Build the binary:
 
 ```bash
 cd engine
-g++ -O2 -o subsnap main.cpp correlate.cpp decoder.cpp srt_parser.cpp \
+g++ -O2 -o lapse main.cpp correlate.cpp decoder.cpp srt_parser.cpp \
     $(pkg-config --cflags --libs libavcodec libavformat libavutil libswresample) \
     -lfvad -lfftw3
 ```
@@ -42,34 +46,34 @@ g++ -O2 -o subsnap main.cpp correlate.cpp decoder.cpp srt_parser.cpp \
 Run it on a single file:
 
 ```bash
-./subsnap video.mkv subtitles.srt
+./lapse video.mkv subtitles.srt
 ```
 
 This decodes the audio, runs VAD, finds the offset and drift, corrects the SRT file in place, and prints the result. No Python required.
 
-### docker
+### docker (experimental)
 
 The Docker image includes the C++ binary and the Python file watcher. Point it at your media and it will scan on startup then watch for new files.
 
 ```yaml
 services:
-  subsnap:
-    image: ghcr.io/rs-jensen/subsnap:latest
+  lapse:
+    image: ghcr.io/rs-jensen/lapse:latest
     restart: always
     volumes:
       - ./data:/data
       - /your/media:/media
     environment:
       - MEDIA_ROOT=/media
-      - DB_PATH=/data/subsnap.db
-      - SUBSNAP_BIN=/app/subsnap
+      - DB_PATH=/data/lapse.db
+      - LAPSE_BIN=/app/lapse
 ```
 
 ```bash
 docker compose up -d
 ```
 
-Subsnap matches video files to SRT files by filename similarity within the same directory. It handles the usual naming differences from scene releases reasonably well. The first run is worth watching with `docker compose logs -f subsnap` to make sure matches look correct.
+LAPSE matches video files to SRT files by filename similarity within the same directory. It handles the usual naming differences from scene releases reasonably well. The first run is worth watching with `docker compose logs -f lapse` to make sure matches look correct.
 
 ---
 
@@ -79,6 +83,7 @@ Subsnap matches video files to SRT files by filename similarity within the same 
 
 **Subtitles:** `.srt`
 
-Planned:
-- `.ass` / `.ssa`
-- `.vtt`
+Planned to support most common video and subtitle formats.
+
+
+Licensed under the GNU General Public License v3.0 — see [LICENSE](LICENSE) for details.
