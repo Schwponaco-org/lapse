@@ -51,6 +51,14 @@ Run it on a single file:
 
 This decodes the audio, runs VAD, finds the offset and drift, corrects the SRT file in place, and prints the result. No Python required.
 
+Sync subtitles to another subtitle file:
+
+```bash
+./lapse reference.srt subtitles.srt
+```
+
+When the first argument is an SRT file, LAPSE skips audio decoding and aligns directly against the reference subtitle's timestamps instead. Faster and more accurate than aligning to audio.
+
 ### docker (experimental)
 
 The Docker image includes the C++ binary and the Python file watcher. Point it at your media and it will scan on startup then watch for new files.
