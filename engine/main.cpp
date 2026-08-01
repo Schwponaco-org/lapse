@@ -21,46 +21,49 @@
 #include "srt_parser.h"
 #include "correlate.h"
 
+bool is_subtitle(const std::string& path) {
+    for (auto& ext : {".srt"})
+        if (path.size() > strlen(ext) && path.substr(path.size() - strlen(ext)) == ext)
+            return true;
+    return false;
+}
+
 int main(int argc, const char *argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: lapse <video> <subtitle.srt>\n";
+        std::cerr << "Usage: lapse <video_or_subtitle> <subtitle.srt>\n";
         return -1;
     }
 
-    AVFormatContext* AVC = open_file(argv[1]);
-    int audio_stream_index = find_audio_stream(AVC);
-    AVCodecContext* OAD = open_audio_decoder(AVC, audio_stream_index);
+    std::string reference_path = argv[1];
+    std::string input_path = argv[2];
 
-    std::vector<float> decoded = decode_audio(AVC, OAD, audio_stream_index);
-    std::vector<int16_t> pcm = convert_to_8kHz(decoded, OAD);
-    decoded.clear();
-    decoded.shrink_to_fit();
-    std::vector<float> fvad = calculate_fvad(pcm, 8000);
-    pcm.clear();
-    pcm.shrink_to_fit();
+    // build reference activity profile
+    std::vector<int> reference_activity;
+    if (is_subtitle(reference_path)) {
+        auto [ref_spans, _] = read_srt(reference_path.c_str());
+        reference_activity = activity(ref_spans);
+    } else {
+        AVFormatContext* AVC = open_file(reference_path.c_str());
+        int audio_stream_index = find_audio_stream(AVC);
+        AVCodecContext* OAD = open_audio_decoder(AVC, audio_stream_index);
+        std::vector<float> decoded = decode_audio(AVC, OAD, audio_stream_index);
+        std::vector<int16_t> pcm = convert_to_8kHz(decoded, OAD);
+        decoded.clear(); decoded.shrink_to_fit();
+        std::vector<float> fvad = calculate_fvad(pcm, 8000);
+        pcm.clear(); pcm.shrink_to_fit();
+        reference_activity = std::vector<int>(fvad.begin(), fvad.end());
+    }
 
-    auto [spans, mapping] = read_srt(argv[2]);
+    auto [spans, mapping] = read_srt(input_path.c_str());
     if (spans.empty()) {
-        std::cerr << "No timestamps found in SRT: " << argv[2] << '\n';
+        std::cerr << "No timestamps found in SRT: " << input_path << '\n';
         return 1;
     }
-    std::vector<int> activity_variable = activity(spans);
-    std::vector<int> fvad_int(fvad.begin(), fvad.end());
+    std::vector<int> input_activity = activity(spans);
 
-    /*
-    Something:
-    if (P == 0) {
-        lapse OLS pipeline (fft_cross_correlate)
-    } else {
-        run span-alignment with penalty P
-    }
-    */
-
-    auto [slope, intercept] = fft_crosscorrelate(fvad_int, activity_variable);
-
-    write_srt_OLS(argv[2], argv[2], slope, intercept);
-
-    std::cout << "Done: slope=" << slope << " intercept=" << intercept << "s -> " << argv[2] << '\n';
+    auto [slope, intercept] = fft_crosscorrelate(reference_activity, input_activity);
+    write_srt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
+    std::cout << "Done: slope=" << slope << " intercept=" << intercept << "s -> " << input_path << '\n';
 
     return 0;
 }
