@@ -29,11 +29,8 @@ bool is_subtitle(const std::string& path) {
     return false;
 }
 
-
 int main(int argc, const char *argv[]) {
     if (argc < 3) {
-
-        std::cerr << "Usage: lapse <video_or_subtitle> <subtitle.srt>\n";
         std::cerr << "Usage: lapse <video_or_subtitle> <subtitle>\n";
         return -1;
     }
@@ -41,10 +38,8 @@ int main(int argc, const char *argv[]) {
     std::string reference_path = argv[1];
     std::string input_path = argv[2];
 
-    // build reference activity profile
     std::vector<int> reference_activity;
     if (is_subtitle(reference_path)) {
-        auto [ref_spans, _] = read_srt(reference_path.c_str());
         auto [ref_spans, _] = process_spans(read_subtitle(reference_path));
         reference_activity = activity(ref_spans);
     } else {
@@ -59,20 +54,14 @@ int main(int argc, const char *argv[]) {
         reference_activity = std::vector<int>(fvad.begin(), fvad.end());
     }
 
-    auto [spans, mapping] = read_srt(input_path.c_str());
-    if (spans.empty()) {
-        std::cerr << "No timestamps found in SRT: " << input_path << '\n';
-
     auto [spans, mapping] = process_spans(read_subtitle(input_path));
     if (spans.empty()) {
         std::cerr << "No timestamps found in subtitle file: " << input_path << '\n';
-
         return 1;
     }
     std::vector<int> input_activity = activity(spans);
 
     auto [slope, intercept] = fft_crosscorrelate(reference_activity, input_activity);
-    write_srt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
 
     if (input_path.ends_with(".srt"))
         write_srt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
@@ -80,7 +69,7 @@ int main(int argc, const char *argv[]) {
         write_ass_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
     else if (input_path.ends_with(".vtt"))
         write_vtt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
-    
+
     std::cout << "Done: slope=" << slope << " intercept=" << intercept << "s -> " << input_path << '\n';
 
     return 0;
