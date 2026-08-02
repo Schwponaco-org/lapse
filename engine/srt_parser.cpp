@@ -12,11 +12,21 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 #include "srt_parser.h"
 
-std::pair<std::vector<std::pair<int,int>>, std::vector<int>> read_srt(const char* filename) {
+std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
+    if (path.ends_with(".srt"))
+        return read_srt(path.c_str());
+    if (path.ends_with(".ass") || path.ends_with(".ssa"))
+        return read_ass(path.c_str());
+    if (path.ends_with(".vtt"))
+        return read_vtt(path.c_str());
+    throw std::runtime_error("Unsupported subtitle format: " + path);
+}
+
+std::vector<std::pair<int, int>> read_srt(const char* filename) {
     std::vector<std::pair<int, int>> timestamps;
-    std::vector<int> mapping;
     std::string line {};
     std::ifstream read_file(filename);
     while (getline (read_file, line)) {
@@ -45,7 +55,65 @@ std::pair<std::vector<std::pair<int,int>>, std::vector<int>> read_srt(const char
             timestamps.push_back(std::make_pair(start_ms, end_ms));
         }
     }
+    return timestamps;
+}
 
+std::vector<std::pair<int, int>> read_ass(const char* filename) {
+    std::vector<std::pair<int, int>> timestamps;
+    std::string line {};
+    std::ifstream read_file(filename);
+    while (getline(read_file, line)) {
+        if (line.find("Dialogue:") != 0) continue;
+
+        // Format: Dialogue: Layer,Start,End,...
+        int first_comma = line.find(',');
+        int second_comma = line.find(',', first_comma + 1);
+        int third_comma = line.find(',', second_comma + 1);
+
+        std::string start_str = line.substr(first_comma + 1, second_comma - first_comma - 1);
+        std::string end_str = line.substr(second_comma + 1, third_comma - second_comma - 1);
+
+        auto parse_ass_time = [](const std::string& t) {
+            int h = std::stoi(t.substr(0, 1));
+            int m = std::stoi(t.substr(2, 2));
+            int s = std::stoi(t.substr(5, 2));
+            int cs = std::stoi(t.substr(8, 2));
+            return h * 3600000 + m * 60000 + s * 1000 + cs * 10;
+        };
+
+        timestamps.push_back({parse_ass_time(start_str), parse_ass_time(end_str)});
+    }
+    return timestamps;
+}
+
+std::vector<std::pair<int,int>> read_vtt(const char* filename) {
+    std::vector<std::pair<int,int>> timestamps;
+    std::string line;
+    std::ifstream f(filename);
+    while (std::getline(f, line)) {
+        if (line.find("-->") == std::string::npos) continue;
+        try {
+            int h1  = std::stoi(line.substr(0, 2));
+            int m1  = std::stoi(line.substr(3, 2));
+            int s1  = std::stoi(line.substr(6, 2));
+            int ms1 = std::stoi(line.substr(9, 3));
+            int start = h1*3600000 + m1*60000 + s1*1000 + ms1;
+
+            int h2  = std::stoi(line.substr(17, 2));
+            int m2  = std::stoi(line.substr(20, 2));
+            int s2  = std::stoi(line.substr(23, 2));
+            int ms2 = std::stoi(line.substr(26, 3));
+            int end = h2*3600000 + m2*60000 + s2*1000 + ms2;
+
+            timestamps.push_back({start, end});
+        } catch (...) {}
+    }
+    return timestamps;
+}
+
+
+std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(std::vector<std::pair<int, int>> timestamps) {
+    std::vector<int> mapping;
     std::vector<std::pair<std::pair<int,int>, int>> ys;
     for (int i = 0; i < timestamps.size(); i++) {
         ys.push_back({timestamps[i], i});
@@ -92,6 +160,8 @@ std::pair<std::vector<std::pair<int,int>>, std::vector<int>> read_srt(const char
     return {spans, mapping};
 }
 
+
+
 // Build some sort of activity profile that checks every 10ms for dialogue 
 std::vector<int> activity(std::vector<std::pair<int, int>> spans) {
     if (spans.empty()) return {};
@@ -110,58 +180,3 @@ std::vector<int> activity(std::vector<std::pair<int, int>> spans) {
     return activity_profile;
 }
 
-void write_srt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    std::ifstream in(input_path, std::ios::binary);
-    if (!in) throw std::runtime_error("Cannot open SRT: " + std::string(input_path));
-
-    std::string raw((std::istreambuf_iterator<char>(in)), {});
-    in.close();
-
-    // strip UTF-8 BOM if present
-    size_t bom_start = 0;
-    if (raw.size() >= 3 &&
-        (unsigned char)raw[0] == 0xEF &&
-        (unsigned char)raw[1] == 0xBB &&
-        (unsigned char)raw[2] == 0xBF)
-        bom_start = 3;
-
-    std::istringstream ss(raw.substr(bom_start));
-    std::ofstream out(output_path, std::ios::binary);
-    if (!out) throw std::runtime_error("Cannot write SRT: " + std::string(output_path));
-
-    auto ts_to_ms = [](const std::string& s, int offset) -> int {
-        int h  = std::stoi(s.substr(offset, 2));
-        int m  = std::stoi(s.substr(offset + 3, 2));
-        int sc = std::stoi(s.substr(offset + 6, 2));
-        int ms = std::stoi(s.substr(offset + 9, 3));
-        return h * 3600000 + m * 60000 + sc * 1000 + ms;
-    };
-
-    auto ms_to_ts = [](int ms) -> std::string {
-        if (ms < 0) ms = 0;
-        int h  = ms / 3600000; ms %= 3600000;
-        int m  = ms / 60000;   ms %= 60000;
-        int sc = ms / 1000;    ms %= 1000;
-        char buf[13];
-        snprintf(buf, sizeof(buf), "%02d:%02d:%02d,%03d", h, m, sc, ms);
-        return buf;
-    };
-
-    std::string line;
-    while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r')
-            line.pop_back();
-
-            if (line.find("-->") != std::string::npos && line.size() >= 29) {
-                try {
-                    int start_ms  = ts_to_ms(line, 0);
-                    int end_ms    = ts_to_ms(line, 17);
-                    int new_start = (int)(start_ms * (1.0 + slope) + intercept_s * 1000.0);
-                    int new_end   = (int)(end_ms   * (1.0 + slope) + intercept_s * 1000.0);
-                    line = ms_to_ts(new_start) + " --> " + ms_to_ts(new_end);
-                } catch (...) {}
-            }
-
-        out << line << "\n";
-    }
-}

@@ -20,10 +20,9 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
+#include <filesystem>
 
-std::vector<std::pair<int,int>> read_subtitle(const std::string& path);
-std::vector<std::pair<int, int>> read_srt(const char* filename);
-std::vector<std::pair<int, int>> read_ass(const char* filename);
-std::vector<std::pair<int,int>> read_vtt(const char* filename);
-std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(std::vector<std::pair<int, int>> timestamps);
-std::vector<int> activity(std::vector<std::pair<int, int>> spans);
+void backup_file(const char* path);
+void write_srt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
+void write_ass_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
+void write_vtt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);

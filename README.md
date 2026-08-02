@@ -43,7 +43,7 @@ g++ -O2 -o lapse main.cpp correlate.cpp decoder.cpp srt_parser.cpp \
     -lfvad -lfftw3
 ```
 
-Run it on a single file:
+Sync subtitles to a video file:
 
 ```bash
 ./lapse video.mkv subtitles.srt
@@ -85,11 +85,11 @@ LAPSE matches video files to SRT files by filename similarity within the same di
 
 ---
 
-## supported formats
+## Supported formats
 
-**Video:** `.mp4`, `.mkv`, `.avi`
+**Video:** All formats supported by FFmpeg (`.mp4`, `.mkv`, `.avi`, `.mov`, `.ts`, `.webm` and more)
 
-**Subtitles:** `.srt`
+**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt` 
 
 Planned to support most common video and subtitle formats.
 

@@ -20,17 +20,21 @@
 #include "decoder.h"
 #include "srt_parser.h"
 #include "correlate.h"
+#include "write_subtitle.h"
 
 bool is_subtitle(const std::string& path) {
-    for (auto& ext : {".srt"})
+    for (auto& ext : {".srt", ".ass", ".ssa", ".vtt"})
         if (path.size() > strlen(ext) && path.substr(path.size() - strlen(ext)) == ext)
             return true;
     return false;
 }
 
+
 int main(int argc, const char *argv[]) {
     if (argc < 3) {
+
         std::cerr << "Usage: lapse <video_or_subtitle> <subtitle.srt>\n";
+        std::cerr << "Usage: lapse <video_or_subtitle> <subtitle>\n";
         return -1;
     }
 
@@ -41,6 +45,7 @@ int main(int argc, const char *argv[]) {
     std::vector<int> reference_activity;
     if (is_subtitle(reference_path)) {
         auto [ref_spans, _] = read_srt(reference_path.c_str());
+        auto [ref_spans, _] = process_spans(read_subtitle(reference_path));
         reference_activity = activity(ref_spans);
     } else {
         AVFormatContext* AVC = open_file(reference_path.c_str());
@@ -57,12 +62,25 @@ int main(int argc, const char *argv[]) {
     auto [spans, mapping] = read_srt(input_path.c_str());
     if (spans.empty()) {
         std::cerr << "No timestamps found in SRT: " << input_path << '\n';
+
+    auto [spans, mapping] = process_spans(read_subtitle(input_path));
+    if (spans.empty()) {
+        std::cerr << "No timestamps found in subtitle file: " << input_path << '\n';
+
         return 1;
     }
     std::vector<int> input_activity = activity(spans);
 
     auto [slope, intercept] = fft_crosscorrelate(reference_activity, input_activity);
     write_srt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
+
+    if (input_path.ends_with(".srt"))
+        write_srt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
+    else if (input_path.ends_with(".ass") || input_path.ends_with(".ssa"))
+        write_ass_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
+    else if (input_path.ends_with(".vtt"))
+        write_vtt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
+    
     std::cout << "Done: slope=" << slope << " intercept=" << intercept << "s -> " << input_path << '\n';
 
     return 0;
