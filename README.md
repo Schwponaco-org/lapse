@@ -13,7 +13,7 @@ Built in C++ using FFmpeg for audio decoding, libfvad for voice activity detecti
 1. Decodes audio from the video file using FFmpeg
 2. Runs WebRTC voice activity detection to build a speech activity profile at 8kHz
 3. Parses the SRT file and builds a matching dialogue activity profile from the timestamps
-4. Cross-correlates the two profiles across 15 minute chunks using FFT, which finds the offset for each chunk in O(N log N) instead of the naive O(N²)
+4. Cross-correlates the two profiles across 15 minute chunks using FFT, which finds the offset for each chunk in O(N log N)
 5. Fits a line through the per-chunk offsets using weighted linear regression to find both the constant offset and any linear drift
 6. Applies the correction to the SRT file and keeps a .srt.bak of the original
 
