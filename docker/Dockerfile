@@ -36,8 +36,9 @@ WORKDIR /app
 COPY docker/requirements.txt .
 RUN pip3 install -r requirements.txt --break-system-packages
 COPY engine/correlate.cpp engine/correlate.h engine/decoder.cpp engine/decoder.h \
-     engine/srt_parser.cpp engine/srt_parser.h engine/main.cpp .
-RUN g++ -O2 -o lapse main.cpp correlate.cpp decoder.cpp srt_parser.cpp \
+     engine/srt_parser.cpp engine/srt_parser.h engine/main.cpp \
+     engine/write_subtitle.cpp engine/write_subtitle.h .
+RUN g++ -O2 -std=c++20 -o lapse main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp \
     -lavcodec -lavformat -lavutil -lswresample -lfvad -lfftw3
 COPY docker/main.py .
 CMD ["python3", "main.py"]
