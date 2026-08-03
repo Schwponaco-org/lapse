@@ -94,4 +94,4 @@ LAPSE matches video files to SRT files by filename similarity within the same di
 Planned to support most common video and subtitle formats.
 
 
-Licensed under the GNU General Public License v3.0 — see [LICENSE](LICENSE) for details.
+Licensed under the GNU General Public License v3.0 see [LICENSE](LICENSE) for details.
