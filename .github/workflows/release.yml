@@ -74,6 +74,9 @@ jobs:
             -lfftw3 \
             -lm -lpthread -lz -ldl
 
+      - name: Verify FFmpeg build
+        run: ls -la /opt/ffmpeg/lib/*.a || echo "NO STATIC LIBS FOUND"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
