@@ -1,10 +1,8 @@
 name: Release
-
 on:
   push:
     tags:
       - 'v*'
-
 jobs:
   build:
     strategy:
@@ -14,32 +12,65 @@ jobs:
             os: ubuntu-latest
           - arch: arm64
             os: ubuntu-24.04-arm
-
     runs-on: ${{ matrix.os }}
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libavformat-dev libavcodec-dev libavutil-dev \
-            libswresample-dev libfftw3-dev \
-            autoconf automake libtool
+            build-essential autoconf automake libtool pkg-config \
+            nasm yasm libfftw3-dev zlib1g-dev
 
-      - name: Build libfvad
+      - name: Build FFmpeg 7.x static
+        run: |
+          wget -q https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz
+          tar xf ffmpeg-7.1.tar.xz
+          cd ffmpeg-7.1
+          ./configure \
+            --prefix=/opt/ffmpeg \
+            --enable-static \
+            --disable-shared \
+            --disable-programs \
+            --disable-doc \
+            --disable-debug \
+            --disable-everything \
+            --enable-avformat \
+            --enable-avcodec \
+            --enable-avutil \
+            --enable-swresample \
+            --enable-demuxer=matroska,mov,avi,mp4,ogg,wav,flac,aac \
+            --enable-decoder=aac,ac3,eac3,mp3,flac,vorbis,opus,dca,truehd,\
+          pcm_s16le,pcm_s16be,pcm_s24le,pcm_f32le,pcm_f32be \
+            --enable-parser=aac,mp3,flac,vorbis,opus,ac3 \
+            --enable-protocol=file
+          make -j$(nproc)
+          sudo make install
+
+      - name: Build libfvad static
         run: |
           git clone https://github.com/dpirch/libfvad.git
-          cd libfvad && autoreconf -i && ./configure && make && sudo make install
-          sudo ldconfig
+          cd libfvad
+          autoreconf -i
+          ./configure --prefix=/opt/libfvad --enable-static --disable-shared
+          make
+          sudo make install
 
       - name: Build lapse
         run: |
           cd engine
-          g++ -O2 -std=c++20 -o lapse-linux-${{ matrix.arch }} \
+          g++ -O2 -std=c++20 \
+            -I/opt/ffmpeg/include \
+            -I/opt/libfvad/include \
+            -o lapse-linux-${{ matrix.arch }} \
             main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp \
-            -lavcodec -lavformat -lavutil -lswresample -lfvad -lfftw3
+            -L/opt/ffmpeg/lib -L/opt/libfvad/lib \
+            -static-libgcc -static-libstdc++ \
+            -Wl,-Bstatic \
+            -lavformat -lavcodec -lavutil -lswresample -lfvad -lfftw3 \
+            -Wl,-Bdynamic \
+            -lm -lpthread -lz -ldl
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -50,11 +81,9 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
-
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
