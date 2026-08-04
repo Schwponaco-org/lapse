@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            os: ubuntu-latest
+          - arch: arm64
+            os: ubuntu-24.04-arm
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libavformat-dev libavcodec-dev libavutil-dev \
+            libswresample-dev libfftw3-dev \
+            autoconf automake libtool
+
+      - name: Build libfvad
+        run: |
+          git clone https://github.com/dpirch/libfvad.git
+          cd libfvad && autoreconf -i && ./configure && make && sudo make install
+          sudo ldconfig
+
+      - name: Build lapse
+        run: |
+          cd engine
+          g++ -O2 -std=c++20 -o lapse-linux-${{ matrix.arch }} \
+            main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp \
+            -lavcodec -lavformat -lavutil -lswresample -lfvad -lfftw3
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lapse-linux-${{ matrix.arch }}
+          path: engine/lapse-linux-${{ matrix.arch }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            lapse-linux-amd64/lapse-linux-amd64
+            lapse-linux-arm64/lapse-linux-arm64
