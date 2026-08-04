@@ -80,7 +80,7 @@ jobs:
             /opt/ffmpeg/lib/libswresample.a \
             /opt/ffmpeg/lib/libavutil.a \
             /opt/libfvad/lib/libfvad.a \
-            -lfftw3 \
+            -Wl,-Bstatic -lfftw3 -Wl,-Bdynamic \
             -lm -lpthread -lz -ldl
 
       - name: Upload artifact
