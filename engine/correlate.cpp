@@ -140,6 +140,35 @@ std::pair<double, double> fft_crosscorrelate(std::vector<int> activity_profile, 
 }
 
 
+/*
+Needs to takeVAD spans
+input spans from read_srt
+One offset in ms
+weight function pr span par
+*/
+
+int score_calculator(std::vector<std::pair<int, int>> read_srt, std::vector<std::pair<int, int>> reference_spans, int x) {
+    int score = 0;
+    int n = 0;
+    int k = 0;
+
+    while (k < read_srt.size() && n < reference_spans.size()) {
+        int overlap = std::max(0, std::min(reference_spans[k].second, read_srt[n].second + x) - std::max(reference_spans[k].first, read_srt[n].first + x));
+        int min_length = std::min(reference_spans[k].second - reference_spans[k].first, read_srt[n].second - read_srt[n].first);
+        double iscore = (double)overlap / min_length;
+
+        int max_length = std::max(reference_spans[k].second - reference_spans[k].first, read_srt[n].second - read_srt[n].first);
+        float w = min_length / max_length;
+
+        score += iscore * w;
+        if (reference_spans[k].second < read_srt[n].second + x)
+            k += 1;
+        else 
+            n +=1;
+    }
+    return score;
+}
+
 
 
 /* 

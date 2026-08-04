@@ -180,3 +180,22 @@ std::vector<int> activity(std::vector<std::pair<int, int>> spans) {
     return activity_profile;
 }
 
+std::vector<std::pair<int, int>> reference_spans(std::vector<int> activity_profile) {
+    std::vector<std::pair<int, int>> reference_spans;
+    bool check = false;
+    int start_ms = 0;
+    int end_ms = 0;
+    for (int i = 0; i < activity_profile.size(); i++) {
+        if (activity_profile[i] == 1 && !check) {
+            check = true;
+            start_ms = i;
+        }
+        if ((activity_profile[i] == 0 && check) || (i == activity_profile.size() - 1 && check)) {
+            check = false;
+            end_ms = i;
+            reference_spans.push_back({start_ms, end_ms});
+        }
+    }
+    return reference_spans;
+}
+

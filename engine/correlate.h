@@ -23,4 +23,5 @@
 
 std::pair<double, double> linear_regression(std::vector<double> x, std::vector<double> y, std::vector<double> w);
 std::pair<double, double> fft_crosscorrelate(std::vector<int> activity_profile, std::vector<int> srt_profile);
+int score_calculator(std::vector<std::pair<int, int>> read_srt, std::vector<std::pair<int, int>> reference_spans, int x);
 

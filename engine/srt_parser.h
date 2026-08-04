@@ -27,3 +27,4 @@ std::vector<std::pair<int, int>> read_ass(const char* filename);
 std::vector<std::pair<int,int>> read_vtt(const char* filename);
 std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(std::vector<std::pair<int, int>> timestamps);
 std::vector<int> activity(std::vector<std::pair<int, int>> spans);
+std::vector<std::pair<int, int>> reference_spans(std::vector<int> activity_profile);
