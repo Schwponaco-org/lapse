@@ -169,7 +169,150 @@ int score_calculator(std::vector<std::pair<int, int>> read_srt, std::vector<std:
     return score;
 }
 
+int best_offset(std::vector<std::pair<int, int>> read_srt, std::vector<std::pair<int, int>> reference_spans) {
+    std::vector<std::pair<int, float>> slope_changes;
 
+    for (int k = 0; k < reference_spans.size(); k++){
+        for (int n = 0; n < read_srt.size(); n++) {
+            int min_length = std::min(reference_spans[k].second - reference_spans[k].first, read_srt[n].second - read_srt[n].first);
+            int max_length = std::max(reference_spans[k].second - reference_spans[k].first, read_srt[n].second - read_srt[n].first);
+            float w = (float)min_length / max_length;
+            float slope = w / (float)min_length;
+
+            int sig1 = reference_spans[k].first - read_srt[n].second;
+            if (max_length == reference_spans[k].second - reference_spans[k].first) {
+                int sig2 = reference_spans[k].first - read_srt[n].first;
+                int sig3 = reference_spans[k].second - read_srt[n].second;
+                
+                slope_changes.push_back({sig2, -slope});
+                slope_changes.push_back({sig3, -slope});
+            } else {
+                int sig2 = reference_spans[k].second - read_srt[n].second;
+                int sig3 = reference_spans[k].first - read_srt[n].first;
+                
+                slope_changes.push_back({sig2, -slope});
+                slope_changes.push_back({sig3, -slope});
+            }
+            int sig4 = reference_spans[k].second - read_srt[n].first;
+            slope_changes.push_back({sig1, +slope});
+            slope_changes.push_back({sig4, +slope});
+        }
+    }
+
+    std::sort(slope_changes.begin(), slope_changes.end());
+
+    int  sig_last = 0;
+    long fvalue = 0;
+    long fmax = 0;
+    long current_slope = 0;
+    int best_offset = 0;
+    for (int i = 0; i < slope_changes.size(); i++) {
+        fvalue += current_slope * (slope_changes[i].first - sig_last);
+        if (fvalue > fmax) {
+            fmax = fvalue;
+            best_offset = slope_changes[i].first;
+        }
+        sig_last = slope_changes[i].first;
+        current_slope += slope_changes[i].second;
+    }
+    return best_offset;
+}
+
+std::vector<float> score_curve(std::pair<int,int> span, std::vector<std::pair<int,int>> reference_spans) {
+    std::vector<std::pair<int, float>> slope_changes;
+    std::vector<float> score_curve;
+
+    for (int k = 0; k < reference_spans.size(); k++) {
+        int min_length = std::min(reference_spans[k].second - reference_spans[k].first, span.second - span.first);
+        int max_length = std::max(reference_spans[k].second - reference_spans[k].first, span.second - span.first);
+        float w = (float)min_length / max_length;
+        float slope = w / (float)min_length;
+
+        int sig1 = reference_spans[k].first - span.second;
+        if (max_length == reference_spans[k].second - reference_spans[k].first) {
+            int sig2 = reference_spans[k].first - span.first;
+            int sig3 = reference_spans[k].second - span.second;
+                
+            slope_changes.push_back({sig2, -slope});
+            slope_changes.push_back({sig3, -slope});
+        } else {
+            int sig2 = reference_spans[k].second - span.second;
+            int sig3 = reference_spans[k].first - span.first;
+                
+            slope_changes.push_back({sig2, -slope});
+            slope_changes.push_back({sig3, -slope});
+        }
+        int sig4 = reference_spans[k].second - span.first;
+        slope_changes.push_back({sig1, +slope});
+        slope_changes.push_back({sig4, +slope});
+    }
+
+    std::sort(slope_changes.begin(), slope_changes.end());
+
+    float omin = reference_spans.front().first - span.second;
+    float omax = reference_spans.back().second - span.first;
+    long current_slope = 0;
+    long fvalue = 0;
+    int j = 0;
+    for (int i = omin; i < omax; i++) {
+        while (j < slope_changes.size() && slope_changes[j].first == i) {
+            current_slope += slope_changes[j].second;
+            j++;
+        }
+        fvalue += current_slope;
+        score_curve.push_back(fvalue);
+    }
+
+    return score_curve;
+}
+
+std::vector<int> split_alignment(std::vector<std::pair<int,int>> read_srt, std::vector<std::pair<int,int>> reference_spans, float p) {
+    int score = 0;
+    std::vector<float> t_new;
+    std::vector<std::vector<int>> all_to;
+    std::vector<float> t_prev = score_curve(read_srt[0], reference_spans);
+    for (int n= 1; n < read_srt.size(); n++) {
+        std::vector<float> scores = score_curve(read_srt[n], reference_spans);
+        std::vector<float> s(scores.size(), 0);
+        float s_max = 0;
+        t_new.clear();
+        for (int sigma = 0; sigma < scores.size(); sigma++) {
+            int shift = sigma + read_srt[n].first - read_srt[n-1].second;
+            if (shift >= 0 && shift < t_prev.size()) {
+                s_max = std::max(s_max, t_prev[shift]);
+            }
+            s[sigma] = s_max;
+        }
+        std::vector<int> to;
+        for (int i = 0; i < scores.size(); i++) {
+            if (t_prev[i] >= s[i] - p) {
+                t_new.push_back(scores[i] + t_prev[i]);
+                to.push_back(i); 
+            } else {
+                t_new.push_back(scores[i] + s[i] - p);
+                int shift = i + read_srt[n].first - read_srt[n-1].second;
+                to.push_back(shift);  
+            }
+        }
+        all_to.push_back(to);
+        t_prev = t_new;
+    }
+    std::vector<int> offsets(read_srt.size());
+
+int sigma_best = 0;
+for (int i = 1; i < t_prev.size(); i++) {
+    if (t_prev[i] > t_prev[sigma_best]) {
+        sigma_best = i;
+    }
+}
+offsets[read_srt.size() - 1] = sigma_best;
+
+for (int n = all_to.size() - 1; n >= 0; n--) {
+    sigma_best = all_to[n][sigma_best];
+    offsets[n] = sigma_best;
+}
+return offsets;
+}
 
 /* 
 // Finds the offset between the movie and subtitles

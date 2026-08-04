@@ -31,19 +31,23 @@ bool is_subtitle(const std::string& path) {
 
 int main(int argc, const char *argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: lapse <video_or_subtitle> <subtitle>\n";
+        std::cerr << "Usage: lapse <video_or_subtitle> <subtitle> [penalty]\n";
         return -1;
     }
 
-    std::string reference_path = argv[1];
+    std::string ref_path   = argv[1];
     std::string input_path = argv[2];
+    float p = (argc >= 4) ? std::stof(argv[3]) : 0.0f;
 
     std::vector<int> reference_activity;
-    if (is_subtitle(reference_path)) {
-        auto [ref_spans, _] = process_spans(read_subtitle(reference_path));
+    std::vector<std::pair<int,int>> ref_spans;
+
+    if (is_subtitle(ref_path)) {
+        auto [rs, _] = process_spans(read_subtitle(ref_path));
+        ref_spans = rs;
         reference_activity = activity(ref_spans);
     } else {
-        AVFormatContext* AVC = open_file(reference_path.c_str());
+        AVFormatContext* AVC = open_file(ref_path.c_str());
         int audio_stream_index = find_audio_stream(AVC);
         AVCodecContext* OAD = open_audio_decoder(AVC, audio_stream_index);
         std::vector<float> decoded = decode_audio(AVC, OAD, audio_stream_index);
@@ -52,25 +56,39 @@ int main(int argc, const char *argv[]) {
         std::vector<float> fvad = calculate_fvad(pcm, 8000);
         pcm.clear(); pcm.shrink_to_fit();
         reference_activity = std::vector<int>(fvad.begin(), fvad.end());
+        ref_spans = reference_spans(reference_activity);
     }
 
     auto [spans, mapping] = process_spans(read_subtitle(input_path));
     if (spans.empty()) {
-        std::cerr << "No timestamps found in subtitle file: " << input_path << '\n';
+        std::cerr << "No timestamps found in: " << input_path << '\n';
         return 1;
     }
-    std::vector<int> input_activity = activity(spans);
 
-    auto [slope, intercept] = fft_crosscorrelate(reference_activity, input_activity);
+    if (p == 0.0f) {
+        std::vector<int> input_activity = activity(spans);
+        auto [slope, intercept] = fft_crosscorrelate(reference_activity, input_activity);
 
-    if (input_path.ends_with(".srt"))
-        write_srt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
-    else if (input_path.ends_with(".ass") || input_path.ends_with(".ssa"))
-        write_ass_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
-    else if (input_path.ends_with(".vtt"))
-        write_vtt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
+        if (input_path.ends_with(".srt"))
+            write_srt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
+        else if (input_path.ends_with(".ass") || input_path.ends_with(".ssa"))
+            write_ass_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
+        else if (input_path.ends_with(".vtt"))
+            write_vtt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
 
-    std::cout << "Done: slope=" << slope << " intercept=" << intercept << "s -> " << input_path << '\n';
+        std::cout << "Done (OLS): slope=" << slope << " intercept=" << intercept << "s -> " << input_path << '\n';
+    } else {
+        std::vector<int> offsets = split_alignment(spans, ref_spans, p);
+
+        if (input_path.ends_with(".srt"))
+            write_srt_split(input_path.c_str(), input_path.c_str(), offsets, mapping);
+        else if (input_path.ends_with(".ass") || input_path.ends_with(".ssa"))
+            write_ass_split(input_path.c_str(), input_path.c_str(), offsets, mapping);
+        else if (input_path.ends_with(".vtt"))
+            write_vtt_split(input_path.c_str(), input_path.c_str(), offsets, mapping);
+
+        std::cout << "Done (split, p=" << p << "): " << input_path << '\n';
+    }
 
     return 0;
 }
