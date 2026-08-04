@@ -65,11 +65,13 @@ jobs:
             -I/opt/libfvad/include \
             -o lapse-linux-${{ matrix.arch }} \
             main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp \
-            -L/opt/ffmpeg/lib -L/opt/libfvad/lib \
             -static-libgcc -static-libstdc++ \
-            -Wl,-Bstatic \
-            -lavformat -lavcodec -lavutil -lswresample -lfvad -lfftw3 \
-            -Wl,-Bdynamic \
+            /opt/ffmpeg/lib/libavformat.a \
+            /opt/ffmpeg/lib/libavcodec.a \
+            /opt/ffmpeg/lib/libswresample.a \
+            /opt/ffmpeg/lib/libavutil.a \
+            /opt/libfvad/lib/libfvad.a \
+            -lfftw3 \
             -lm -lpthread -lz -ldl
 
       - name: Upload artifact
