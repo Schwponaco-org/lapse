@@ -29,15 +29,25 @@ bool is_subtitle(const std::string& path) {
     return false;
 }
 
+void write_offsets(const std::string& path, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    if (path.ends_with(".srt"))
+        write_srt_split(path.c_str(), path.c_str(), offsets, mapping);
+    else if (path.ends_with(".ass") || path.ends_with(".ssa"))
+        write_ass_split(path.c_str(), path.c_str(), offsets, mapping);
+    else if (path.ends_with(".vtt"))
+        write_vtt_split(path.c_str(), path.c_str(), offsets, mapping);
+}
+
 int main(int argc, const char *argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: lapse <video_or_subtitle> <subtitle> [penalty]\n";
+        std::cerr << "Usage: lapse <video_or_subtitle> <subtitle> [ols|nosplit|split] [penalty]\n";
         return -1;
     }
 
     std::string ref_path   = argv[1];
     std::string input_path = argv[2];
-    float p = (argc >= 4) ? std::stof(argv[3]) : 0.0f;
+    std::string mode       = (argc >= 4) ? argv[3] : "nosplit";
+    float p                = (argc >= 5) ? std::stof(argv[4]) : 6.0f;
 
     std::vector<int> reference_activity;
     std::vector<std::pair<int,int>> ref_spans;
@@ -65,29 +75,31 @@ int main(int argc, const char *argv[]) {
         return 1;
     }
 
-    if (p == 0.0f) {
+    if (mode == "ols") {
         std::vector<int> input_activity = activity(spans);
         auto [slope, intercept] = fft_crosscorrelate(reference_activity, input_activity);
-
         if (input_path.ends_with(".srt"))
             write_srt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
         else if (input_path.ends_with(".ass") || input_path.ends_with(".ssa"))
             write_ass_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
         else if (input_path.ends_with(".vtt"))
             write_vtt_OLS(input_path.c_str(), input_path.c_str(), slope, intercept);
+        std::cout << "Done (ols): slope=" << slope << " intercept=" << intercept << "s -> " << input_path << '\n';
 
-        std::cout << "Done (OLS): slope=" << slope << " intercept=" << intercept << "s -> " << input_path << '\n';
-    } else {
+    } else if (mode == "nosplit") {
+        int offset = best_offset(spans, ref_spans);
+        std::vector<int> offsets(spans.size(), offset);
+        write_offsets(input_path, offsets, mapping);
+        std::cout << "Done (nosplit): offset=" << offset << "ms -> " << input_path << '\n';
+
+    } else if (mode == "split") {
         std::vector<int> offsets = split_alignment(spans, ref_spans, p);
-
-        if (input_path.ends_with(".srt"))
-            write_srt_split(input_path.c_str(), input_path.c_str(), offsets, mapping);
-        else if (input_path.ends_with(".ass") || input_path.ends_with(".ssa"))
-            write_ass_split(input_path.c_str(), input_path.c_str(), offsets, mapping);
-        else if (input_path.ends_with(".vtt"))
-            write_vtt_split(input_path.c_str(), input_path.c_str(), offsets, mapping);
-
+        write_offsets(input_path, offsets, mapping);
         std::cout << "Done (split, p=" << p << "): " << input_path << '\n';
+
+    } else {
+        std::cerr << "Unknown mode: " << mode << ". Use ols, nosplit or split.\n";
+        return -1;
     }
 
     return 0;
