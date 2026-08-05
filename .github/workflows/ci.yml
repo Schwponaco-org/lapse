@@ -1,0 +1,151 @@
+# LAPSE - Language-Agnostic subtitle synchronization engine
+# Copyright (C) 2026 Rasmus Stisen Jensen (rs-jensen)
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+name: CI
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  engine:
+    name: Release binary (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            os: ubuntu-latest
+          - arch: arm64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential autoconf automake libtool pkg-config \
+            nasm yasm libfftw3-dev zlib1g-dev
+
+      - name: Build FFmpeg 7.x static
+        run: |
+          wget -q https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz
+          tar xf ffmpeg-7.1.tar.xz
+          cd ffmpeg-7.1
+          ./configure \
+            --prefix=/opt/ffmpeg \
+            --enable-static \
+            --disable-shared \
+            --disable-programs \
+            --disable-doc \
+            --disable-debug \
+            --disable-everything \
+            --enable-avformat \
+            --enable-avcodec \
+            --enable-avutil \
+            --enable-swresample \
+            --enable-demuxer=matroska,mov,avi,mp4,ogg,wav,flac,aac \
+            --enable-decoder=aac,ac3,eac3,mp3,flac,vorbis,opus,dca,truehd,pcm_s16le,pcm_s16be,pcm_s24le,pcm_f32le,pcm_f32be \
+            --enable-parser=aac,mp3,flac,vorbis,opus,ac3 \
+            --enable-protocol=file
+          make -j$(nproc)
+          sudo make install
+
+      - name: Verify FFmpeg static build
+        run: |
+          for lib in libavformat libavcodec libavutil libswresample; do
+            if [ ! -f "/opt/ffmpeg/lib/${lib}.a" ]; then
+              echo "Missing /opt/ffmpeg/lib/${lib}.a, static FFmpeg build failed"
+              exit 1
+            fi
+          done
+          ls -la /opt/ffmpeg/lib/*.a
+
+      - name: Build libfvad static
+        run: |
+          git clone https://github.com/dpirch/libfvad.git
+          cd libfvad
+          autoreconf -i
+          ./configure --prefix=/opt/libfvad --enable-static --disable-shared
+          make
+          sudo make install
+
+      - name: Build lapse
+        run: |
+          cd engine
+          g++ -O2 -std=c++20 \
+            -I/opt/ffmpeg/include \
+            -I/opt/libfvad/include \
+            -o lapse-linux-${{ matrix.arch }} \
+            main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp \
+            -static-libgcc -static-libstdc++ \
+            /opt/ffmpeg/lib/libavformat.a \
+            /opt/ffmpeg/lib/libavcodec.a \
+            /opt/ffmpeg/lib/libswresample.a \
+            /opt/ffmpeg/lib/libavutil.a \
+            /opt/libfvad/lib/libfvad.a \
+            -Wl,-Bstatic -lfftw3 -Wl,-Bdynamic \
+            -lm -lpthread -lz -ldl
+
+      - name: Test the binary
+        run: engine/lapse-linux-${{ matrix.arch }} --formats && .github/scripts/smoke-engine.sh engine/lapse-linux-${{ matrix.arch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lapse-linux-${{ matrix.arch }}
+          path: engine/lapse-linux-${{ matrix.arch }}
+
+  image:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build for both platforms the release publishes
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build for testing
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          load: true
+          tags: lapse:ci
+          cache-from: type=gha
+
+      - name: Test the engine inside the image
+        run: |
+          docker run --rm --entrypoint /app/lapse lapse:ci --formats
+          docker run --rm -v "$PWD/.github/scripts:/scripts:ro" --entrypoint /scripts/smoke-engine.sh lapse:ci /app/lapse
+
+      - name: Test the watcher inside the image
+        run: .github/scripts/smoke-docker.sh lapse:ci

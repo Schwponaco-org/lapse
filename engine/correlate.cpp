@@ -16,24 +16,32 @@
 #include "correlate.h"
 
 // slope og intercept for y = slope*x + intercept
-std::pair<double, double> linear_regression(std::vector<double> x, std::vector<double> y, std::vector<double> w) {
+std::pair<double, double> linear_regression(const std::vector<double>& x, const std::vector<double>& y, const std::vector<double>& w) {
     double sw = 0, swx = 0 , swy = 0, swxx = 0, swxy = 0;
-    for (int i = 0; i < x.size(); i++) {
+    for (int i = 0; i < (int)x.size(); i++) {
         sw   += w[i];
         swx  += w[i] * x[i];
         swy  += w[i] * y[i];
         swxx += w[i] * x[i] * x[i];
         swxy += w[i] * x[i] * y[i];
     }
-    double slope = (sw*swxy - swx*swy) / (sw*swxx - swx*swx);
+
+    // One usable chunk cannot hold a line - fall back to a flat offset instead
+    // of dividing by zero and writing NaN into every timestamp
+    double denom = sw*swxx - swx*swx;
+    if (sw <= 0) return {0.0, 0.0};
+    if (std::abs(denom) < 1e-9) return {0.0, swy / sw};
+
+    double slope = (sw*swxy - swx*swy) / denom;
     double intercept = (swy - slope*swx) / sw;
     return {slope, intercept};
 }
 
-std::pair<double, double> fft_crosscorrelate(std::vector<int> activity_profile, std::vector<int> srt_profile) {
+std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_profile, const std::vector<int>& srt_profile) {
     int padded = 262144;
     int chunk_size = 90000;
     int half = padded / 2 + 1;
+    int max_lag = MAX_OFFSET_MS / 10;   // profiles hold one entry per 10ms
 
     std::vector<double> t_vals, delta_vals, weights;
     int chunk_number = 0;
@@ -56,15 +64,26 @@ std::pair<double, double> fft_crosscorrelate(std::vector<int> activity_profile, 
     for (int chunks = 45000; chunks + chunk_size <= (int)activity_profile.size(); chunks += chunk_size) {
         chunk_number++;
 
+        // Both profiles are just ones and zeros so they carry a big constant
+        // term. Taking the mean out first stops the correlation from mostly
+        // measuring how much talking there is and gives a peak worth finding
+        double a_mean = 0, b_mean = 0;
+        for (int i = 0; i < chunk_size; ++i) {
+            a_mean += activity_profile[chunks + i];
+            if (chunks + i < (int)srt_profile.size()) b_mean += srt_profile[chunks + i];
+        }
+        a_mean /= chunk_size;
+        b_mean /= chunk_size;
+
         // Fill activity buffer then full the rest with zeros
         for (int i = 0; i < padded; ++i)
-            activity_buf[i] = (i < chunk_size) ? activity_profile[chunks + i] : 0.0;
+            activity_buf[i] = (i < chunk_size) ? activity_profile[chunks + i] - a_mean : 0.0;
 
         // Fill srt buffer same window then zeros
         for (int i = 0; i < padded; ++i)
-            srt_buf[i] = (i < chunk_size && chunks + i < (int)srt_profile.size()) ? srt_profile[chunks + i] : 0.0;
+            srt_buf[i] = (i < chunk_size && chunks + i < (int)srt_profile.size()) ? srt_profile[chunks + i] - b_mean : 0.0;
 
-  
+
         fftw_execute(plan_activity);
         fftw_execute(plan_srt);
 
@@ -85,38 +104,43 @@ std::pair<double, double> fft_crosscorrelate(std::vector<int> activity_profile, 
         for (int i = 0; i < padded; ++i)
             corr_out[i] /= padded;
 
-        // Find peak and second best peak
+        // Find the peak, only looking at lags we would actually believe
         double best_val = -std::numeric_limits<double>::infinity();
-        double second_val = -std::numeric_limits<double>::infinity();
-        int best_idx = 0;
+        int best_lag = 0;
 
         for (int i = 0; i < padded; ++i) {
+            int lag = (i < padded / 2) ? i : i - padded;
+            if (std::abs(lag) > max_lag) continue;
             if (corr_out[i] > best_val) {
                 best_val = corr_out[i];
-                best_idx = i;
-            } else if (corr_out[i] > second_val) {
-                second_val = corr_out[i];
+                best_lag = lag;
             }
         }
 
+        // The runner up has to come from somewhere else entirely. Taking the
+        // bin next to the peak told us nothing - it is always nearly as high,
+        // so every chunk came out with a sharpness of about 1
+        double second_val = -std::numeric_limits<double>::infinity();
+        for (int i = 0; i < padded; ++i) {
+            int lag = (i < padded / 2) ? i : i - padded;
+            if (std::abs(lag) > max_lag) continue;
+            if (std::abs(lag - best_lag) < 100) continue;   // skip a second either side
+            if (corr_out[i] > second_val) second_val = corr_out[i];
+        }
 
-        //Convert index to offset in ms
-        //Positive offsets index 0 to chunk_size-1
-        //Negative offsets index padded-chunk_size to padded-1
-        double offset_ms;
-
-        if (best_idx < padded / 2)
-            offset_ms = best_idx * 10.0;
-        else
-            offset_ms = (best_idx - padded) * 10.0;
-
-
-        double sharpness = best_val / second_val;
+        double offset_ms = best_lag * 10.0;
+        double sharpness = (second_val > 0) ? best_val / second_val : 0.0;
 
         std::cout << "t_" << chunk_number << " offset: " << offset_ms << "ms\n";
         std::cout << "Sharpness_" << chunk_number << ": " << sharpness << '\n';
 
-        t_vals.push_back((chunk_number - 0.5) * 900);
+        // A chunk that did not really lock onto anything only drags the line
+        // around, so leave it out instead of weighting it
+        if (sharpness < 1.05) continue;
+
+        // Time of the middle of this chunk in seconds. The chunks start seven
+        // and a half minutes in, which the old chunk_number*900 forgot about
+        t_vals.push_back((chunks + chunk_size / 2) * 0.01);
         delta_vals.push_back(offset_ms / 1000.0);
         weights.push_back(sharpness);
     }
@@ -147,35 +171,47 @@ One offset in ms
 weight function pr span par
 */
 
-int score_calculator(std::vector<std::pair<int, int>> read_srt, std::vector<std::pair<int, int>> reference_spans, int x) {
-    int score = 0;
+double score_calculator(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, int x) {
+    double score = 0;
     int n = 0;
     int k = 0;
 
-    while (k < read_srt.size() && n < reference_spans.size()) {
+    while (k < (int)reference_spans.size() && n < (int)read_srt.size()) {
         int overlap = std::max(0, std::min(reference_spans[k].second, read_srt[n].second + x) - std::max(reference_spans[k].first, read_srt[n].first + x));
         int min_length = std::min(reference_spans[k].second - reference_spans[k].first, read_srt[n].second - read_srt[n].first);
-        double iscore = (double)overlap / min_length;
-
         int max_length = std::max(reference_spans[k].second - reference_spans[k].first, read_srt[n].second - read_srt[n].first);
-        float w = min_length / max_length;
 
-        score += iscore * w;
+        if (min_length > 0) {
+            double iscore = (double)overlap / min_length;
+            double w = (double)min_length / max_length;
+            score += iscore * w;
+        }
+
         if (reference_spans[k].second < read_srt[n].second + x)
             k += 1;
-        else 
+        else
             n +=1;
     }
     return score;
 }
 
-int best_offset(std::vector<std::pair<int, int>> read_srt, std::vector<std::pair<int, int>> reference_spans) {
+// Slides the subtitle spans over the reference and returns the offset where
+// they overlap best, together with how much of the file that offset explains
+std::pair<int, double> best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans) {
     std::vector<std::pair<int, float>> slope_changes;
 
-    for (int k = 0; k < reference_spans.size(); k++){
-        for (int n = 0; n < read_srt.size(); n++) {
+    for (int k = 0; k < (int)reference_spans.size(); k++){
+        for (int n = 0; n < (int)read_srt.size(); n++) {
+            // This pair can only ever meet somewhere between these two offsets,
+            // so skip it when that whole stretch is further out than we search
+            int reach_lo = reference_spans[k].first - read_srt[n].second;
+            int reach_hi = reference_spans[k].second - read_srt[n].first;
+            if (reach_hi < -MAX_OFFSET_MS || reach_lo > MAX_OFFSET_MS) continue;
+
             int min_length = std::min(reference_spans[k].second - reference_spans[k].first, read_srt[n].second - read_srt[n].first);
             int max_length = std::max(reference_spans[k].second - reference_spans[k].first, read_srt[n].second - read_srt[n].first);
+            if (min_length <= 0) continue;
+
             float w = (float)min_length / max_length;
             float slope = w / (float)min_length;
 
@@ -183,13 +219,13 @@ int best_offset(std::vector<std::pair<int, int>> read_srt, std::vector<std::pair
             if (max_length == reference_spans[k].second - reference_spans[k].first) {
                 int sig2 = reference_spans[k].first - read_srt[n].first;
                 int sig3 = reference_spans[k].second - read_srt[n].second;
-                
+
                 slope_changes.push_back({sig2, -slope});
                 slope_changes.push_back({sig3, -slope});
             } else {
                 int sig2 = reference_spans[k].second - read_srt[n].second;
                 int sig3 = reference_spans[k].first - read_srt[n].first;
-                
+
                 slope_changes.push_back({sig2, -slope});
                 slope_changes.push_back({sig3, -slope});
             }
@@ -201,30 +237,72 @@ int best_offset(std::vector<std::pair<int, int>> read_srt, std::vector<std::pair
 
     std::sort(slope_changes.begin(), slope_changes.end());
 
+    // These have to be doubles. The slopes are fractions of a millisecond and
+    // adding them to a long threw every one of them away, so the score never
+    // moved off zero and the answer was always an offset of 0
     int  sig_last = 0;
-    long fvalue = 0;
-    long fmax = 0;
-    long current_slope = 0;
-    int best_offset = 0;
-    for (int i = 0; i < slope_changes.size(); i++) {
+    double fvalue = 0;
+    double fmax = 0;
+    double current_slope = 0;
+    int best = 0;
+    for (int i = 0; i < (int)slope_changes.size(); i++) {
         fvalue += current_slope * (slope_changes[i].first - sig_last);
-        if (fvalue > fmax) {
+        if (fvalue > fmax && std::abs(slope_changes[i].first) <= MAX_OFFSET_MS) {
             fmax = fvalue;
-            best_offset = slope_changes[i].first;
+            best = slope_changes[i].first;
         }
         sig_last = slope_changes[i].first;
         current_slope += slope_changes[i].second;
     }
-    return best_offset;
+
+    // A cue that lands right on top of a reference span is worth 1, so this
+    // reads as the share of the subtitle file that ended up on speech
+    double confidence = read_srt.empty() ? 0.0 : fmax / read_srt.size();
+    if (confidence > 1.0) confidence = 1.0;
+
+    return {best, confidence};
 }
 
-std::vector<float> score_curve(std::pair<int,int> span, std::vector<std::pair<int,int>> reference_spans) {
-    std::vector<std::pair<int, float>> slope_changes;
-    std::vector<float> score_curve;
+// Stretches the subtitle by each framerate ratio in turn and keeps whichever
+// one lines up best. Measuring the drift chunk by chunk never really worked 
+// a quarter of an hour of film drifts more than half a minute at 4 percent, so
+// there is no single lag that fits the chunk and the peak just smears out
+std::tuple<double, int, double> best_framerate(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans) {
+    double best_ratio = 1.0;
+    int best_shift = 0;
+    double best_confidence = -1;
 
-    for (int k = 0; k < reference_spans.size(); k++) {
+    for (double ratio : FRAMERATE_RATIOS) {
+        std::vector<std::pair<int, int>> scaled;
+        scaled.reserve(read_srt.size());
+        for (auto& s : read_srt)
+            scaled.push_back({(int)(s.first * ratio), (int)(s.second * ratio)});
+
+        auto [offset, confidence] = best_offset(scaled, reference_spans);
+        std::cout << "ratio " << ratio << ": offset=" << offset << "ms confidence=" << confidence << '\n';
+
+        if (confidence > best_confidence) {
+            best_confidence = confidence;
+            best_ratio = ratio;
+            best_shift = offset;
+        }
+    }
+    return {best_ratio, best_shift, best_confidence};
+}
+
+//  Same idea as best_offset but for a single span, and instead of the best
+// offset we keep the whole score for every offset in the window. Sampling it
+// every 10ms rather than every millisecond is what makes split mode fit in
+//memory the old per millisecond version needed gigabytes for a film
+std::vector<double> score_curve(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, int lo, int hi, int step) {
+    std::vector<std::pair<int, float>> slope_changes;
+    std::vector<double> curve;
+
+    for (int k = 0; k < (int)reference_spans.size(); k++) {
         int min_length = std::min(reference_spans[k].second - reference_spans[k].first, span.second - span.first);
         int max_length = std::max(reference_spans[k].second - reference_spans[k].first, span.second - span.first);
+        if (min_length <= 0) continue;
+
         float w = (float)min_length / max_length;
         float slope = w / (float)min_length;
 
@@ -232,13 +310,13 @@ std::vector<float> score_curve(std::pair<int,int> span, std::vector<std::pair<in
         if (max_length == reference_spans[k].second - reference_spans[k].first) {
             int sig2 = reference_spans[k].first - span.first;
             int sig3 = reference_spans[k].second - span.second;
-                
+
             slope_changes.push_back({sig2, -slope});
             slope_changes.push_back({sig3, -slope});
         } else {
             int sig2 = reference_spans[k].second - span.second;
             int sig3 = reference_spans[k].first - span.first;
-                
+
             slope_changes.push_back({sig2, -slope});
             slope_changes.push_back({sig3, -slope});
         }
@@ -249,72 +327,92 @@ std::vector<float> score_curve(std::pair<int,int> span, std::vector<std::pair<in
 
     std::sort(slope_changes.begin(), slope_changes.end());
 
-    float omin = reference_spans.front().first - span.second;
-    float omax = reference_spans.back().second - span.first;
-    long current_slope = 0;
-    long fvalue = 0;
-    int j = 0;
-    for (int i = omin; i < omax; i++) {
-        while (j < slope_changes.size() && slope_changes[j].first == i) {
+    curve.reserve((hi - lo) / step + 1);
+    double fvalue = 0;
+    double current_slope = 0;
+    int sig_last = slope_changes.empty() ? lo : slope_changes[0].first;
+    size_t j = 0;
+
+    for (int offset = lo; offset <= hi; offset += step) {
+        while (j < slope_changes.size() && slope_changes[j].first <= offset) {
+            fvalue += current_slope * (slope_changes[j].first - sig_last);
+            sig_last = slope_changes[j].first;
             current_slope += slope_changes[j].second;
             j++;
         }
-        fvalue += current_slope;
-        score_curve.push_back(fvalue);
+        fvalue += current_slope * (offset - sig_last);
+        sig_last = offset;
+        curve.push_back(fvalue);
     }
 
-    return score_curve;
+    return curve;
 }
 
-std::vector<int> split_alignment(std::vector<std::pair<int,int>> read_srt, std::vector<std::pair<int,int>> reference_spans, float p) {
-    int score = 0;
-    std::vector<float> t_new;
+std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, float p, int base_offset) {
+    // Every span is scored on the same grid of offsets around the one nosplit
+    // already found. Sharing the grid is what makes the indexes comparable
+    // from one span to the next each span having its own base was why the offsets came out wrong before
+    int lo = base_offset - SPLIT_WINDOW_MS;
+    int hi = base_offset + SPLIT_WINDOW_MS;
+
+    std::vector<double> t_prev = score_curve(read_srt[0], reference_spans, lo, hi, SPLIT_STEP_MS);
     std::vector<std::vector<int>> all_to;
-    std::vector<float> t_prev = score_curve(read_srt[0], reference_spans);
-    for (int n= 1; n < read_srt.size(); n++) {
-        std::vector<float> scores = score_curve(read_srt[n], reference_spans);
-        std::vector<float> s(scores.size(), 0);
-        float s_max = 0;
-        t_new.clear();
-        for (int sigma = 0; sigma < scores.size(); sigma++) {
-            int shift = sigma + read_srt[n].first - read_srt[n-1].second;
-            if (shift >= 0 && shift < t_prev.size()) {
-                s_max = std::max(s_max, t_prev[shift]);
+
+    for (int n = 1; n < (int)read_srt.size(); n++) {
+        std::vector<double> scores = score_curve(read_srt[n], reference_spans, lo, hi, SPLIT_STEP_MS);
+        std::vector<double> t_new(scores.size(), 0);
+        std::vector<int> to(scores.size(), 0);
+
+        // Subtitles are not allowed to swap places. If this span sits at sigma
+        // the one before it can sit anywhere up to sigma plus the gap between
+        // them, so we walk a running best over everything allowed so far
+        int gap = (read_srt[n].first - read_srt[n-1].second) / SPLIT_STEP_MS;
+        double s_max = -std::numeric_limits<double>::infinity();
+        int s_max_at = 0;
+        int reached = -1;
+
+        for (int sigma = 0; sigma < (int)scores.size(); sigma++) {
+            int allowed = std::min(sigma + gap, (int)t_prev.size() - 1);
+            while (reached < allowed) {
+                reached++;
+                if (t_prev[reached] > s_max) {
+                    s_max = t_prev[reached];
+                    s_max_at = reached;
+                }
             }
-            s[sigma] = s_max;
-        }
-        std::vector<int> to;
-        for (int i = 0; i < scores.size(); i++) {
-            if (t_prev[i] >= s[i] - p) {
-                t_new.push_back(scores[i] + t_prev[i]);
-                to.push_back(i); 
+
+            // Staying where the previous span sits is free, moving somewhere else costs the split penalty
+            if (t_prev[sigma] >= s_max - p) {
+                t_new[sigma] = scores[sigma] + t_prev[sigma];
+                to[sigma] = sigma;
             } else {
-                t_new.push_back(scores[i] + s[i] - p);
-                int shift = i + read_srt[n].first - read_srt[n-1].second;
-                to.push_back(shift);  
+                t_new[sigma] = scores[sigma] + s_max - p;
+                to[sigma] = s_max_at;
             }
         }
         all_to.push_back(to);
-        t_prev = t_new;
+        t_prev.swap(t_new);
     }
+
+    int sigma_best = 0;
+    for (int i = 1; i < (int)t_prev.size(); i++) {
+        if (t_prev[i] > t_prev[sigma_best]) {
+            sigma_best = i;
+        }
+    }
+
+     // Walk the choices back and turn the grid positions into real offsets
     std::vector<int> offsets(read_srt.size());
+    offsets[read_srt.size() - 1] = lo + sigma_best * SPLIT_STEP_MS;
 
-int sigma_best = 0;
-for (int i = 1; i < t_prev.size(); i++) {
-    if (t_prev[i] > t_prev[sigma_best]) {
-        sigma_best = i;
+    for (int n = all_to.size() - 1; n >= 0; n--) {
+        sigma_best = all_to[n][sigma_best];
+        offsets[n] = lo + sigma_best * SPLIT_STEP_MS;
     }
-}
-offsets[read_srt.size() - 1] = sigma_best;
-
-for (int n = all_to.size() - 1; n >= 0; n--) {
-    sigma_best = all_to[n][sigma_best];
-    offsets[n] = sigma_best;
-}
-return offsets;
+    return offsets;
 }
 
-/* 
+/*
 // Finds the offset between the movie and subtitles
 std::tuple<double, double, float> cross_correlation(std::vector<int> activity_profile, std::vector<float> RMS) {
     // starts checking one minute behind
@@ -387,8 +485,8 @@ std::tuple<double, double, float> cross_correlation(std::vector<int> activity_pr
 
             for (int offset = -10000; offset <= 10000; offset += 10) {
                 float sum = 0;
-                int offset_index = offset / 10; 
-                
+                int offset_index = offset / 10;
+
                 for (int i = chunks; i < chunks + 90000; ++i) {
                     int rms_index = i - offset_index;
                     if (rms_index >= 0 && rms_index < RMS.size()) {
@@ -411,7 +509,7 @@ std::tuple<double, double, float> cross_correlation(std::vector<int> activity_pr
         weights.push_back(sharpness);
         }
     }
-    
+
     auto [slope, intercept] = linear_regression(t_vals, delta_vals, weights);
     std::cout << "Slope: " << slope << '\n';
     std::cout << "Intercept: " << intercept << '\n';

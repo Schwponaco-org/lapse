@@ -1,3 +1,4 @@
+#!/bin/sh
 # LAPSE - Language-Agnostic subtitle synchronization engine
 # Copyright (C) 2026 Rasmus Stisen Jensen (rs-jensen)
 # This program is free software: you can redistribute it and/or modify
@@ -13,28 +14,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-services:
-  lapse:
-    container_name: lapse
-    image: ghcr.io/rs-jensen/lapse:latest
-    restart: always
-    ulimits:
-      core: 0
-    tmpfs:
-      - /tmp
-    volumes:
-      - ./data:/data
-      - /mnt/media:/media
-    environment:
-      - MEDIA_ROOT=/media
-      - DB_PATH=/data/lapse.db
-      - LAPSE_BIN=/app/lapse
-      - PUID=1000
-      - PGID=1000
-      - MODE=nosplit
-      - PENALTY=6
-      - SCAN_INTERVAL=900
-      - MIN_CONFIDENCE=0
-      - MAX_ATTEMPTS=3
-      - TIMEOUT=1800
-      - POLLING=0
+set -e
+
+if [ -n "$PUID" ] || [ -n "$PGID" ]; then
+    USER_ID=${PUID:-0}
+    GROUP_ID=${PGID:-0}
+    DB_DIR=$(dirname "${DB_PATH:-/data/lapse.db}")
+    mkdir -p "$DB_DIR"
+    chown -R "$USER_ID:$GROUP_ID" "$DB_DIR" 2>/dev/null || true
+    echo "Running as $USER_ID:$GROUP_ID"
+    exec gosu "$USER_ID:$GROUP_ID" "$@"
+fi
+
+exec "$@"

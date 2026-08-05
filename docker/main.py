@@ -14,21 +14,83 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import os
+import re
+import queue
+import shutil
+import signal
 import sqlite3
 import subprocess
-import shutil
 import time
-from pathlib import Path
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 
-DB_PATH    = os.environ.get("DB_PATH", "lapse.db")
-MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/media")
-LAPSE    = os.environ.get("LAPSE_BIN", "./lapse")
-VIDEO_EXTS = ('.mp4', '.mkv', '.avi')
+DB_PATH        = os.environ.get("DB_PATH", "lapse.db")
+MEDIA_ROOT     = os.environ.get("MEDIA_ROOT", "/media")
+LAPSE          = os.environ.get("LAPSE_BIN", "./lapse")
+MODE           = os.environ.get("MODE", "nosplit")
+PENALTY        = os.environ.get("PENALTY", "6")
+SCAN_INTERVAL  = int(os.environ.get("SCAN_INTERVAL", "900"))
+MIN_CONFIDENCE = float(os.environ.get("MIN_CONFIDENCE", "0"))
+MAX_ATTEMPTS   = int(os.environ.get("MAX_ATTEMPTS", "3"))
+TIMEOUT        = int(os.environ.get("TIMEOUT", "1800"))
+POLLING        = os.environ.get("POLLING", "0") == "1"
+
+MEDIA_ROOTS = [p.strip() for p in MEDIA_ROOT.split(",") if p.strip()]
+
+VIDEO_EXTS = {
+    ".mp4", ".mkv", ".avi", ".mov", ".m4v", ".ts", ".m2ts", ".mts", ".webm",
+    ".wmv", ".mpg", ".mpeg", ".flv", ".ogv", ".ogm", ".divx", ".vob", ".rmvb", ".3gp",
+}
+
+# Everything we know of as a subtitle, not everything the engine can read yet.
+# The engine tells us that part at startup and the rest is left alone
+SUBTITLE_EXTS = {
+    ".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx", ".sup", ".smi", ".sami",
+    ".ttml", ".dfxp", ".sbv", ".mpl2", ".lrc", ".stl", ".scc", ".mcc", ".cap",
+}
+
+ENGINE_FORMATS = {".srt", ".ass", ".ssa", ".vtt"}
+
+SKIP_DIRS = {"@eaDir", "#recycle", "#snapshot", "lost+found", ".Trash", "@Recycle"}
+
+LANGUAGE_WORDS = {
+    "en", "eng", "english", "da", "dan", "dansk", "danish", "sv", "swe", "swedish",
+    "no", "nor", "nb", "norwegian", "fi", "fin", "finnish", "is", "isl", "icelandic",
+    "de", "ger", "deu", "german", "fr", "fre", "fra", "french", "es", "spa", "spanish",
+    "it", "ita", "italian", "nl", "dut", "nld", "dutch", "pt", "por", "portuguese",
+    "pl", "pol", "polish", "ru", "rus", "russian", "cs", "ces", "czech", "tr", "tur",
+    "turkish", "ar", "ara", "arabic", "zh", "chi", "chinese", "ja", "jpn", "japanese",
+    "ko", "kor", "korean", "hu", "hun", "hungarian", "ro", "ron", "romanian", "el",
+    "ell", "greek", "he", "heb", "hebrew", "hi", "hin", "hindi", "th", "tha", "thai",
+    "forced", "sdh", "cc", "hearing", "impaired", "full", "default", "sub", "subs",
+    "subtitle", "subtitles", "srt", "track",
+}
+
+jobs = queue.Queue()
+running = True
+
+
+def engine_formats():
+    try:
+        result = subprocess.run([LAPSE, "--formats"], capture_output=True, text=True, timeout=30)
+        found = set()
+        for word in result.stdout.split():
+            if word.startswith("."):
+                found.add(word.lower())
+        if found:
+            return found
+        print("Engine did not answer --formats, going with the formats we know about")
+    except Exception as e:
+        print("Could not ask the engine which formats it reads:", e)
+    return ENGINE_FORMATS
 
 
 def init_db():
+    directory = os.path.dirname(DB_PATH)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sync_jobs (
@@ -38,6 +100,10 @@ def init_db():
             backup_path TEXT,
             slope REAL,
             intercept_ms REAL,
+            offset_ms REAL,
+            confidence REAL,
+            srt_mtime REAL,
+            attempts INTEGER DEFAULT 0,
             status TEXT DEFAULT 'pending',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -46,150 +112,391 @@ def init_db():
         CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_jobs_video_srt
         ON sync_jobs(video_path, srt_path)
     """)
-    for col in [("slope", "REAL"), ("intercept_ms", "REAL")]:
+    for name, kind in [("slope", "REAL"), ("intercept_ms", "REAL"), ("offset_ms", "REAL"),
+                        ("confidence", "REAL"), ("srt_mtime", "REAL"), ("attempts", "INTEGER DEFAULT 0")]:
         try:
-            conn.execute(f"ALTER TABLE sync_jobs ADD COLUMN {col[0]} {col[1]}")
-        except:
+            conn.execute("ALTER TABLE sync_jobs ADD COLUMN %s %s" % (name, kind))
+        except Exception:
             pass
     conn.commit()
     return conn
 
 
 def normalize(name):
-    for ch in "._-":
+    for ch in "._-[]()+'":
         name = name.replace(ch, " ")
     return set(name.lower().split())
 
 
-def find_pairs(path):
-    pairs = []
+def subtitle_tokens(base):
+    return normalize(base) - LANGUAGE_WORDS
+
+
+def episode_tag(name):
+    match = re.search(r"[sS](\d{1,2})[ ._-]?[eE](\d{1,3})", name)
+    if match:
+        return (int(match.group(1)), int(match.group(2)))
+    match = re.search(r"(?<!\d)(\d{1,2})x(\d{2})(?!\d)", name)
+    if match:
+        return (int(match.group(1)), int(match.group(2)))
+    return None
+
+
+def match_video(sbase, videos):
+    tokens = subtitle_tokens(sbase)
+    stag = episode_tag(sbase)
+    best, best_score = None, 0.0
+    usable = []
+
+    for vbase, vpath in videos:
+        vtag = episode_tag(vbase)
+        # Two different episodes in one folder share nearly every other word,
+        # so a tag that disagrees settles it before we look at anything else
+        if stag and vtag and stag != vtag:
+            continue
+        usable.append((vbase, vpath))
+
+        vtokens = normalize(vbase)
+        if not vtokens:
+            continue
+        score = len(vtokens & tokens) / len(vtokens)
+        if score > best_score:
+            best_score = score
+            best = vpath
+
+    if best and best_score >= 0.5:
+        return best
+    # Nothing lined up by name, but if only one video can belong to it anyway
+    # then the subtitle is for that one
+    if len(usable) == 1:
+        return usable[0][1]
+    return None
+
+
+def scan(path):
+    videos = {}
+    subtitles = {}
 
     for root, dirs, files in os.walk(path):
-        videos = []
-        srts = []
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
 
         for filename in files:
-            if filename.startswith("._"):
+            if filename.startswith("."):
                 continue
+            base, ext = os.path.splitext(filename)
+            ext = ext.lower()
             full_path = os.path.join(root, filename)
-            base = os.path.splitext(filename)[0]
 
-            if filename.lower().endswith(VIDEO_EXTS):
-                videos.append((base, full_path))
-            elif filename.lower().endswith('.srt'):
-                srts.append((base, full_path))
+            if ext in VIDEO_EXTS:
+                videos.setdefault(root, []).append((base, full_path))
+            elif ext in SUBTITLE_EXTS:
+                subtitles.setdefault(root, []).append((base, full_path))
 
-        for vbase, vpath in videos:
-            best, best_score = None, 0
-            for sbase, spath in srts:
-                score = len(normalize(vbase) & normalize(sbase))
-                if score > best_score:
-                    best_score = score
-                    best = spath
+    return videos, subtitles
 
-            if best and best_score >= 3:
-                print(f"Matched: {vpath} -> {best}")
-                pairs.append((vpath, best))
-            else:
-                print(f"No srt match for: {vpath}")
+
+def videos_in(directory):
+    found = []
+    try:
+        for filename in sorted(os.listdir(directory)):
+            if filename.startswith("."):
+                continue
+            base, ext = os.path.splitext(filename)
+            if ext.lower() in VIDEO_EXTS:
+                found.append((base, os.path.join(directory, filename)))
+    except OSError:
+        pass
+    return found
+
+
+def find_pairs(path, verbose=False):
+    videos, subtitles = scan(path)
+    pairs = []
+
+    for directory in sorted(subtitles):
+        candidates = videos.get(directory)
+        # Scene releases drop the subtitles in a Subs folder beside the video
+        if not candidates:
+            candidates = videos_in(os.path.dirname(directory))
+
+        for sbase, spath in subtitles[directory]:
+            video = match_video(sbase, candidates) if candidates else None
+            if video:
+                pairs.append((video, spath))
+            elif verbose:
+                print("No video match for:", spath)
 
     return pairs
 
-def already_processed(conn, video_path, srt_path):
+
+def wait_stable(path):
+    # A file that is still being copied in gives us half a video, so leave it
+    # alone until nothing has touched it for a while
+    for _ in range(60):
+        if not running:
+            return False
+        try:
+            info = os.stat(path)
+        except OSError:
+            return False
+        if info.st_size > 0 and time.time() - info.st_mtime > 30:
+            return True
+        time.sleep(2)
+    return False
+
+
+def file_mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return None
+
+
+def previous_job(conn, video_path, srt_path):
     cur = conn.execute(
-        "SELECT 1 FROM sync_jobs WHERE video_path = ? AND srt_path = ? AND status = 'done' LIMIT 1",
+        "SELECT status, attempts, srt_mtime FROM sync_jobs WHERE video_path = ? AND srt_path = ?",
         (video_path, srt_path)
     )
-    return cur.fetchone() is not None
+    return cur.fetchone()
+
+
+def needs_work(row, mtime):
+    if row is None:
+        return True
+
+    status, attempts, srt_mtime = row
+    # Somebody replaced the subtitle since we last wrote it, so it is a new job
+    if mtime is not None and srt_mtime is not None and abs(mtime - srt_mtime) > 1:
+        return True
+    if status in ("done", "lowconf"):
+        return False
+    return (attempts or 0) < MAX_ATTEMPTS
+
+
+def parse_output(output):
+    values = {}
+    for key, value in re.findall(r"(\w+)=(-?[\d.]+)", output):
+        try:
+            values[key] = float(value)
+        except ValueError:
+            pass
+    return values
 
 
 def run_sync(video_path, srt_path):
-    srt = Path(srt_path)
-    backup_path = srt.with_suffix(".srt.bak")
-    shutil.copy2(srt, backup_path)
+    command = [LAPSE, video_path, srt_path, MODE]
+    if MODE == "split":
+        command.append(PENALTY)
 
-    result = subprocess.run(
-        [LAPSE, video_path, srt_path],
-        capture_output=True,
-        text=True,
-        check=True
-    )
-    print(result.stdout.strip())
-    return str(backup_path)
+    result = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT)
+    output = (result.stdout or "").strip()
+    if output:
+        print(output)
+
+    if result.returncode != 0:
+        message = (result.stderr or "").strip()
+        raise RuntimeError(message or "lapse exited with %d" % result.returncode)
+
+    return parse_output(output)
 
 
-
-def save_result(conn, video_path, srt_path, backup_path, slope, intercept, status="done"):
-    intercept_ms = intercept * 1000 if intercept is not None else None
+def save_result(conn, video_path, srt_path, backup_path, values, attempts, status):
     conn.execute(
         """
         INSERT OR REPLACE INTO sync_jobs
-        (video_path, srt_path, backup_path, slope, intercept_ms, status)
-        VALUES (?, ?, ?, ?, ?, ?)
+        (video_path, srt_path, backup_path, slope, intercept_ms, offset_ms, confidence, srt_mtime, attempts, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (video_path, srt_path, backup_path, slope, intercept_ms, status)
+        (
+            video_path,
+            srt_path,
+            backup_path,
+            values.get("slope"),
+            values.get("intercept") * 1000 if values.get("intercept") is not None else None,
+            values.get("offset", values.get("base")),
+            values.get("confidence"),
+            file_mtime(srt_path),
+            attempts,
+            status,
+        )
     )
     conn.commit()
 
 
 def process(conn, video_path, srt_path):
-    if already_processed(conn, video_path, srt_path):
-        print(f"Skipping: {video_path}")
+    ext = os.path.splitext(srt_path)[1].lower()
+    if ext not in ENGINE_FORMATS:
+        return "unsupported"
+
+    row = previous_job(conn, video_path, srt_path)
+    if not needs_work(row, file_mtime(srt_path)):
+        return "skipped"
+
+    attempts = (row[1] or 0) + 1 if row else 1
+
+    if not wait_stable(video_path) or not wait_stable(srt_path):
+        print("Still being written, leaving it for the next scan:", srt_path)
+        return "busy"
+
+    print("Syncing:", srt_path)
+    print("      to:", video_path)
+    try:
+        values = run_sync(video_path, srt_path)
+    except Exception as e:
+        print("Failed:", srt_path, "->", e)
+        save_result(conn, video_path, srt_path, None, {}, attempts, "failed")
+        return "failed"
+
+    backup_path = srt_path + ".bak"
+    if not os.path.exists(backup_path):
+        backup_path = None
+
+    status = "done"
+    confidence = values.get("confidence")
+    if MIN_CONFIDENCE > 0 and confidence is not None and confidence < MIN_CONFIDENCE and backup_path:
+        shutil.copy2(backup_path, srt_path)
+        print("Confidence %.2f is under %.2f, put the original back: %s" % (confidence, MIN_CONFIDENCE, srt_path))
+        status = "lowconf"
+
+    save_result(conn, video_path, srt_path, backup_path, values, attempts, status)
+    return status
+
+
+def run_scan(conn, path, verbose=False):
+    if not os.path.isdir(path):
         return
 
-    print(f"Processing: {video_path}")
-    try:
-        backup_path = run_sync(video_path, srt_path)
-        save_result(conn, video_path, srt_path, backup_path, None, None)
-    except Exception as e:
-        print(f"Failed: {video_path} -> {e}")
-        save_result(conn, video_path, srt_path, None, None, None, status="failed")
+    unsupported = 0
+    for video, subtitle in find_pairs(path, verbose):
+        if not running:
+            return
+        if process(conn, video, subtitle) == "unsupported":
+            unsupported += 1
 
-
+    if unsupported:
+        print("Left", unsupported, "subtitles alone, the engine does not read those formats yet")
 
 
 class MediaHandler(FileSystemEventHandler):
-    def __init__(self, conn):
-        self.conn = conn
+    def interesting(self, path):
+        name = os.path.basename(path)
+        if name.startswith("."):
+            return False
+        ext = os.path.splitext(name)[1].lower()
+        return ext in VIDEO_EXTS or ext in SUBTITLE_EXTS
+
+    def queue(self, path, is_directory):
+        if is_directory:
+            jobs.put(path)
+        elif self.interesting(path):
+            jobs.put(os.path.dirname(path))
 
     def on_created(self, event):
-        if event.is_directory:
+        self.queue(event.src_path, event.is_directory)
+
+    def on_moved(self, event):
+        self.queue(event.dest_path, event.is_directory)
+
+    def on_closed(self, event):
+        self.queue(event.src_path, event.is_directory)
+
+
+def start_watching():
+    handler = MediaHandler()
+    observer = PollingObserver() if POLLING else Observer()
+    watched = 0
+
+    for root in MEDIA_ROOTS:
+        if not os.path.isdir(root):
+            print("Cannot watch, it is not mounted:", root)
+            continue
+        try:
+            observer.schedule(handler, root, recursive=True)
+            watched += 1
+        except OSError as e:
+            print("Cannot watch", root, "->", e)
+
+    if not watched:
+        print("Watching nothing, falling back to rescans only")
+        return None
+
+    observer.start()
+    return observer
+
+
+def settle(seconds):
+    for _ in range(seconds):
+        if not running:
             return
-        if event.src_path.endswith(('.srt', '.bak')):
-            return
-        
-        directory = os.path.dirname(event.src_path)
-        now = time.time()
-        if _last_processed.get(directory, 0) > now - 60:
-            return
-        _last_processed[directory] = now
-        
-        time.sleep(5)
-        conn = sqlite3.connect(DB_PATH)
-        pairs = find_pairs(directory)
-        for video, srt in pairs:
-            process(conn, video, srt)
-        conn.close()
+        time.sleep(1)
+
+
+def take_pending():
+    try:
+        first = jobs.get(timeout=5)
+    except queue.Empty:
+        return set()
+    if not running:
+        return set()
+
+    # A release lands as a pile of files, so let the rest of them turn up
+    # before we go and look at the folder
+    settle(10)
+    directories = {first}
+    while True:
+        try:
+            directories.add(jobs.get_nowait())
+        except queue.Empty:
+            break
+    directories.discard(None)
+    return directories
+
+
+# The queue is what the loop sits and waits on, so put something in it to
+# get out of that wait straight away instead of sitting out the timeout
+def stop(signum, frame):
+    global running
+    running = False
+    jobs.put(None)
 
 
 def main():
-    conn = init_db()
+    global ENGINE_FORMATS, SUBTITLE_EXTS
 
-    for video, srt in find_pairs(MEDIA_ROOT):
-        process(conn, video, srt)
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    ENGINE_FORMATS = engine_formats()
+    SUBTITLE_EXTS = SUBTITLE_EXTS | ENGINE_FORMATS
+    print("Engine reads:", " ".join(sorted(ENGINE_FORMATS)))
+    print("Library:", ", ".join(MEDIA_ROOTS))
+
+    conn = init_db()
+    observer = start_watching()
+
+    for root in MEDIA_ROOTS:
+        if not os.path.isdir(root):
+            print("Not mounted, nothing to scan there:", root)
+            continue
+        run_scan(conn, root, verbose=True)
+    last_scan = time.time()
 
     print("Watching for new files...")
-    handler = MediaHandler(conn)
-    observer = Observer()
-    observer.schedule(handler, MEDIA_ROOT, recursive=True)
-    observer.start()
+    while running:
+        for directory in take_pending():
+            if not running:
+                break
+            run_scan(conn, directory, verbose=True)
 
-    try:
-        while True:
-            time.sleep(10)
-    except KeyboardInterrupt:
+        if running and SCAN_INTERVAL and time.time() - last_scan > SCAN_INTERVAL:
+            for root in MEDIA_ROOTS:
+                run_scan(conn, root)
+            last_scan = time.time()
+
+    print("Shutting down")
+    if observer:
         observer.stop()
-    observer.join()
+        observer.join()
     conn.close()
 
 

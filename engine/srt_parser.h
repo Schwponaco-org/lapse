@@ -21,10 +21,17 @@
 #include <vector>
 #include <algorithm>
 
+int parse_timestamp(const std::string& line, size_t from);
+std::string trim(const std::string& s);
+
+std::vector<size_t> ass_commas(const std::string& line);
+bool ass_field(const std::string& line, const std::vector<size_t>& commas, int index, size_t& from, size_t& len);
+std::pair<int,int> ass_time_columns(const std::string& format_line);
+
 std::vector<std::pair<int,int>> read_subtitle(const std::string& path);
 std::vector<std::pair<int, int>> read_srt(const char* filename);
 std::vector<std::pair<int, int>> read_ass(const char* filename);
 std::vector<std::pair<int,int>> read_vtt(const char* filename);
-std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(std::vector<std::pair<int, int>> timestamps);
-std::vector<int> activity(std::vector<std::pair<int, int>> spans);
-std::vector<std::pair<int, int>> reference_spans(std::vector<int> activity_profile);
+std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const std::vector<std::pair<int, int>>& timestamps, bool merge = true);
+std::vector<int> activity(const std::vector<std::pair<int, int>>& spans);
+std::vector<std::pair<int, int>> reference_spans(const std::vector<int>& activity_profile);
