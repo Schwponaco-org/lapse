@@ -14,11 +14,35 @@ Built in C++ using FFmpeg for audio decoding, libfvad for voice activity detecti
 
 **No-split mode (default)**
 
-1. Decodes audio from the video file using FFmpeg
-2. Runs WebRTC voice activity detection to build a speech activity profile at 8kHz
-3. Parses the subtitle file and extracts subtitle spans from the timestamps
-4. Finds the single offset that maximises total overlap between subtitle spans and speech spans
-5. Applies the correction and keeps a .bak of the original
+1. Builds a reference of when someone is talking, either from a subtitle track already inside the video file or from the audio
+2. Parses the subtitle file and extracts subtitle spans from the timestamps
+3. Finds the single offset that maximises total overlap between subtitle spans and speech spans
+4. Applies the correction and keeps a .bak of the original
+
+**Where the reference comes from**
+
+If the video already carries a text subtitle track, LAPSE reads the cue timings straight out of it. Those timings are exact, so nothing has to be guessed and no audio is decoded at all. Forced and hearing impaired tracks are skipped and the track marked default is preferred. Pass `--no-embedded` to skip this and always use the audio.
+
+Otherwise the audio is decoded with FFmpeg and turned into a speech profile at 8kHz:
+
+- Dialogue usually sits on the centre channel of a 5.1 mix, but not always. LAPSE listens to the centre channel, the full downmix and the front pair over the first ten minutes, keeps whichever one looks most like conversation, and decodes the rest of the film from that one alone. A mix the detector is unsure about, or one that is talking nearly all of the time, loses to one it can call clearly.
+- The level is tracked as the file plays and the signal is brought to a steady loudness before the detector sees it, so a quiet transfer is not treated differently from a loud one.
+- Every 10ms frame gets a probability rather than a yes or no. Spans the detector was unsure about count for less when the offset is scored.
+
+### Voice detection
+
+LAPSE uses [Silero VAD](https://github.com/snakers4/silero-vad) when it can find it, and falls back to libfvad when it cannot. Silero is a small neural model that is far better at telling speech from music, singing and effects than the older detector, and it runs at roughly 400 times realtime, so a two hour film costs about 20 seconds.
+
+Silero needs two files that are not built into the binary:
+
+| File | Where LAPSE looks |
+|---|---|
+| `libonnxruntime.so` (`.dylib` on macOS) | `LAPSE_ONNXRUNTIME`, then next to the lapse binary, then the usual library paths |
+| `silero_vad.onnx` | `LAPSE_VAD_MODEL`, then next to the lapse binary, then `/usr/local/share/lapse`, `/usr/share/lapse`, then the working directory |
+
+Both ship as release assets and both are already inside the Docker image. Drop them next to the binary and they are picked up on their own.
+
+If either one is missing LAPSE says so in one line and carries on with libfvad, which needs nothing extra. There it runs at all four aggressiveness settings and the number that agree becomes the probability, and stretches of steady unchanging level are pushed down so music and singing stay out of the reference.
 
 **OLS mode**
 
@@ -53,10 +77,12 @@ Build the binary:
 
 ```bash
 cd engine
-g++ -O2 -std=c++20 -o lapse main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp \
+g++ -O2 -std=c++20 -o lapse main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp silero.cpp \
     $(pkg-config --cflags --libs libavcodec libavformat libavutil libswresample) \
-    -lfvad -lfftw3
+    -lfvad -lfftw3 -ldl
 ```
+
+ONNX Runtime is not needed to build. LAPSE looks for it when it runs and carries on without it, see [Voice detection](#voice-detection).
 
 Sync subtitles to a video file (no-split, default):
 
@@ -91,6 +117,7 @@ By default LAPSE overwrites the subtitle file it was given and leaves a `.bak` n
 ```
 --output <path>     write the corrected subtitle to <path> instead of overwriting the input
 --no-backup         do not create the .bak file
+--no-embedded       ignore subtitle tracks inside the video and use the audio
 ```
 
 Together they cover the four ways a caller may want the output handled:

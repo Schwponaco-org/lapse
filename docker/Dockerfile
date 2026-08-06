@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y \
     libfftw3-dev \
     g++ pkg-config \
     git automake autoconf libtool \
+    wget ca-certificates \
     gosu \
     && rm -rf /var/lib/apt/lists/*
 
@@ -43,9 +44,25 @@ COPY docker/requirements.txt .
 RUN pip3 install -r requirements.txt --break-system-packages
 COPY engine/correlate.cpp engine/correlate.h engine/decoder.cpp engine/decoder.h \
      engine/srt_parser.cpp engine/srt_parser.h engine/main.cpp \
-     engine/write_subtitle.cpp engine/write_subtitle.h ./
-RUN g++ -O2 -std=c++20 -o lapse main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp \
-    -lavcodec -lavformat -lavutil -lswresample -lfvad -lfftw3
+     engine/write_subtitle.cpp engine/write_subtitle.h \
+     engine/silero.cpp engine/silero.h engine/onnxruntime_c_api.h ./
+RUN g++ -O2 -std=c++20 -o lapse main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp silero.cpp \
+    -lavcodec -lavformat -lavutil -lswresample -lfvad -lfftw3 -ldl
+
+ARG ORT_VERSION=1.28.0
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) ORT_ARCH=x64 ;; \
+      arm64) ORT_ARCH=aarch64 ;; \
+      *) ORT_ARCH="" ;; \
+    esac; \
+    if [ -n "$ORT_ARCH" ]; then \
+      wget -q -O /tmp/ort.tgz "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}.tgz" && \
+      tar xf /tmp/ort.tgz -C /tmp && \
+      cp /tmp/onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /app/libonnxruntime.so && \
+      wget -q -O /app/silero_vad.onnx "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx" && \
+      rm -rf /tmp/ort.tgz /tmp/onnxruntime-linux-*; \
+    fi
 COPY docker/main.py .
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

@@ -45,7 +45,7 @@ void write_offsets(const std::string& in_path, const std::string& out_path, cons
 }
 
 void usage() {
-    std::cerr << "Usage: lapse <video_or_subtitle> <subtitle> [ols|nosplit|split] [penalty] [--output <path>] [--no-backup]\n";
+    std::cerr << "Usage: lapse <video_or_subtitle> <subtitle> [ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-embedded]\n";
     std::cerr << "       lapse --formats\n";
 }
 
@@ -54,6 +54,7 @@ int run(int argc, const char *argv[]) {
     std::vector<std::string> args;
     std::string output_path;
     bool make_backup = true;
+    bool use_embedded = true;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -66,6 +67,8 @@ int run(int argc, const char *argv[]) {
             output_path = argv[++i];
         } else if (arg == "--no-backup") {
             make_backup = false;
+        } else if (arg == "--no-embedded") {
+            use_embedded = false;
         } else {
             args.push_back(arg);
         }
@@ -91,6 +94,7 @@ int run(int argc, const char *argv[]) {
 
     std::vector<int> reference_activity;
     std::vector<std::pair<int,int>> ref_spans;
+    std::vector<float> ref_weights;
 
     if (is_subtitle(ref_path)) {
         auto [rs, _] = process_spans(read_subtitle(ref_path));
@@ -100,23 +104,35 @@ int run(int argc, const char *argv[]) {
         AVFormatContext* AVC = open_file(ref_path.c_str());
         if (!AVC) return 1;
 
-        int audio_stream_index = find_audio_stream(AVC);
-        AVCodecContext* OAD = open_audio_decoder(AVC, audio_stream_index);
-        if (!OAD) {
-            std::cerr << "No audio track we can decode in: " << ref_path << '\n';
-            return 1;
+        // A subtitle track inside the file is already exact, so there is no
+        // reason to guess at the audio when one is sitting right there
+        if (use_embedded) {
+            auto [rs, _] = process_spans(embedded_spans(AVC));
+            ref_spans = rs;
+            reference_activity = activity(ref_spans);
         }
 
-        std::vector<int16_t> pcm = decode_audio(AVC, OAD, audio_stream_index);
-        if (pcm.empty()) {
-            std::cerr << "Got no audio out of: " << ref_path << '\n';
-            return 1;
-        }
+        if (ref_spans.empty()) {
+            int audio_stream_index = find_audio_stream(AVC);
+            AVCodecContext* OAD = open_audio_decoder(AVC, audio_stream_index);
+            if (!OAD) {
+                std::cerr << "No audio track we can decode in: " << ref_path << '\n';
+                return 1;
+            }
 
-        std::vector<float> fvad = calculate_fvad(pcm, 8000);
-        pcm.clear(); pcm.shrink_to_fit();
-        reference_activity = std::vector<int>(fvad.begin(), fvad.end());
-        ref_spans = reference_spans(reference_activity);
+            std::vector<float> profile = speech_profile(AVC, OAD, audio_stream_index);
+            if (profile.empty()) {
+                std::cerr << "Got no audio out of: " << ref_path << '\n';
+                return 1;
+            }
+
+            auto [rs, w] = reference_spans(profile);
+            ref_spans = rs;
+            ref_weights = w;
+
+            reference_activity.reserve(profile.size());
+            for (float p : profile) reference_activity.push_back(p >= 0.5f ? 1 : 0);
+        }
     }
 
     if (ref_spans.empty()) {
@@ -136,7 +152,7 @@ int run(int argc, const char *argv[]) {
         // Try the framerates people actually ship first. Only when none of them
         // fit do we go back to measuring the drift chunk by chunk, which is the
         // one thing that can still catch a stretch that isnt a standard ratio
-        auto [ratio, offset, confidence] = best_framerate(spans, ref_spans);
+        auto [ratio, offset, confidence] = best_framerate(spans, ref_spans, ref_weights);
         double slope = ratio - 1.0;
         double intercept = offset / 1000.0;
 
@@ -157,7 +173,7 @@ int run(int argc, const char *argv[]) {
         std::cout << "Done (ols): slope=" << slope << " intercept=" << intercept << "s confidence=" << confidence << " -> " << output_path << '\n';
 
     } else if (mode == "nosplit") {
-        auto [offset, confidence] = best_offset(spans, ref_spans);
+        auto [offset, confidence] = best_offset(spans, ref_spans, ref_weights);
         std::vector<int> offsets(spans.size(), offset);
         write_offsets(input_path, output_path, offsets, mapping);
         std::cout << "Done (nosplit): offset=" << offset << "ms confidence=" << confidence << " -> " << output_path << '\n';
@@ -165,8 +181,8 @@ int run(int argc, const char *argv[]) {
     } else if (mode == "split") {
         // Lock onto the whole file first and let the split search work around
         // that it only has to look at the offsets near the one we found
-        auto [offset, confidence] = best_offset(spans, ref_spans);
-        std::vector<int> offsets = split_alignment(spans, ref_spans, p, offset);
+        auto [offset, confidence] = best_offset(spans, ref_spans, ref_weights);
+        std::vector<int> offsets = split_alignment(spans, ref_spans, ref_weights, p, offset);
         write_offsets(input_path, output_path, offsets, mapping);
         std::cout << "Done (split, p=" << p << "): base=" << offset << "ms confidence=" << confidence << " -> " << output_path << '\n';
 

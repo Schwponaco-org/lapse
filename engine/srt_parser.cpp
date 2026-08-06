@@ -256,36 +256,59 @@ std::vector<int> activity(const std::vector<std::pair<int, int>>& spans) {
 }
 
 // Turns the vad output back into spans. One entry is one 10ms frame so the index has to be scaled before anything compares this to subtitle timestamps
-std::vector<std::pair<int, int>> reference_spans(const std::vector<int>& activity_profile) {
+std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(const std::vector<float>& probability) {
     std::vector<std::pair<int, int>> raw;
+    std::vector<float> raw_weight;
     bool check = false;
     int start_ms = 0;
-    int end_ms = 0;
-    for (int i = 0; i < (int)activity_profile.size(); i++) {
-        if (activity_profile[i] == 1 && !check) {
+    double total = 0;
+    int frames = 0;
+
+    for (int i = 0; i < (int)probability.size(); i++) {
+        bool speech = probability[i] >= 0.25f;
+
+        if (speech && !check) {
             check = true;
             start_ms = i * 10;
+            total = 0;
+            frames = 0;
         }
-        if ((activity_profile[i] == 0 && check) || (i == (int)activity_profile.size() - 1 && check)) {
+        if (speech) {
+            total += probability[i];
+            frames++;
+        }
+        if ((!speech && check) || (i == (int)probability.size() - 1 && check)) {
             check = false;
-            end_ms = i * 10;
-            raw.push_back({start_ms, end_ms});
+            raw.push_back({start_ms, i * 10});
+            raw_weight.push_back(frames > 0 ? (float)(total / frames) : 0.0f);
         }
     }
 
     // The vad flickers on and off inside a sentence, so glue spans that are only a breath apart together
     //and drop whatever is left too short to be speech single frames of noise otherwise fill the reference with junk
     std::vector<std::pair<int, int>> spans;
-    for (auto& s : raw) {
-        if (!spans.empty() && s.first - spans.back().second < 200)
-            spans.back().second = s.second;
-        else
-            spans.push_back(s);
+    std::vector<float> weights;
+    for (int i = 0; i < (int)raw.size(); i++) {
+        if (!spans.empty() && raw[i].first - spans.back().second < 200) {
+            int a = spans.back().second - spans.back().first;
+            int b = raw[i].second - raw[i].first;
+            if (a + b > 0)
+                weights.back() = (weights.back() * a + raw_weight[i] * b) / (a + b);
+            spans.back().second = raw[i].second;
+        } else {
+            spans.push_back(raw[i]);
+            weights.push_back(raw_weight[i]);
+        }
     }
 
-    std::vector<std::pair<int, int>> out;
-    for (auto& s : spans)
-        if (s.second - s.first >= 100) out.push_back(s);
+    std::vector<std::pair<int, int>> out_spans;
+    std::vector<float> out_weights;
+    for (int i = 0; i < (int)spans.size(); i++) {
+        if (spans[i].second - spans[i].first >= 100) {
+            out_spans.push_back(spans[i]);
+            out_weights.push_back(weights[i]);
+        }
+    }
 
-    return out;
+    return {out_spans, out_weights};
 }
