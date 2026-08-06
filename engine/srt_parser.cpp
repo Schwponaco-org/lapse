@@ -15,6 +15,68 @@
 
 #include "srt_parser.h"
 
+// A utf-8 BOM sits in front of the very first line and would otherwise trip up
+// whatever we try to read out of it
+static void strip_bom(std::string& line) {
+    if (line.size() >= 3 &&
+        (unsigned char)line[0] == 0xEF &&
+        (unsigned char)line[1] == 0xBB &&
+        (unsigned char)line[2] == 0xBF)
+        line.erase(0, 3);
+}
+
+std::string trim(const std::string& s) {
+    size_t a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return "";
+    size_t b = s.find_last_not_of(" \t\r\n");
+    return s.substr(a, b - a + 1);
+}
+
+// Reads a timestamp starting at "from" and returns it in ms, or -1 if there
+// isnt one. We just walk the digits instead of counting characters - files in
+// the wild write 0:00:01.00, 00:00:01,000 and 00:01.000 and all of them are
+// supposed to work
+int parse_timestamp(const std::string& line, size_t from) {
+    std::vector<int> parts;
+    int value = 0;
+    int digits = 0;
+    bool started = false;
+
+    size_t i = from;
+    while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) i++;
+
+    for (; i < line.size(); i++) {
+        char c = line[i];
+        if (c >= '0' && c <= '9') {
+            value = value * 10 + (c - '0');
+            digits++;
+            started = true;
+        } else if (started && (c == ':' || c == ',' || c == '.')) {
+            parts.push_back(value);
+            value = 0;
+            digits = 0;
+        } else {
+            break;  // whitespace or vtt cue settings - the timestamp ended here
+        }
+    }
+    if (!started) return -1;
+    parts.push_back(value);
+
+    // Last group is the fraction. Three digits means milliseconds, two means
+    // the centiseconds that ass files use
+    int frac = parts.back();
+    parts.pop_back();
+    if (digits == 2) frac *= 10;
+    else if (digits == 1) frac *= 100;
+
+    if (parts.size() < 2 || parts.size() > 3) return -1;
+    int sec = parts.back(); parts.pop_back();
+    int min = parts.back(); parts.pop_back();
+    int hour = parts.empty() ? 0 : parts.back();
+
+    return hour * 3600000 + min * 60000 + sec * 1000 + frac;
+}
+
 std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
     if (path.ends_with(".srt"))
         return read_srt(path.c_str());
@@ -25,136 +87,149 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
     throw std::runtime_error("Unsupported subtitle format: " + path);
 }
 
+// Every line holding "-->" gets an entry even when we cannot read it - the
+// writers walk the same lines later and would drift out of step otherwise
 std::vector<std::pair<int, int>> read_srt(const char* filename) {
     std::vector<std::pair<int, int>> timestamps;
     std::string line {};
     std::ifstream read_file(filename);
+    bool first = true;
     while (getline (read_file, line)) {
-        if (line.find("-->") != std::string::npos) {
-            int start_ms {};
-            int end_ms {};
+        if (first) { strip_bom(line); first = false; }
 
-            int hours =std::stoi(line.substr(0, 2));
-            start_ms = hours * 3600000;
-            int min =std::stoi(line.substr(3, 2));
-            start_ms += min * 60000;
-            int sec =std::stoi(line.substr(6, 2));
-            start_ms += sec * 1000;
-            int mil_sec =std::stoi(line.substr(9, 3));
-            start_ms += mil_sec;
+        size_t arrow = line.find("-->");
+        if (arrow == std::string::npos) continue;
 
-            int e_hours =std::stoi(line.substr(17, 2));
-            end_ms = e_hours * 3600000;
-            int e_min =std::stoi(line.substr(20, 2));
-            end_ms += e_min * 60000;
-            int e_sec =std::stoi(line.substr(23, 2));
-            end_ms += e_sec * 1000;
-            int e_mil_sec =std::stoi(line.substr(26, 3));
-            end_ms += e_mil_sec;
+        int start_ms = parse_timestamp(line, 0);
+        int end_ms   = parse_timestamp(line, arrow + 3);
 
+        if (start_ms < 0 || end_ms < 0)
+            timestamps.push_back({0, 0});   // dropped later, keeps the count right
+        else
             timestamps.push_back(std::make_pair(start_ms, end_ms));
-        }
     }
     return timestamps;
+}
+
+// Positions of the commas on a Dialogue or Format line
+std::vector<size_t> ass_commas(const std::string& line) {
+    std::vector<size_t> commas;
+    for (size_t i = 0; i < line.size(); i++)
+        if (line[i] == ',') commas.push_back(i);
+    return commas;
+}
+
+// Field 0 is the one right after the colon. Only works for fields that have a
+// comma after them, which is fine since we never touch the text field
+bool ass_field(const std::string& line, const std::vector<size_t>& commas, int index, size_t& from, size_t& len) {
+    if (index < 0 || index >= (int)commas.size()) return false;
+    size_t colon = line.find(':');
+    if (colon == std::string::npos) return false;
+
+    from = (index == 0) ? colon + 1 : commas[index - 1] + 1;
+    if (from > commas[index]) return false;
+    len = commas[index] - from;
+    return true;
+}
+
+// The Format line says which columns hold the times. Almost every file puts
+// them at 1 and 2 but the spec lets them sit anywhere
+std::pair<int,int> ass_time_columns(const std::string& format_line) {
+    std::vector<size_t> commas = ass_commas(format_line);
+    int start_col = -1;
+    int end_col = -1;
+
+    for (int i = 0; i < (int)commas.size(); i++) {
+        size_t from, len;
+        if (!ass_field(format_line, commas, i, from, len)) continue;
+        std::string name = trim(format_line.substr(from, len));
+        if (name == "Start") start_col = i;
+        if (name == "End")   end_col = i;
+    }
+    return {start_col, end_col};
 }
 
 std::vector<std::pair<int, int>> read_ass(const char* filename) {
     std::vector<std::pair<int, int>> timestamps;
     std::string line {};
     std::ifstream read_file(filename);
+    int start_col = 1;
+    int end_col = 2;
+    bool first = true;
+
     while (getline(read_file, line)) {
-        if (line.find("Dialogue:") != 0) continue;
+        if (first) { strip_bom(line); first = false; }
 
-        // Format: Dialogue: Layer,Start,End,...
-        int first_comma = line.find(',');
-        int second_comma = line.find(',', first_comma + 1);
-        int third_comma = line.find(',', second_comma + 1);
+        if (line.rfind("Format:", 0) == 0) {
+            auto [s, e] = ass_time_columns(line);
+            if (s >= 0 && e >= 0) { start_col = s; end_col = e; }
+            continue;
+        }
+        if (line.rfind("Dialogue:", 0) != 0) continue;
 
-        std::string start_str = line.substr(first_comma + 1, second_comma - first_comma - 1);
-        std::string end_str = line.substr(second_comma + 1, third_comma - second_comma - 1);
+        std::vector<size_t> commas = ass_commas(line);
+        size_t from, len;
+        int start_ms = -1;
+        int end_ms = -1;
 
-        auto parse_ass_time = [](const std::string& t) {
-            int h = std::stoi(t.substr(0, 1));
-            int m = std::stoi(t.substr(2, 2));
-            int s = std::stoi(t.substr(5, 2));
-            int cs = std::stoi(t.substr(8, 2));
-            return h * 3600000 + m * 60000 + s * 1000 + cs * 10;
-        };
+        if (ass_field(line, commas, start_col, from, len))
+            start_ms = parse_timestamp(line.substr(from, len), 0);
+        if (ass_field(line, commas, end_col, from, len))
+            end_ms = parse_timestamp(line.substr(from, len), 0);
 
-        timestamps.push_back({parse_ass_time(start_str), parse_ass_time(end_str)});
+        if (start_ms < 0 || end_ms < 0)
+            timestamps.push_back({0, 0});
+        else
+            timestamps.push_back({start_ms, end_ms});
     }
     return timestamps;
 }
 
+// vtt cues look just like srt ones once we stop counting characters
 std::vector<std::pair<int,int>> read_vtt(const char* filename) {
-    std::vector<std::pair<int,int>> timestamps;
-    std::string line;
-    std::ifstream f(filename);
-    while (std::getline(f, line)) {
-        if (line.find("-->") == std::string::npos) continue;
-        try {
-            int h1  = std::stoi(line.substr(0, 2));
-            int m1  = std::stoi(line.substr(3, 2));
-            int s1  = std::stoi(line.substr(6, 2));
-            int ms1 = std::stoi(line.substr(9, 3));
-            int start = h1*3600000 + m1*60000 + s1*1000 + ms1;
-
-            int h2  = std::stoi(line.substr(17, 2));
-            int m2  = std::stoi(line.substr(20, 2));
-            int s2  = std::stoi(line.substr(23, 2));
-            int ms2 = std::stoi(line.substr(26, 3));
-            int end = h2*3600000 + m2*60000 + s2*1000 + ms2;
-
-            timestamps.push_back({start, end});
-        } catch (...) {}
-    }
-    return timestamps;
+    return read_srt(filename);
 }
 
 
-std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(std::vector<std::pair<int, int>> timestamps) {
-    std::vector<int> mapping;
+// Cues that sit on top of each other normally get glued into one span - they
+// are the same moment on screen and counting them twice only skews the score.
+// Split mode asks for them separately though: when a file jumps halfway through
+// the two halves overlap each other once sorted, and merging across that jump
+// welds cues from either side of it together so they can never come apart again
+std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const std::vector<std::pair<int, int>>& timestamps, bool merge) {
+    // Sort the cues by time but remember where each one sat in the file the
+    // writers go through the file top to bottom and look their span back up
     std::vector<std::pair<std::pair<int,int>, int>> ys;
-    for (int i = 0; i < timestamps.size(); i++) {
-        ys.push_back({timestamps[i], i});
+    for (int i = 0; i < (int)timestamps.size(); i++) {
+        int start = timestamps[i].first;
+        int end   = timestamps[i].second;
+        if (end < start) std::swap(start, end);
+        if (end == start) continue;    // empty or unreadable cue, nothing to line up
+        ys.push_back({{start, end}, i});
     }
 
     std::sort(ys.begin(), ys.end());
 
-
-    for (int i = 0; i < ys.size(); i++) {
-        int place = 0;
-        if (ys[i].first.first - ys[i].first.second == 0) {
-            ys.erase(ys.begin() + i--);
-            //ys[i].second = -1;
-        }
-
-        if (ys[i].first.second < ys[i].first.first) {
-            place = ys[i].first.first;
-            ys[i].first.first = ys[i].first.second;
-            ys[i].first.second = place;
-        }
-    }
     std::vector<std::pair<int,int>> spans;
-    std::vector<int> original_placement;
-    int new_end;
-    int n = 0;
+    std::vector<int> mapping(timestamps.size(), 0);
+    std::vector<bool> kept(timestamps.size(), false);
 
-    for (int i = 0; i < ys.size(); i++) {
-        original_placement.push_back(n);
-
-
-        if (spans.empty() || ys[i].first.first >= spans.back().second) {
-            spans.push_back({ys[i].first.first, ys[i].first.second});
-            n += 1;
+    for (int i = 0; i < (int)ys.size(); i++) {
+        if (!merge || spans.empty() || ys[i].first.first >= spans.back().second) {
+            spans.push_back(ys[i].first);
         } else {
-            new_end = std::max(ys[i].first.second, spans.back().second);
-            spans.back().second = new_end;
+            spans.back().second = std::max(ys[i].first.second, spans.back().second);
         }
+        mapping[ys[i].second] = (int)spans.size() - 1;
+        kept[ys[i].second] = true;
     }
 
-    for (int i = 0; i < ys.size(); i++) {
-        mapping.push_back(original_placement[ys[i].second]);
+    // The cues we threw out still take up a line in the file point them at
+    // the span before them so the writer keeps shifting them along with it
+    int last = 0;
+    for (int i = 0; i < (int)mapping.size(); i++) {
+        if (kept[i]) last = mapping[i];
+        else mapping[i] = last;
     }
 
     return {spans, mapping};
@@ -162,16 +237,16 @@ std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(std::
 
 
 
-// Build some sort of activity profile that checks every 10ms for dialogue 
-std::vector<int> activity(std::vector<std::pair<int, int>> spans) {
+// Build some sort of activity profile that checks every 10ms for dialogue
+std::vector<int> activity(const std::vector<std::pair<int, int>>& spans) {
     if (spans.empty()) return {};
     std::vector<int> activity_profile = {};
     int j = 0;
     for (int i = 0; i <= spans.back().second; i += 10) {
-        while (j < spans.size() && i > spans[j].second) {
+        while (j < (int)spans.size() && i > spans[j].second) {
             j++;
         }
-        if (i >= spans[j].first && i <= spans[j].second) {
+        if (j < (int)spans.size() && i >= spans[j].first && i <= spans[j].second) {
             activity_profile.push_back(1);
         } else {
             activity_profile.push_back(0);
@@ -180,22 +255,37 @@ std::vector<int> activity(std::vector<std::pair<int, int>> spans) {
     return activity_profile;
 }
 
-std::vector<std::pair<int, int>> reference_spans(std::vector<int> activity_profile) {
-    std::vector<std::pair<int, int>> reference_spans;
+// Turns the vad output back into spans. One entry is one 10ms frame so the index has to be scaled before anything compares this to subtitle timestamps
+std::vector<std::pair<int, int>> reference_spans(const std::vector<int>& activity_profile) {
+    std::vector<std::pair<int, int>> raw;
     bool check = false;
     int start_ms = 0;
     int end_ms = 0;
-    for (int i = 0; i < activity_profile.size(); i++) {
+    for (int i = 0; i < (int)activity_profile.size(); i++) {
         if (activity_profile[i] == 1 && !check) {
             check = true;
-            start_ms = i;
+            start_ms = i * 10;
         }
-        if ((activity_profile[i] == 0 && check) || (i == activity_profile.size() - 1 && check)) {
+        if ((activity_profile[i] == 0 && check) || (i == (int)activity_profile.size() - 1 && check)) {
             check = false;
-            end_ms = i;
-            reference_spans.push_back({start_ms, end_ms});
+            end_ms = i * 10;
+            raw.push_back({start_ms, end_ms});
         }
     }
-    return reference_spans;
-}
 
+    // The vad flickers on and off inside a sentence, so glue spans that are only a breath apart together
+    //and drop whatever is left too short to be speech single frames of noise otherwise fill the reference with junk
+    std::vector<std::pair<int, int>> spans;
+    for (auto& s : raw) {
+        if (!spans.empty() && s.first - spans.back().second < 200)
+            spans.back().second = s.second;
+        else
+            spans.push_back(s);
+    }
+
+    std::vector<std::pair<int, int>> out;
+    for (auto& s : spans)
+        if (s.second - s.first >= 100) out.push_back(s);
+
+    return out;
+}

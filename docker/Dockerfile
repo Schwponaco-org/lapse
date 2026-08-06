@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y \
     libfftw3-dev \
     g++ pkg-config \
     git automake autoconf libtool \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone https://github.com/dpirch/libfvad.git /tmp/libfvad && \
@@ -32,13 +33,21 @@ RUN git clone https://github.com/dpirch/libfvad.git /tmp/libfvad && \
     ldconfig && \
     rm -rf /tmp/libfvad
 
+ENV PYTHONUNBUFFERED=1
+ENV MEDIA_ROOT=/media
+ENV DB_PATH=/data/lapse.db
+ENV LAPSE_BIN=/app/lapse
+
 WORKDIR /app
 COPY docker/requirements.txt .
 RUN pip3 install -r requirements.txt --break-system-packages
 COPY engine/correlate.cpp engine/correlate.h engine/decoder.cpp engine/decoder.h \
      engine/srt_parser.cpp engine/srt_parser.h engine/main.cpp \
-     engine/write_subtitle.cpp engine/write_subtitle.h .
+     engine/write_subtitle.cpp engine/write_subtitle.h ./
 RUN g++ -O2 -std=c++20 -o lapse main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp \
     -lavcodec -lavformat -lavutil -lswresample -lfvad -lfftw3
 COPY docker/main.py .
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python3", "main.py"]

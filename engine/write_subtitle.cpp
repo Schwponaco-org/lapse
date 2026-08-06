@@ -14,350 +14,213 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 #include "write_subtitle.h"
+#include "srt_parser.h"
 
-// writes the original file as .bak
+// Writes the original file as .bak, but never on top of one we already made -
+// running lapse twice used to replace the untouched original with the shifted
+// version and then there was no way back
 void backup_file(const char* path) {
-    std::filesystem::copy_file(path, std::string(path) + ".bak", std::filesystem::copy_options::overwrite_existing);
+    std::string backup = std::string(path) + ".bak";
+    if (std::filesystem::exists(backup)) return;
+    std::filesystem::copy_file(path, backup, std::filesystem::copy_options::overwrite_existing);
 }
 
+// How a timestamp gets moved. Either one line for the whole file, or a lookup
+// per cue for nosplit and split
+struct Shift {
+    bool ols = false;
+    double slope = 0;
+    double intercept_s = 0;
+    std::vector<int> offsets;
+    std::vector<int> mapping;
+
+    int apply(int ms, int cue) const {
+        if (ols) return (int)(ms * (1.0 + slope) + intercept_s * 1000.0);
+        if (cue < 0 || cue >= (int)mapping.size()) return ms;
+        int span = mapping[cue];
+        if (span < 0 || span >= (int)offsets.size()) return ms;
+        return ms + offsets[span];
+    }
+};
+
+// Reads the file in one go and drops a utf-8 BOM if it is there
+static std::string load_file(const char* path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("Cannot open subtitle: " + std::string(path));
+
+    std::string raw((std::istreambuf_iterator<char>(in)), {});
+
+    if (raw.size() >= 2 && (unsigned char)raw[0] == 0xFF && (unsigned char)raw[1] == 0xFE)
+        throw std::runtime_error("File looks like utf-16, convert it to utf-8 first: " + std::string(path));
+    if (raw.size() >= 2 && (unsigned char)raw[0] == 0xFE && (unsigned char)raw[1] == 0xFF)
+        throw std::runtime_error("File looks like utf-16, convert it to utf-8 first: " + std::string(path));
+
+    if (raw.size() >= 3 &&
+        (unsigned char)raw[0] == 0xEF &&
+        (unsigned char)raw[1] == 0xBB &&
+        (unsigned char)raw[2] == 0xBF)
+        return raw.substr(3);
+
+    return raw;
+}
+
+static std::string ms_to_ts(int ms, char ms_sep) {
+    if (ms < 0) ms = 0;
+    int h  = ms / 3600000; ms %= 3600000;
+    int m  = ms / 60000;   ms %= 60000;
+    int sc = ms / 1000;    ms %= 1000;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d%c%03d", h, m, sc, ms_sep, ms);
+    return buf;
+}
+
+static std::string ms_to_ass_ts(int ms) {
+    if (ms < 0) ms = 0;
+    int h  = ms / 3600000; ms %= 3600000;
+    int m  = ms / 60000;   ms %= 60000;
+    int sc = ms / 1000;    ms %= 1000;
+    int cs = ms / 10;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%01d:%02d:%02d.%02d", h, m, sc, cs);
+    return buf;
+}
+
+// srt and vtt are the same file with a different character in front of the
+// milliseconds, so they go through here together. We write to a temp file and
+// move it into place at the end if something throws halfway the subtitle the user already had is still whole
+static void write_cues(const char* input_path, const char* output_path, char ms_sep, const Shift& shift) {
+    std::istringstream ss(load_file(input_path));
+
+    std::string temp_path = std::string(output_path) + ".tmp";
+    std::ofstream out(temp_path, std::ios::binary);
+    if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
+
+    std::string line;
+    int cue = 0;
+    while (std::getline(ss, line)) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+
+        size_t arrow = line.find("-->");
+        if (arrow != std::string::npos) {
+            int start_ms = parse_timestamp(line, 0);
+            int end_ms   = parse_timestamp(line, arrow + 3);
+
+            if (start_ms >= 0 && end_ms >= 0) {
+                // vtt hangs cue settings on the end of the line, keep them
+                std::string tail;
+                size_t after = line.find_first_not_of(" \t", arrow + 3);
+                if (after != std::string::npos) {
+                    size_t space = line.find_first_of(" \t", after);
+                    if (space != std::string::npos) tail = line.substr(space);
+                }
+                line = ms_to_ts(shift.apply(start_ms, cue), ms_sep) + " --> " +
+                       ms_to_ts(shift.apply(end_ms, cue), ms_sep) + tail;
+            }
+            cue++;       // counted even when it did not parse, the reader did the same
+        }
+
+        out << line << "\n";
+    }
+
+    out.close();
+    std::filesystem::rename(temp_path, output_path);
+}
+
+static void write_dialogue(const char* input_path, const char* output_path, const Shift& shift) {
+    std::istringstream ss(load_file(input_path));
+
+    std::string temp_path = std::string(output_path) + ".tmp";
+    std::ofstream out(temp_path, std::ios::binary);
+    if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
+
+    std::string line;
+    int cue = 0;
+    int start_col = 1;
+    int end_col = 2;
+
+    while (std::getline(ss, line)) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+
+        if (line.rfind("Format:", 0) == 0) {
+            auto [s, e] = ass_time_columns(line);
+            if (s >= 0 && e >= 0) { start_col = s; end_col = e; }
+
+        } else if (line.rfind("Dialogue:", 0) == 0) {
+            std::vector<size_t> commas = ass_commas(line);
+            size_t sf, sl, ef, el;
+
+            if (ass_field(line, commas, start_col, sf, sl) && ass_field(line, commas, end_col, ef, el)) {
+                int start_ms = parse_timestamp(line.substr(sf, sl), 0);
+                int end_ms   = parse_timestamp(line.substr(ef, el), 0);
+
+                if (start_ms >= 0 && end_ms >= 0) {
+                    std::string new_start = ms_to_ass_ts(shift.apply(start_ms, cue));
+                    std::string new_end   = ms_to_ass_ts(shift.apply(end_ms, cue));
+
+                    // Put the later field back first so the earlier one keeps
+                    // the position we just looked up
+                    if (sf < ef) {
+                        line.replace(ef, el, new_end);
+                        line.replace(sf, sl, new_start);
+                    } else {
+                        line.replace(sf, sl, new_start);
+                        line.replace(ef, el, new_end);
+                    }
+                }
+            }
+            cue++;
+        }
+
+        out << line << "\n";
+    }
+
+    out.close();
+    std::filesystem::rename(temp_path, output_path);
+}
 
 void write_srt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    
-    backup_file(input_path);
-
-    std::ifstream in(input_path, std::ios::binary);
-    if (!in) throw std::runtime_error("Cannot open SRT: " + std::string(input_path));
-
-    std::string raw((std::istreambuf_iterator<char>(in)), {});
-    in.close();
-
-    // strip UTF-8 BOM if present
-    size_t bom_start = 0;
-    if (raw.size() >= 3 &&
-        (unsigned char)raw[0] == 0xEF &&
-        (unsigned char)raw[1] == 0xBB &&
-        (unsigned char)raw[2] == 0xBF)
-        bom_start = 3;
-
-    std::istringstream ss(raw.substr(bom_start));
-    std::ofstream out(output_path, std::ios::binary);
-    if (!out) throw std::runtime_error("Cannot write SRT: " + std::string(output_path));
-
-    auto ts_to_ms = [](const std::string& s, int offset) -> int {
-        int h  = std::stoi(s.substr(offset, 2));
-        int m  = std::stoi(s.substr(offset + 3, 2));
-        int sc = std::stoi(s.substr(offset + 6, 2));
-        int ms = std::stoi(s.substr(offset + 9, 3));
-        return h * 3600000 + m * 60000 + sc * 1000 + ms;
-    };
-
-    auto ms_to_ts = [](int ms) -> std::string {
-        if (ms < 0) ms = 0;
-        int h  = ms / 3600000; ms %= 3600000;
-        int m  = ms / 60000;   ms %= 60000;
-        int sc = ms / 1000;    ms %= 1000;
-        char buf[13];
-        snprintf(buf, sizeof(buf), "%02d:%02d:%02d,%03d", h, m, sc, ms);
-        return buf;
-    };
-
-    std::string line;
-    while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r')
-            line.pop_back();
-
-            if (line.find("-->") != std::string::npos && line.size() >= 29) {
-                try {
-                    int start_ms  = ts_to_ms(line, 0);
-                    int end_ms    = ts_to_ms(line, 17);
-                    int new_start = (int)(start_ms * (1.0 + slope) + intercept_s * 1000.0);
-                    int new_end   = (int)(end_ms   * (1.0 + slope) + intercept_s * 1000.0);
-                    line = ms_to_ts(new_start) + " --> " + ms_to_ts(new_end);
-                } catch (...) {}
-            }
-
-        out << line << "\n";
-    }
-}
-
-void write_ass_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    
-    backup_file(input_path);
-
-    std::ifstream in(input_path, std::ios::binary);
-    if (!in) throw std::runtime_error("Cannot open ASS or SSA: " + std::string(input_path));
-
-    std::string raw((std::istreambuf_iterator<char>(in)), {});
-    in.close();
-
-    // strip UTF-8 BOM if present
-    size_t bom_start = 0;
-    if (raw.size() >= 3 &&
-        (unsigned char)raw[0] == 0xEF &&
-        (unsigned char)raw[1] == 0xBB &&
-        (unsigned char)raw[2] == 0xBF)
-        bom_start = 3;
-
-    std::istringstream ss(raw.substr(bom_start));
-    std::ofstream out(output_path, std::ios::binary);
-    if (!out) throw std::runtime_error("Cannot write ASS or SSA: " + std::string(output_path));
-
-    auto ts_to_ms = [](const std::string& s) -> int {
-        int h  = std::stoi(s.substr(0, 1));
-        int m  = std::stoi(s.substr(2, 2));
-        int sc = std::stoi(s.substr(5, 2));
-        int cs = std::stoi(s.substr(8, 2));
-        return h * 3600000 + m * 60000 + sc * 1000 + cs * 10;
-    };
-
-    auto ms_to_ts = [](int ms) -> std::string {
-        if (ms < 0) ms = 0;
-        int h  = ms / 3600000; ms %= 3600000;
-        int m  = ms / 60000;   ms %= 60000;
-        int sc = ms / 1000;    ms %= 1000;
-        int cs = ms / 10;     ms %= 10;
-        char buf[13];
-        snprintf(buf, sizeof(buf), "%01d:%02d:%02d.%02d", h, m, sc, cs);
-        return buf;
-    };
-
-    std::string line;
-    while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r')
-            line.pop_back();
-
-            if (line.find("Dialogue:") != std::string::npos) {
-                size_t c1 = line.find(',');
-                size_t c2 = line.find(',', c1 + 1);
-                size_t c3 = line.find(',', c2 + 1);
-
-                std::string start_str = line.substr(c1 + 1, c2 - c1 - 1);
-                std::string end_str   = line.substr(c2 + 1, c3 - c2 - 1);
-                std::string rest      = line.substr(c3);
-
-                try {
-                    int start_ms  = ts_to_ms(start_str);
-                    int end_ms    = ts_to_ms(end_str);
-                    int new_start = (int)(start_ms * (1.0 + slope) + intercept_s * 1000.0);
-                    int new_end   = (int)(end_ms   * (1.0 + slope) + intercept_s * 1000.0);
-                    line = line.substr(0, c1 + 1) + ms_to_ts(new_start) + "," + ms_to_ts(new_end) + rest;
-                } catch (...) {}
-            }
-
-        out << line << "\n";
-    }
+    Shift shift;
+    shift.ols = true;
+    shift.slope = slope;
+    shift.intercept_s = intercept_s;
+    write_cues(input_path, output_path, ',', shift);
 }
 
 void write_vtt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    backup_file(input_path);
-
-    std::ifstream in(input_path);
-    std::ofstream out(output_path);
-
-    auto ms_to_ts = [](int ms) -> std::string {
-        if (ms < 0) ms = 0;
-        int h  = ms / 3600000; ms %= 3600000;
-        int m  = ms / 60000;   ms %= 60000;
-        int s  = ms / 1000;    ms %= 1000;
-        char buf[13];
-        snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%03d", h, m, s, ms);
-        return buf;
-    };
-
-    std::string line;
-    while (std::getline(in, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (line.find("-->") != std::string::npos && line.size() >= 29) {
-            try {
-                int h1  = std::stoi(line.substr(0, 2));
-                int m1  = std::stoi(line.substr(3, 2));
-                int s1  = std::stoi(line.substr(6, 2));
-                int ms1 = std::stoi(line.substr(9, 3));
-                int start = h1*3600000 + m1*60000 + s1*1000 + ms1;
-
-                int h2  = std::stoi(line.substr(17, 2));
-                int m2  = std::stoi(line.substr(20, 2));
-                int s2  = std::stoi(line.substr(23, 2));
-                int ms2 = std::stoi(line.substr(26, 3));
-                int end = h2*3600000 + m2*60000 + s2*1000 + ms2;
-
-                int new_start = (int)(start * (1.0 + slope) + intercept_s * 1000.0);
-                int new_end   = (int)(end   * (1.0 + slope) + intercept_s * 1000.0);
-                line = ms_to_ts(new_start) + " --> " + ms_to_ts(new_end);
-            } catch (...) {}
-        }
-        out << line << "\n";
-    }
+    Shift shift;
+    shift.ols = true;
+    shift.slope = slope;
+    shift.intercept_s = intercept_s;
+    write_cues(input_path, output_path, '.', shift);
 }
 
-void write_srt_split(const char* input_path, const char* output_path, std::vector<int> offsets, std::vector<int> mapping) {
-    backup_file(input_path);
-
-    std::ifstream in(input_path, std::ios::binary);
-    if (!in) throw std::runtime_error("Cannot open SRT: " + std::string(input_path));
-
-    std::string raw((std::istreambuf_iterator<char>(in)), {});
-    in.close();
-
-    size_t bom_start = 0;
-    if (raw.size() >= 3 &&
-        (unsigned char)raw[0] == 0xEF &&
-        (unsigned char)raw[1] == 0xBB &&
-        (unsigned char)raw[2] == 0xBF)
-        bom_start = 3;
-
-    std::istringstream ss(raw.substr(bom_start));
-    std::ofstream out(output_path, std::ios::binary);
-    if (!out) throw std::runtime_error("Cannot write SRT: " + std::string(output_path));
-
-    auto ts_to_ms = [](const std::string& s, int offset) -> int {
-        int h  = std::stoi(s.substr(offset, 2));
-        int m  = std::stoi(s.substr(offset + 3, 2));
-        int sc = std::stoi(s.substr(offset + 6, 2));
-        int ms = std::stoi(s.substr(offset + 9, 3));
-        return h * 3600000 + m * 60000 + sc * 1000 + ms;
-    };
-
-    auto ms_to_ts = [](int ms) -> std::string {
-        if (ms < 0) ms = 0;
-        int h  = ms / 3600000; ms %= 3600000;
-        int m  = ms / 60000;   ms %= 60000;
-        int sc = ms / 1000;    ms %= 1000;
-        char buf[13];
-        snprintf(buf, sizeof(buf), "%02d:%02d:%02d,%03d", h, m, sc, ms);
-        return buf;
-    };
-
-    std::string line;
-    int line_index = 0;
-    while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r')
-            line.pop_back();
-
-        if (line.find("-->") != std::string::npos && line.size() >= 29) {
-            try {
-                int span_index = mapping[line_index];
-                int offset_ms = offsets[span_index];
-                int start_ms  = ts_to_ms(line, 0) + offset_ms;
-                int end_ms    = ts_to_ms(line, 17) + offset_ms;
-                line = ms_to_ts(start_ms) + " --> " + ms_to_ts(end_ms);
-                line_index++;
-            } catch (...) {}
-        }
-
-        out << line << "\n";
-    }
-}
-void write_ass_split(const char* input_path, const char* output_path, std::vector<int> offsets, std::vector<int> mapping) {
-    backup_file(input_path);
-
-    std::ifstream in(input_path, std::ios::binary);
-    if (!in) throw std::runtime_error("Cannot open ASS or SSA: " + std::string(input_path));
-
-    std::string raw((std::istreambuf_iterator<char>(in)), {});
-    in.close();
-
-    size_t bom_start = 0;
-    if (raw.size() >= 3 &&
-        (unsigned char)raw[0] == 0xEF &&
-        (unsigned char)raw[1] == 0xBB &&
-        (unsigned char)raw[2] == 0xBF)
-        bom_start = 3;
-
-    std::istringstream ss(raw.substr(bom_start));
-    std::ofstream out(output_path, std::ios::binary);
-    if (!out) throw std::runtime_error("Cannot write ASS or SSA: " + std::string(output_path));
-
-    auto ts_to_ms = [](const std::string& s) -> int {
-        int h  = std::stoi(s.substr(0, 1));
-        int m  = std::stoi(s.substr(2, 2));
-        int sc = std::stoi(s.substr(5, 2));
-        int cs = std::stoi(s.substr(8, 2));
-        return h * 3600000 + m * 60000 + sc * 1000 + cs * 10;
-    };
-
-    auto ms_to_ts = [](int ms) -> std::string {
-        if (ms < 0) ms = 0;
-        int h  = ms / 3600000; ms %= 3600000;
-        int m  = ms / 60000;   ms %= 60000;
-        int sc = ms / 1000;    ms %= 1000;
-        int cs = ms / 10;
-        char buf[13];
-        snprintf(buf, sizeof(buf), "%01d:%02d:%02d.%02d", h, m, sc, cs);
-        return buf;
-    };
-
-    std::string line;
-    int line_index = 0;
-    while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r')
-            line.pop_back();
-
-        if (line.find("Dialogue:") != std::string::npos) {
-            try {
-                size_t c1 = line.find(',');
-                size_t c2 = line.find(',', c1 + 1);
-                size_t c3 = line.find(',', c2 + 1);
-
-                std::string start_str = line.substr(c1 + 1, c2 - c1 - 1);
-                std::string end_str   = line.substr(c2 + 1, c3 - c2 - 1);
-                std::string rest      = line.substr(c3);
-
-                int span_index = mapping[line_index];
-                int offset_ms  = offsets[span_index];
-                int start_ms   = ts_to_ms(start_str) + offset_ms;
-                int end_ms     = ts_to_ms(end_str) + offset_ms;
-                line = line.substr(0, c1 + 1) + ms_to_ts(start_ms) + "," + ms_to_ts(end_ms) + rest;
-                line_index++;
-            } catch (...) {}
-        }
-
-        out << line << "\n";
-    }
+void write_ass_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    Shift shift;
+    shift.ols = true;
+    shift.slope = slope;
+    shift.intercept_s = intercept_s;
+    write_dialogue(input_path, output_path, shift);
 }
 
-void write_vtt_split(const char* input_path, const char* output_path, std::vector<int> offsets, std::vector<int> mapping) {
-    backup_file(input_path);
+void write_srt_split(const char* input_path, const char* output_path, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    Shift shift;
+    shift.offsets = offsets;
+    shift.mapping = mapping;
+    write_cues(input_path, output_path, ',', shift);
+}
 
-    std::ifstream in(input_path);
-    std::ofstream out(output_path);
+void write_vtt_split(const char* input_path, const char* output_path, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    Shift shift;
+    shift.offsets = offsets;
+    shift.mapping = mapping;
+    write_cues(input_path, output_path, '.', shift);
+}
 
-    auto ms_to_ts = [](int ms) -> std::string {
-        if (ms < 0) ms = 0;
-        int h  = ms / 3600000; ms %= 3600000;
-        int m  = ms / 60000;   ms %= 60000;
-        int s  = ms / 1000;    ms %= 1000;
-        char buf[13];
-        snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%03d", h, m, s, ms);
-        return buf;
-    };
-
-    std::string line;
-    int line_index = 0;
-    while (std::getline(in, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-
-        if (line.find("-->") != std::string::npos && line.size() >= 29) {
-            try {
-                int h1  = std::stoi(line.substr(0, 2));
-                int m1  = std::stoi(line.substr(3, 2));
-                int s1  = std::stoi(line.substr(6, 2));
-                int ms1 = std::stoi(line.substr(9, 3));
-                int start = h1*3600000 + m1*60000 + s1*1000 + ms1;
-
-                int h2  = std::stoi(line.substr(17, 2));
-                int m2  = std::stoi(line.substr(20, 2));
-                int s2  = std::stoi(line.substr(23, 2));
-                int ms2 = std::stoi(line.substr(26, 3));
-                int end = h2*3600000 + m2*60000 + s2*1000 + ms2;
-
-                int span_index = mapping[line_index];
-                int offset_ms  = offsets[span_index];
-                line = ms_to_ts(start + offset_ms) + " --> " + ms_to_ts(end + offset_ms);
-                line_index++;
-            } catch (...) {}
-        }
-
-        out << line << "\n";
-    }
+void write_ass_split(const char* input_path, const char* output_path, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    Shift shift;
+    shift.offsets = offsets;
+    shift.mapping = mapping;
+    write_dialogue(input_path, output_path, shift);
 }
