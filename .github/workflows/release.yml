@@ -66,6 +66,19 @@ jobs:
           make
           sudo make install
 
+      - name: Fetch ONNX Runtime and the Silero model
+        run: |
+          if [ "${{ matrix.arch }}" = "amd64" ]; then ORT_ARCH=x64; else ORT_ARCH=aarch64; fi
+          wget -q https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}.tgz
+          tar xf onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}.tgz
+          cp onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} \
+             libonnxruntime-linux-${{ matrix.arch }}.so
+          wget -q -O silero_vad.onnx \
+            https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx
+          ls -la libonnxruntime-linux-${{ matrix.arch }}.so silero_vad.onnx
+        env:
+          ORT_VERSION: 1.28.0
+
       - name: Build lapse
         run: |
           cd engine
@@ -73,7 +86,7 @@ jobs:
             -I/opt/ffmpeg/include \
             -I/opt/libfvad/include \
             -o lapse-linux-${{ matrix.arch }} \
-            main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp \
+            main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp silero.cpp \
             -static-libgcc -static-libstdc++ \
             /opt/ffmpeg/lib/libavformat.a \
             /opt/ffmpeg/lib/libavcodec.a \
@@ -83,11 +96,19 @@ jobs:
             -Wl,-Bstatic -lfftw3 -Wl,-Bdynamic \
             -lm -lpthread -lz -ldl
 
+      - name: Check that the binary starts without onnxruntime beside it
+        run: |
+          cd engine
+          ./lapse-linux-${{ matrix.arch }} --formats
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: lapse-linux-${{ matrix.arch }}
-          path: engine/lapse-linux-${{ matrix.arch }}
+          path: |
+            engine/lapse-linux-${{ matrix.arch }}
+            libonnxruntime-linux-${{ matrix.arch }}.so
+            silero_vad.onnx
 
   release:
     needs: build
@@ -95,9 +116,21 @@ jobs:
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
+      - name: Collect files
+        run: |
+          mkdir -p out
+          cp lapse-linux-amd64/engine/lapse-linux-amd64 out/
+          cp lapse-linux-arm64/engine/lapse-linux-arm64 out/
+          cp lapse-linux-amd64/libonnxruntime-linux-amd64.so out/
+          cp lapse-linux-arm64/libonnxruntime-linux-arm64.so out/
+          cp lapse-linux-amd64/silero_vad.onnx out/
+          ls -la out
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            lapse-linux-amd64/lapse-linux-amd64
-            lapse-linux-arm64/lapse-linux-arm64
+            out/lapse-linux-amd64
+            out/lapse-linux-arm64
+            out/libonnxruntime-linux-amd64.so
+            out/libonnxruntime-linux-arm64.so
+            out/silero_vad.onnx

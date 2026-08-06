@@ -91,7 +91,7 @@ jobs:
             -I/opt/ffmpeg/include \
             -I/opt/libfvad/include \
             -o lapse-linux-${{ matrix.arch }} \
-            main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp \
+            main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp silero.cpp \
             -static-libgcc -static-libstdc++ \
             /opt/ffmpeg/lib/libavformat.a \
             /opt/ffmpeg/lib/libavcodec.a \
@@ -101,8 +101,15 @@ jobs:
             -Wl,-Bstatic -lfftw3 -Wl,-Bdynamic \
             -lm -lpthread -lz -ldl
 
-      - name: Test the binary
-        run: engine/lapse-linux-${{ matrix.arch }} --formats && .github/scripts/smoke-engine.sh engine/lapse-linux-${{ matrix.arch }}
+      - name: Test the binary with nothing beside it
+        run: |
+          engine/lapse-linux-${{ matrix.arch }} --formats
+          .github/scripts/smoke-engine.sh engine/lapse-linux-${{ matrix.arch }}
+
+      - name: Check it falls back to libfvad when onnxruntime is missing
+        run: |
+          sudo apt-get install -y espeak-ng ffmpeg
+          .github/scripts/smoke-fallback.sh engine/lapse-linux-${{ matrix.arch }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

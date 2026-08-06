@@ -68,6 +68,16 @@ if docker logs $CONTAINER 2>&1 | grep -q "@eaDir"; then
     exit 1
 fi
 
+if ! docker logs $CONTAINER 2>&1 | grep -q "Using embedded subtitle track"; then
+    echo "FAIL: the film with a subtitle track inside it was synced off the audio"
+    exit 1
+fi
+if ! docker logs $CONTAINER 2>&1 | grep -q "Silero VAD"; then
+    echo "FAIL: the films without a track did not reach Silero"
+    exit 1
+fi
+echo "both references were used, the embedded track and the audio"
+
 echo "== dropping a new episode in while it runs"
 docker run --rm -v $MEDIA:/media -v "$SCRIPTS:/scripts:ro" --entrypoint /scripts/make-media.sh $IMAGE extra
 wait_for "Show.S01E03.english.srt"
