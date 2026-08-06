@@ -197,8 +197,9 @@ double score_calculator(const std::vector<std::pair<int, int>>& read_srt, const 
 
 // Slides the subtitle spans over the reference and returns the offset where
 // they overlap best, together with how much of the file that offset explains
-std::pair<int, double> best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans) {
+std::pair<int, double> best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights) {
     std::vector<std::pair<int, float>> slope_changes;
+    bool weighted = reference_weights.size() == reference_spans.size();
 
     for (int k = 0; k < (int)reference_spans.size(); k++){
         for (int n = 0; n < (int)read_srt.size(); n++) {
@@ -213,6 +214,7 @@ std::pair<int, double> best_offset(const std::vector<std::pair<int, int>>& read_
             if (min_length <= 0) continue;
 
             float w = (float)min_length / max_length;
+            if (weighted) w *= reference_weights[k];
             float slope = w / (float)min_length;
 
             int sig1 = reference_spans[k].first - read_srt[n].second;
@@ -267,7 +269,7 @@ std::pair<int, double> best_offset(const std::vector<std::pair<int, int>>& read_
 // one lines up best. Measuring the drift chunk by chunk never really worked 
 // a quarter of an hour of film drifts more than half a minute at 4 percent, so
 // there is no single lag that fits the chunk and the peak just smears out
-std::tuple<double, int, double> best_framerate(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans) {
+std::tuple<double, int, double> best_framerate(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights) {
     double best_ratio = 1.0;
     int best_shift = 0;
     double best_confidence = -1;
@@ -278,7 +280,7 @@ std::tuple<double, int, double> best_framerate(const std::vector<std::pair<int, 
         for (auto& s : read_srt)
             scaled.push_back({(int)(s.first * ratio), (int)(s.second * ratio)});
 
-        auto [offset, confidence] = best_offset(scaled, reference_spans);
+        auto [offset, confidence] = best_offset(scaled, reference_spans, reference_weights);
         std::cout << "ratio " << ratio << ": offset=" << offset << "ms confidence=" << confidence << '\n';
 
         if (confidence > best_confidence) {
@@ -294,9 +296,10 @@ std::tuple<double, int, double> best_framerate(const std::vector<std::pair<int, 
 // offset we keep the whole score for every offset in the window. Sampling it
 // every 10ms rather than every millisecond is what makes split mode fit in
 //memory the old per millisecond version needed gigabytes for a film
-std::vector<double> score_curve(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, int lo, int hi, int step) {
+std::vector<double> score_curve(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, int lo, int hi, int step) {
     std::vector<std::pair<int, float>> slope_changes;
     std::vector<double> curve;
+    bool weighted = reference_weights.size() == reference_spans.size();
 
     for (int k = 0; k < (int)reference_spans.size(); k++) {
         int min_length = std::min(reference_spans[k].second - reference_spans[k].first, span.second - span.first);
@@ -304,6 +307,7 @@ std::vector<double> score_curve(const std::pair<int,int>& span, const std::vecto
         if (min_length <= 0) continue;
 
         float w = (float)min_length / max_length;
+        if (weighted) w *= reference_weights[k];
         float slope = w / (float)min_length;
 
         int sig1 = reference_spans[k].first - span.second;
@@ -348,18 +352,18 @@ std::vector<double> score_curve(const std::pair<int,int>& span, const std::vecto
     return curve;
 }
 
-std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, float p, int base_offset) {
+std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, float p, int base_offset) {
     // Every span is scored on the same grid of offsets around the one nosplit
     // already found. Sharing the grid is what makes the indexes comparable
     // from one span to the next each span having its own base was why the offsets came out wrong before
     int lo = base_offset - SPLIT_WINDOW_MS;
     int hi = base_offset + SPLIT_WINDOW_MS;
 
-    std::vector<double> t_prev = score_curve(read_srt[0], reference_spans, lo, hi, SPLIT_STEP_MS);
+    std::vector<double> t_prev = score_curve(read_srt[0], reference_spans, reference_weights, lo, hi, SPLIT_STEP_MS);
     std::vector<std::vector<int>> all_to;
 
     for (int n = 1; n < (int)read_srt.size(); n++) {
-        std::vector<double> scores = score_curve(read_srt[n], reference_spans, lo, hi, SPLIT_STEP_MS);
+        std::vector<double> scores = score_curve(read_srt[n], reference_spans, reference_weights, lo, hi, SPLIT_STEP_MS);
         std::vector<double> t_new(scores.size(), 0);
         std::vector<int> to(scores.size(), 0);
 

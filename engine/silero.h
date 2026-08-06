@@ -12,23 +12,14 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 #pragma once
-#include <iostream>
-#include <vector>
 #include <string>
-#include <utility>
-#include <cmath>
-#include <fvad.h>
 
+// Silero wants 256 samples at a time when it is fed 8kHz audio
+const int SILERO_WINDOW = 256;
 
-extern "C" {
-    #include <libavformat/avformat.h>
-    #include <libavcodec/avcodec.h>
-    #include <libswresample/swresample.h>
-}
-
-AVFormatContext* open_file(const char* filename);
-int find_audio_stream(const AVFormatContext* pFormatContext);
-AVCodecContext* open_audio_decoder(const AVFormatContext* pFormatContext, int audio_stream_index);
-std::vector<std::pair<int, int>> embedded_spans(AVFormatContext* pFormatContext);
-std::vector<float> speech_profile(AVFormatContext* pFormatContext, AVCodecContext* dec_ctx, int audio_stream_index);
+bool silero_open();
+void silero_close();
+void silero_reset();
+float silero_run(const float* samples, int count);
