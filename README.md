@@ -210,7 +210,7 @@ The first run is worth watching with `docker compose logs -f lapse` to check tha
 
 **Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`
 
-Planned to support most common video and subtitle formats.
+Planned to support most subtitle formats.
 
 Run `lapse --formats` to print the subtitle formats your binary can read, one per line.
 
