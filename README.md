@@ -216,4 +216,4 @@ Run `lapse --formats` to print the subtitle formats your binary can read, one pe
 
 ---
 
-Licensed under the GNU General Public License v3.0 -- see [LICENSE](LICENSE) for details.
+Licensed under the GNU General Public License v3.0 -- see [LICENSE](LICENSE) for details
