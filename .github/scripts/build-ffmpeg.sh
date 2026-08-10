@@ -22,7 +22,7 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
 
-curl -fsSL -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${VERSION}.tar.xz"
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${VERSION}.tar.xz"
 tar xf ffmpeg.tar.xz
 cd "ffmpeg-${VERSION}"
 
@@ -40,7 +40,7 @@ cd "ffmpeg-${VERSION}"
     --enable-avcodec \
     --enable-avutil \
     --enable-swresample \
-    --enable-demuxer=matroska,mov,avi,mp4,ogg,wav,flac,aac \
+    --enable-demuxer=matroska,mov,avi,mp4,ogg,wav,flac,aac,mpegts \
     --enable-decoder=aac,ac3,eac3,mp3,flac,vorbis,opus,dca,truehd,pcm_s16le,pcm_s16be,pcm_s24le,pcm_f32le,pcm_f32be \
     --enable-parser=aac,mp3,flac,vorbis,opus,ac3 \
     --enable-protocol=file

@@ -28,6 +28,7 @@ random.seed(7)
 RATE = 16000
 SHIFT = 4200
 EARLY = -1500
+GAP = 30 * 1000
 
 
 def load_line():
@@ -89,7 +90,7 @@ write_wav("concat_audio.wav", joined)
 
 write_srt("concat_truth.srt", jcues)
 # a segment the video does not have, so the second half sits later than the film
-write_srt("concat_gap.srt", [(a + EP, b + EP) if a >= EP else (a, b) for a, b in jcues])
+write_srt("concat_gap.srt", [(a + GAP, b + GAP) if a >= EP else (a, b) for a, b in jcues])
 # two per episode subtitles stuck together, the second one starting over at zero
 write_srt("concat_ep.srt", [(a - EP, b - EP) if a >= EP else (a, b) for a, b in jcues])
 

@@ -35,17 +35,17 @@ DIR="onnxruntime-${TARGET}-${VERSION}"
 
 case "$TARGET" in
     win-*)
-        curl -fsSL -o ort.zip "${BASE}/${DIR}.zip"
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 -o ort.zip "${BASE}/${DIR}.zip"
         unzip -q ort.zip "${DIR}/lib/onnxruntime.dll"
         cp "${DIR}/lib/onnxruntime.dll" "$DEST/onnxruntime.dll"
         ;;
     osx-*)
-        curl -fsSL -o ort.tgz "${BASE}/${DIR}.tgz"
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 -o ort.tgz "${BASE}/${DIR}.tgz"
         tar xf ort.tgz "${DIR}/lib/libonnxruntime.${VERSION}.dylib"
         cp "${DIR}/lib/libonnxruntime.${VERSION}.dylib" "$DEST/libonnxruntime.dylib"
         ;;
     linux-*)
-        curl -fsSL -o ort.tgz "${BASE}/${DIR}.tgz"
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 -o ort.tgz "${BASE}/${DIR}.tgz"
         tar xf ort.tgz "${DIR}/lib/libonnxruntime.so.${VERSION}"
         cp "${DIR}/lib/libonnxruntime.so.${VERSION}" "$DEST/libonnxruntime.so"
         ;;
@@ -55,7 +55,7 @@ case "$TARGET" in
         ;;
 esac
 
-curl -fsSL -o "$DEST/silero_vad.onnx" \
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 -o "$DEST/silero_vad.onnx" \
     "https://github.com/snakers4/silero-vad/raw/${MODEL_TAG}/src/silero_vad/data/silero_vad.onnx"
 
 if command -v sha256sum > /dev/null; then
