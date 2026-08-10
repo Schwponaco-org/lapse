@@ -19,20 +19,10 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
     libfftw3-dev \
-    g++ pkg-config \
-    git automake autoconf libtool \
+    g++ cmake pkg-config git \
     wget ca-certificates \
     gosu \
     && rm -rf /var/lib/apt/lists/*
-
-RUN git clone https://github.com/dpirch/libfvad.git /tmp/libfvad && \
-    cd /tmp/libfvad && \
-    autoreconf -i && \
-    ./configure && \
-    make && \
-    make install && \
-    ldconfig && \
-    rm -rf /tmp/libfvad
 
 ENV PYTHONUNBUFFERED=1
 ENV MEDIA_ROOT=/media
@@ -42,14 +32,13 @@ ENV LAPSE_BIN=/app/lapse
 WORKDIR /app
 COPY docker/requirements.txt .
 RUN pip3 install -r requirements.txt --break-system-packages
-COPY engine/correlate.cpp engine/correlate.h engine/align.cpp engine/align.h engine/decoder.cpp engine/decoder.h \
-     engine/srt_parser.cpp engine/srt_parser.h engine/main.cpp \
-     engine/write_subtitle.cpp engine/write_subtitle.h \
-     engine/silero.cpp engine/silero.h engine/onnxruntime_c_api.h \
-     engine/cuetext.cpp engine/cuetext.h engine/charset.cpp engine/charset.h \
-     engine/log.cpp engine/log.h ./
-RUN g++ -O2 -std=c++20 -o lapse main.cpp correlate.cpp align.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp silero.cpp cuetext.cpp charset.cpp log.cpp \
-    -lavcodec -lavformat -lavutil -lswresample -lfvad -lfftw3 -ldl
+# libfvad is not packaged for Debian, cmake fetches and links it in statically
+COPY CMakeLists.txt ./
+COPY engine ./engine
+RUN cmake -B build && \
+    cmake --build build -j "$(nproc)" && \
+    cp build/lapse /app/lapse && \
+    rm -rf build engine CMakeLists.txt
 
 ARG ORT_VERSION=1.28.0
 RUN set -eux; \

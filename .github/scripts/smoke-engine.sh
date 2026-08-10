@@ -23,8 +23,25 @@ SHIFT=4200
 WORK=$(mktemp -d)
 cd "$WORK"
 
+SOLID=0
+REFUSED=2
+UNSURE=3
+
 timestamp() {
     printf "%02d:%02d:%02d,%03d" $(($1 / 3600000)) $(($1 % 3600000 / 60000)) $(($1 % 60000 / 1000)) $(($1 % 1000))
+}
+
+run() {
+    set +e
+    output=$("$LAPSE" "$@" 2>&1)
+    status=$?
+    set -e
+}
+
+fail() {
+    echo "FAIL: $1"
+    [ -n "$output" ] && echo "$output"
+    exit 1
 }
 
 for i in $(seq 0 39); do
@@ -34,50 +51,93 @@ for i in $(seq 0 39); do
     printf "%d\n%s --> %s\nline %d\n\n" "$cue" "$(timestamp $start)" "$(timestamp $end)" "$cue" >> reference.srt
     printf "%d\n%s --> %s\nline %d\n\n" "$cue" "$(timestamp $((start + SHIFT)))" "$(timestamp $((end + SHIFT)))" "$cue" >> late.srt
 done
+cp late.srt pristine.srt
 cp late.srt sidecar.srt
 
 echo "== a subtitle that is ${SHIFT}ms late"
-output=$("$LAPSE" reference.srt late.srt)
+cp pristine.srt unsure.srt
+run reference.srt unsure.srt
 echo "$output"
 
+if [ "$status" != "$UNSURE" ]; then
+    fail "expected exit $UNSURE with only subtitles to go on, got $status"
+fi
 if ! echo "$output" | grep -q -- "offset=-${SHIFT}ms"; then
-    echo "FAIL: expected offset=-${SHIFT}ms"
-    exit 1
+    fail "expected offset=-${SHIFT}ms"
 fi
-if [ ! -f late.srt.bak ]; then
-    echo "FAIL: no backup was written"
-    exit 1
+if [ ! -f unsure.lapse-unsure.srt ]; then
+    fail "no sidecar was written"
 fi
-if [ "$(grep -m1 -- '-->' late.srt)" != "$(grep -m1 -- '-->' reference.srt)" ]; then
-    echo "FAIL: the corrected file does not line up with the reference"
-    exit 1
+if [ "$(grep -m1 -- '-->' unsure.lapse-unsure.srt)" != "$(grep -m1 -- '-->' reference.srt)" ]; then
+    fail "the sidecar does not line up with the reference"
+fi
+if ! cmp -s unsure.srt pristine.srt; then
+    fail "the original was touched when the answer was only a guess"
+fi
+if [ -f unsure.srt.bak ]; then
+    fail "a backup was written for a file that was never changed"
+fi
+
+echo "== --force overwrites the original and leaves a backup"
+cp pristine.srt forced.srt
+run reference.srt forced.srt --force
+if [ "$status" != "$SOLID" ]; then
+    fail "expected exit $SOLID with --force, got $status"
+fi
+if [ ! -f forced.srt.bak ]; then
+    fail "no backup was written"
+fi
+if ! cmp -s forced.srt.bak pristine.srt; then
+    fail "the backup is not the file we started with"
+fi
+if [ "$(grep -m1 -- '-->' forced.srt)" != "$(grep -m1 -- '-->' reference.srt)" ]; then
+    fail "the corrected file does not line up with the reference"
+fi
+
+echo "== --strict refuses instead of writing beside the original"
+cp pristine.srt strict.srt
+run reference.srt strict.srt --strict
+if [ "$status" != "$REFUSED" ]; then
+    fail "expected exit $REFUSED with --strict, got $status"
+fi
+if [ -f strict.lapse-unsure.srt ] || [ -f strict.srt.bak ]; then
+    fail "--strict wrote something anyway"
+fi
+if ! cmp -s strict.srt pristine.srt; then
+    fail "--strict changed the original"
 fi
 
 echo "== writing a sidecar and leaving the original alone"
-"$LAPSE" reference.srt sidecar.srt --output fixed.srt --no-backup > /dev/null
-if [ ! -f fixed.srt ] || [ -f sidecar.srt.bak ]; then
-    echo "FAIL: --output or --no-backup did not do what it says"
-    exit 1
+run reference.srt sidecar.srt --force --output fixed.srt --no-backup
+if [ "$status" != "$SOLID" ]; then
+    fail "expected exit $SOLID, got $status"
 fi
-if [ "$(grep -m1 -- '-->' sidecar.srt)" != "$(grep -m1 -- '-->' late.srt.bak)" ]; then
-    echo "FAIL: the input was touched when it should not have been"
-    exit 1
+if [ ! -f fixed.srt ] || [ -f sidecar.srt.bak ]; then
+    fail "--output or --no-backup did not do what it says"
+fi
+if ! cmp -s sidecar.srt pristine.srt; then
+    fail "the input was touched when it should not have been"
+fi
+if [ "$(grep -m1 -- '-->' fixed.srt)" != "$(grep -m1 -- '-->' reference.srt)" ]; then
+    fail "--output did not line up with the reference"
 fi
 
 echo "== a format the engine does not read"
 cp reference.srt unreadable.xyz
-if "$LAPSE" reference.srt unreadable.xyz > /dev/null 2>&1; then
-    echo "FAIL: an unreadable format should come back as an error"
-    exit 1
+run reference.srt unreadable.xyz
+if [ "$status" = "$SOLID" ]; then
+    fail "an unreadable format should come back as an error"
 fi
 
 echo "== an existing backup is never overwritten"
 echo "the original" > guarded.srt.bak
-cp late.srt.bak guarded.srt
-"$LAPSE" reference.srt guarded.srt > /dev/null
+cp pristine.srt guarded.srt
+run reference.srt guarded.srt --force
+if [ "$status" != "$SOLID" ]; then
+    fail "expected exit $SOLID, got $status"
+fi
 if [ "$(cat guarded.srt.bak)" != "the original" ]; then
-    echo "FAIL: the first backup was overwritten"
-    exit 1
+    fail "the first backup was overwritten"
 fi
 
 cd /

@@ -124,22 +124,34 @@ The Windows x64 build also runs on Windows on ARM under emulation if the ARM64 o
 ### Build
 
 ```bash
-cd engine
-g++ -O2 -std=c++20 -o lapse main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp silero.cpp \
-    $(pkg-config --cflags --libs libavcodec libavformat libavutil libswresample) \
-    -lfvad -lfftw3 -ldl
+cmake -B build
+cmake --build build -j
 ```
 
-That links against whatever FFmpeg, libfvad and FFTW3 the system has. To reproduce a release build instead, where all three are static and the binary depends on nothing outside the platform itself:
+The binary lands in `build/lapse`. FFmpeg has to come from the system, everything else is used if it is installed and built inside `build/` if it is not, so on a machine that only has FFmpeg the two commands above are the whole story. Nothing is written outside the build directory.
+
+| | |
+| --- | --- |
+| macOS | `brew install cmake ffmpeg pkg-config` |
+| Debian, Ubuntu | `sudo apt install cmake pkg-config libavformat-dev libavcodec-dev libavutil-dev libswresample-dev` |
+| Fedora | `sudo dnf install cmake pkgconf-pkg-config ffmpeg-devel` |
+| MSYS2 | `pacman -S $MINGW_PACKAGE_PREFIX-{cmake,ffmpeg,pkgconf,toolchain}` |
+
+Installing libfftw3 and libfvad as well is fine and slightly faster, the build picks them up instead. `cmake --build build` prints where each dependency came from. `ctest --test-dir build` runs the same smoke test CI runs, and `cmake --install build` puts the binary in `/usr/local/bin` and nothing else anywhere.
+
+Useful options: `-DLAPSE_FETCH_MISSING=OFF` to fail instead of downloading anything, `-DLAPSE_STATIC_DEPS=ON` to link the dependencies statically, `-DLAPSE_DEPS_PREFIX=<prefix>` to build against a prefix from the scripts below, `-DCMAKE_BUILD_TYPE=Debug` for a build worth stepping through.
+
+To reproduce a release build instead, where FFmpeg, FFTW3 and libfvad are all static and minimal and the binary depends on nothing outside the platform itself:
 
 ```bash
 .github/scripts/build-ffmpeg.sh "$HOME/deps"
 .github/scripts/build-fftw.sh "$HOME/deps"
 .github/scripts/build-libfvad.sh "$HOME/deps"
-.github/scripts/build-lapse.sh "$HOME/deps" lapse
+cmake -B build-release -DLAPSE_DEPS_PREFIX="$HOME/deps"
+cmake --build build-release -j
 ```
 
-The same four commands work on Linux, on macOS with the Xcode command line tools, and on Windows inside an MSYS2 MINGW64 or CLANGARM64 shell. Set `MACOSX_DEPLOYMENT_TARGET` on macOS to pick the oldest system the binary should run on.
+That is what CI does, on Linux, on macOS with the Xcode command line tools, and on Windows inside an MSYS2 MINGW64 or CLANGARM64 shell. The three scripts exist because those are cut-down static builds -- FFmpeg with `--disable-everything` and a hand-picked codec list -- and none of that is expressible in CMake, since FFmpeg has no CMake build at all. Set `MACOSX_DEPLOYMENT_TARGET` on macOS to pick the oldest system the binary should run on. `$HOME/deps` is a throwaway prefix, those libraries have no business in `/usr/local` where every other program would find them, so delete it when the build is done.
 
 ONNX Runtime is not needed to build. LAPSE looks for it when it runs and carries on without it, see [Voice detection](#voice-detection).
 

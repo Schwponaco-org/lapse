@@ -146,7 +146,7 @@ refuses "a different film"    joined.mkv unrelated.srt
 echo "== the cache"
 rm -rf "$LAPSE_CACHE"
 cp shifted.srt work.srt
-"$LAPSE" plain.mkv work.srt --no-backup --no-embedded > /dev/null
+"$LAPSE" plain.mkv work.srt --no-backup --no-embedded > /dev/null || true
 cp shifted.srt work.srt
 if "$LAPSE" plain.mkv work.srt --no-backup --no-embedded 2>&1 | grep -q "Reusing"; then
     echo "  cache is reused              ok"

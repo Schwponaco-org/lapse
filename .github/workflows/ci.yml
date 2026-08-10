@@ -54,10 +54,10 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             sudo apt-get update
-            sudo apt-get install -y build-essential autoconf automake libtool \
+            sudo apt-get install -y build-essential cmake autoconf automake libtool \
               pkg-config nasm yasm zlib1g-dev
           else
-            for pkg in nasm automake autoconf libtool pkg-config; do
+            for pkg in cmake nasm automake autoconf libtool pkg-config; do
               brew list --formula "$pkg" > /dev/null 2>&1 || brew install "$pkg"
             done
           fi
@@ -69,7 +69,10 @@ jobs:
           .github/scripts/build-libfvad.sh "$HOME/deps"
 
       - name: Build lapse
-        run: .github/scripts/build-lapse.sh "$HOME/deps" stage/lapse
+        run: |
+          cmake -B build -DLAPSE_DEPS_PREFIX="$HOME/deps" \
+                -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$PWD/stage"
+          cmake --build build -j
 
       - name: Test the binary with nothing beside it
         run: |
@@ -145,6 +148,8 @@ jobs:
             autoconf automake libtool
             ${{ matrix.pkgprefix }}-toolchain
             ${{ matrix.pkgprefix }}-zlib
+            ${{ matrix.pkgprefix }}-cmake
+            ${{ matrix.pkgprefix }}-ninja
 
       - name: Build FFmpeg, FFTW and libfvad
         run: |
@@ -153,7 +158,12 @@ jobs:
           .github/scripts/build-libfvad.sh "$HOME/deps"
 
       - name: Build lapse
-        run: .github/scripts/build-lapse.sh "$HOME/deps" stage/lapse.exe
+        run: |
+          cmake -B build -G Ninja \
+                -DLAPSE_DEPS_PREFIX="$(cygpath -m "$HOME/deps")" \
+                -DCMAKE_RC_COMPILER="$WINDRES" \
+                -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$(cygpath -m "$PWD")/stage"
+          cmake --build build -j
 
       - name: Test the binary with nothing beside it
         run: |

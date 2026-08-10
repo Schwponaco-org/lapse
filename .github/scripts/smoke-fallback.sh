@@ -26,17 +26,19 @@ espeak-ng -w line.wav -s 150 "The quick brown fox jumps over the lazy dog near t
 spoken=$(ffprobe -v error -show_entries format=duration -of csv=p=0 line.wav)
 cue=$(python3 -c "print(int(float('$spoken') * 1000))")
 
+LINES=12
+
 inputs=""
 filters=""
 chain=""
-for i in $(seq 0 7); do
+for i in $(seq 0 $((LINES - 1))); do
     inputs="$inputs -i line.wav"
     filters="$filters[$i:a]aresample=16000,apad=whole_dur=8[a$i];"
     chain="$chain[a$i]"
 done
 
 ffmpeg -v error -y $inputs -filter_complex \
-    "${filters}${chain}concat=n=8:v=0:a=1,adelay=2000|2000,apad=pad_dur=2[out]" \
+    "${filters}${chain}concat=n=${LINES}:v=0:a=1,adelay=2000|2000,apad=pad_dur=2[out]" \
     -map "[out]" -ar 16000 -ac 1 audio.wav
 ffmpeg -v error -y -f lavfi -i color=c=black:s=320x240:r=24 -i audio.wav \
     -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest video.mkv
@@ -48,15 +50,23 @@ def ts(ms):
     s = ms // 1000; ms %= 1000
     return '%02d:%02d:%02d,%03d' % (h, m, s, ms)
 out = []
-for i in range(8):
+for i in range($LINES):
     start = 2000 + i * 8000 + 4200
     out.append('%d\n%s --> %s\nline %d\n' % (i + 1, ts(start), ts(start + $cue), i + 1))
 open('late.srt', 'w').write('\n'.join(out))
 "
 
 echo "== no onnxruntime anywhere near this binary"
-output=$("$LAPSE" video.mkv late.srt --no-backup)
+set +e
+output=$("$LAPSE" video.mkv late.srt --no-backup 2>&1)
+status=$?
+set -e
 echo "$output"
+
+if [ "$status" != 0 ] && [ "$status" != 3 ]; then
+    echo "FAIL: the engine came back with exit $status"
+    exit 1
+fi
 
 if ! echo "$output" | grep -q "using libfvad"; then
     echo "FAIL: it did not say it was falling back"
