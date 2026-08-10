@@ -115,14 +115,6 @@ jobs:
             cc: gcc
             cxx: g++
             windres: windres
-          - name: windows-arm64
-            os: windows-11-arm
-            msystem: CLANGARM64
-            pkgprefix: mingw-w64-clang-aarch64
-            ort: win-arm64
-            cc: clang
-            cxx: clang++
-            windres: llvm-windres
     runs-on: ${{ matrix.os }}
     defaults:
       run:

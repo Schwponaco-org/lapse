@@ -104,7 +104,6 @@ Every release ships a self-contained archive per platform. Unpack it and run the
 | macOS Apple silicon | `lapse-macos-arm64.tar.gz` | macOS 11 Big Sur and newer |
 | macOS Intel | `lapse-macos-x86_64.tar.gz` | macOS 10.15 Catalina and newer |
 | Windows x64 | `lapse-windows-x64.zip` | Windows 10 and newer |
-| Windows ARM64 | `lapse-windows-arm64.zip` | Windows 11 on ARM |
 
 Each archive holds the binary, `libonnxruntime` (`onnxruntime.dll` on Windows), `silero_vad.onnx` and the licence. FFmpeg, libfvad and FFTW3 are linked into the binary, so nothing else has to be on the machine. `SHA256SUMS` covers every asset.
 
@@ -151,7 +150,7 @@ cmake -B build-release -DLAPSE_DEPS_PREFIX="$HOME/deps"
 cmake --build build-release -j
 ```
 
-That is what CI does, on Linux, on macOS with the Xcode command line tools, and on Windows inside an MSYS2 MINGW64 or CLANGARM64 shell. The three scripts exist because those are cut-down static builds -- FFmpeg with `--disable-everything` and a hand-picked codec list -- and none of that is expressible in CMake, since FFmpeg has no CMake build at all. Set `MACOSX_DEPLOYMENT_TARGET` on macOS to pick the oldest system the binary should run on. `$HOME/deps` is a throwaway prefix, those libraries have no business in `/usr/local` where every other program would find them, so delete it when the build is done.
+That is what CI does, on Linux, on macOS with the Xcode command line tools, and on Windows inside an MSYS2 MINGW64 shell. The three scripts exist because those are cut-down static builds -- FFmpeg with `--disable-everything` and a hand-picked codec list -- and none of that is expressible in CMake, since FFmpeg has no CMake build at all. Set `MACOSX_DEPLOYMENT_TARGET` on macOS to pick the oldest system the binary should run on. `$HOME/deps` is a throwaway prefix, those libraries have no business in `/usr/local` where every other program would find them, so delete it when the build is done.
 
 ONNX Runtime is not needed to build. LAPSE looks for it when it runs and carries on without it, see [Voice detection](#voice-detection).
 
