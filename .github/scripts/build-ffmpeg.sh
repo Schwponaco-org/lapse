@@ -27,7 +27,13 @@ tar xf ffmpeg.tar.xz
 cd "ffmpeg-${VERSION}"
 
 TOOLS=""
-if [ -n "$CC" ]; then TOOLS="--cc=$CC"; fi
+if [ -n "$CC" ]; then
+    TOOLS="--cc=$CC"
+    TARGET_ARCH=$("$CC" -dumpmachine 2>/dev/null | cut -d- -f1)
+    if [ -n "$TARGET_ARCH" ]; then
+        TOOLS="$TOOLS --arch=$TARGET_ARCH"
+    fi
+fi
 if [ -n "$CXX" ]; then TOOLS="$TOOLS --cxx=$CXX"; fi
 
 ./configure \
