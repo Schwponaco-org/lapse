@@ -194,7 +194,7 @@ int run(int argc, const char *argv[]) {
     return 0;
 }
 
-// A bad file should come back as an error the caller can read, not as a crash
+
 int main(int argc, const char *argv[]) {
     try {
         return run(argc, argv);
