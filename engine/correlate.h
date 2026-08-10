@@ -26,11 +26,20 @@
 // film rather than a sync problem, so there is no reason to search that far
 const int MAX_OFFSET_MS = 15 * 60 * 1000;
 
-// Split mode searches around the offset nosplit already found. 10ms steps over
-// two minutes each way is enough for ad breaks and extended cuts and keeps the
-// backtracking table down to something a container can hold
-const int SPLIT_WINDOW_MS = 120000;
-const int SPLIT_STEP_MS = 10;
+// Split mode searches around the offset nosplit already found. The grid is
+// coarse on purpose, it only has to work out where the offset changes and each
+// piece gets measured properly afterwards, so ten minutes each way still fits
+const int SPLIT_WINDOW_MS = 600000;
+const int SPLIT_COARSE_MS = 100;
+
+// refining an offset we already trust only has to cover ad breaks and missing
+// scenes, so the window shrinks and the grid gets four times finer for free
+const int REFINE_WINDOW_MS = 45000;
+const int REFINE_STEP_MS = 25;
+
+const int CONCAT_SEARCH_MS = 90 * 60 * 1000;
+const int CONCAT_JUMP_MS = 300000;
+const int CONCAT_BACK_MS = 60000;
 
 // The ratios you actually run into - a subtitle timed for one framerate played
 // back at another. Anything outside this list is a transcode gone wrong, and
@@ -44,10 +53,36 @@ const double FRAMERATE_RATIOS[] = {
     30.0/25.0,   25.0/30.0
 };
 
+// What one pass of the search came back with. sigma is the one to trust: it is
+// how far the winning offset sticks out of the noise, and unlike confidence it
+// reads the same on every film
+struct Lock {
+    int offset = 0;
+    double confidence = 0;
+    double margin = 0;
+    double sigma = 0;
+};
+
+// One slice of the subtitle measured on its own, so we can see whether the
+// whole file agrees on one offset or whether it wanders
+struct Chunk {
+    double time;
+    double offset;
+    double confidence;
+    double sigma;
+};
+
 std::pair<double, double> linear_regression(const std::vector<double>& x, const std::vector<double>& y, const std::vector<double>& w);
 std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_profile, const std::vector<int>& srt_profile);
 double score_calculator(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, int x);
-std::pair<int, double> best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights = {});
-std::tuple<double, int, double> best_framerate(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights = {});
+Lock best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights = {}, double coverage = 1.0, int max_offset = MAX_OFFSET_MS);
+std::tuple<double, int, double, double> best_framerate(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights = {}, double coverage = 1.0);
+std::vector<Chunk> chunk_offsets(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights, int count, double coverage = 1.0, int max_offset = MAX_OFFSET_MS);
+std::vector<int> backward_jumps(const std::vector<std::pair<int,int>>& read_srt);
+std::vector<int> offsets_for_cuts(const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, const std::vector<int>& cuts, double coverage, double* worst_sigma);
+std::vector<int> concat_offsets(const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, double coverage = 1.0, double* worst_sigma = nullptr);
+std::pair<double, double> robust_line(const std::vector<Chunk>& chunks);
+double snap_ratio(double ratio);
+double peak_sigma(const std::vector<double>& peak, int best_bucket, double fmax);
 std::vector<double> score_curve(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, int lo, int hi, int step);
-std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, float p, int base_offset);
+std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, float p, int base_offset, int window_ms = SPLIT_WINDOW_MS, int step_ms = SPLIT_COARSE_MS);

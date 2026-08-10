@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import json
 import os
 import re
 import queue
@@ -28,7 +29,7 @@ from watchdog.events import FileSystemEventHandler
 DB_PATH        = os.environ.get("DB_PATH", "lapse.db")
 MEDIA_ROOT     = os.environ.get("MEDIA_ROOT", "/media")
 LAPSE          = os.environ.get("LAPSE_BIN", "./lapse")
-MODE           = os.environ.get("MODE", "nosplit")
+MODE           = os.environ.get("MODE", "auto")
 PENALTY        = os.environ.get("PENALTY", "6")
 SCAN_INTERVAL  = int(os.environ.get("SCAN_INTERVAL", "900"))
 MIN_CONFIDENCE = float(os.environ.get("MIN_CONFIDENCE", "0"))
@@ -274,30 +275,37 @@ def needs_work(row, mtime):
 
 
 def parse_output(output):
-    values = {}
-    for key, value in re.findall(r"(\w+)=(-?[\d.]+)", output):
-        try:
-            values[key] = float(value)
-        except ValueError:
-            pass
-    return values
+    # the engine writes one json line on stdout, everything else goes to stderr
+    for line in reversed(output.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except ValueError:
+                pass
+    return {}
 
 
 def run_sync(video_path, srt_path):
-    command = [LAPSE, video_path, srt_path, MODE]
+    command = [LAPSE, video_path, srt_path, MODE, "--json"]
     if MODE == "split":
-        command.append(PENALTY)
+        command.insert(4, PENALTY)
 
     result = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT)
-    output = (result.stdout or "").strip()
-    if output:
-        print(output)
+    values = parse_output(result.stdout or "")
 
-    if result.returncode != 0:
+    # 2 is "nothing lined up", 3 is "wrote it next to the original instead"
+    if result.returncode not in (0, 2, 3):
         message = (result.stderr or "").strip()
         raise RuntimeError(message or "lapse exited with %d" % result.returncode)
 
-    return parse_output(output)
+    if not values:
+        raise RuntimeError((result.stderr or "").strip() or "lapse said nothing")
+
+    print("%s: %s offset=%sms sigma=%.1f agree=%.2f" % (
+        os.path.basename(srt_path), values.get("verdict"), values.get("offset_ms"),
+        values.get("sigma", 0), values.get("agreement", 0)))
+    return values
 
 
 def save_result(conn, video_path, srt_path, backup_path, values, attempts, status):
@@ -311,9 +319,9 @@ def save_result(conn, video_path, srt_path, backup_path, values, attempts, statu
             video_path,
             srt_path,
             backup_path,
-            values.get("slope"),
-            values.get("intercept") * 1000 if values.get("intercept") is not None else None,
-            values.get("offset", values.get("base")),
+            values.get("ratio", 1.0) - 1.0 if values.get("ratio") is not None else None,
+            values.get("offset_ms"),
+            values.get("offset_ms"),
             values.get("confidence"),
             file_mtime(srt_path),
             attempts,
@@ -352,8 +360,19 @@ def process(conn, video_path, srt_path):
         backup_path = None
 
     status = "done"
+    verdict = values.get("verdict")
+    if not values.get("written"):
+        print("Nothing lined up, left it alone:", srt_path)
+        status = "lowconf"
+    elif verdict == "unsure":
+        # the engine wrote its guess beside the original rather than over it
+        print("Not sure about this one, left the original and put the guess in",
+              values.get("output"))
+        status = "lowconf"
+
     confidence = values.get("confidence")
-    if MIN_CONFIDENCE > 0 and confidence is not None and confidence < MIN_CONFIDENCE and backup_path:
+    if status == "done" and MIN_CONFIDENCE > 0 and confidence is not None \
+            and confidence < MIN_CONFIDENCE and backup_path:
         shutil.copy2(backup_path, srt_path)
         print("Confidence %.2f is under %.2f, put the original back: %s" % (confidence, MIN_CONFIDENCE, srt_path))
         status = "lowconf"

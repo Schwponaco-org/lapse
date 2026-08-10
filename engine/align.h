@@ -14,23 +14,24 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 #pragma once
-#include <string>
-
-// Silero wants 512 samples at a time when it is fed 16kHz audio
-const int SILERO_WINDOW = 512;
-const int SILERO_RATE = 16000;
-
-bool silero_open();
-void silero_close();
-
-// the model does not care how many streams you hand it at once and the per call
-// overhead is most of the cost, so a film gets cut into lanes and they all walk
-// forward together. silero_begin returns how many lanes it actually got
 #include <vector>
-struct Lanes {
-    int count = 0;
-    std::vector<float> state, context, window;
+#include <utility>
+
+struct Hit {
+    int offset = 0;
+    double z = 0; // how far the peak sticks out of the noise floor
+    double runner = 0; // best rival, 0..1 of the winner
+    double score = 0; // plain overlap score, same units as before
 };
 
-int silero_begin(Lanes& run, int lanes);
-bool silero_step(Lanes& run, const float* lanes_pcm, float* out);
+void align_setup(const std::vector<std::pair<int,int>>& spans, const std::vector<float>& weights);
+void align_drop();
+bool align_ready();
+int align_reach();
+
+std::vector<Hit> align_peaks(const std::vector<std::pair<int,int>>& cues, int want);
+double align_score(const std::vector<std::pair<int,int>>& cues, int off);
+int align_refine(const std::vector<std::pair<int,int>>& cues, int off, int reach = 400);
+
+
+double onset_z(const std::vector<std::pair<int,int>>& cues, int off, double* rate = nullptr);

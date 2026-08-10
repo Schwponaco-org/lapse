@@ -19,103 +19,173 @@ on:
       - main
   workflow_dispatch:
 
+env:
+  ORT_VERSION: 1.28.0
+
 jobs:
-  engine:
-    name: Release binary (${{ matrix.arch }})
+  unix:
+    name: Release binary (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
+          - name: linux-amd64
             os: ubuntu-latest
-          - arch: arm64
+            ort: linux-x64
+          - name: linux-arm64
             os: ubuntu-24.04-arm
+            ort: linux-aarch64
+          - name: macos-arm64
+            os: macos-14
+            ort: osx-arm64
+            deployment: '11.0'
+          - name: macos-x86_64
+            os: macos-15-intel
+            ort: osx-x86_64
+            ort_version: '1.22.0'
+            deployment: '10.15'
     runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install build tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential autoconf automake libtool pkg-config \
-            nasm yasm libfftw3-dev zlib1g-dev
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y build-essential autoconf automake libtool \
+              pkg-config nasm yasm zlib1g-dev
+          else
+            for pkg in nasm automake autoconf libtool pkg-config; do
+              brew list --formula "$pkg" > /dev/null 2>&1 || brew install "$pkg"
+            done
+          fi
 
-      - name: Build FFmpeg 7.x static
+      - name: Build FFmpeg, FFTW and libfvad
         run: |
-          wget -q https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz
-          tar xf ffmpeg-7.1.tar.xz
-          cd ffmpeg-7.1
-          ./configure \
-            --prefix=/opt/ffmpeg \
-            --enable-static \
-            --disable-shared \
-            --disable-programs \
-            --disable-doc \
-            --disable-debug \
-            --disable-everything \
-            --enable-avformat \
-            --enable-avcodec \
-            --enable-avutil \
-            --enable-swresample \
-            --enable-demuxer=matroska,mov,avi,mp4,ogg,wav,flac,aac \
-            --enable-decoder=aac,ac3,eac3,mp3,flac,vorbis,opus,dca,truehd,pcm_s16le,pcm_s16be,pcm_s24le,pcm_f32le,pcm_f32be \
-            --enable-parser=aac,mp3,flac,vorbis,opus,ac3 \
-            --enable-protocol=file
-          make -j$(nproc)
-          sudo make install
-
-      - name: Verify FFmpeg static build
-        run: |
-          for lib in libavformat libavcodec libavutil libswresample; do
-            if [ ! -f "/opt/ffmpeg/lib/${lib}.a" ]; then
-              echo "Missing /opt/ffmpeg/lib/${lib}.a, static FFmpeg build failed"
-              exit 1
-            fi
-          done
-          ls -la /opt/ffmpeg/lib/*.a
-
-      - name: Build libfvad static
-        run: |
-          git clone https://github.com/dpirch/libfvad.git
-          cd libfvad
-          autoreconf -i
-          ./configure --prefix=/opt/libfvad --enable-static --disable-shared
-          make
-          sudo make install
+          .github/scripts/build-ffmpeg.sh "$HOME/deps"
+          .github/scripts/build-fftw.sh "$HOME/deps"
+          .github/scripts/build-libfvad.sh "$HOME/deps"
 
       - name: Build lapse
-        run: |
-          cd engine
-          g++ -O2 -std=c++20 \
-            -I/opt/ffmpeg/include \
-            -I/opt/libfvad/include \
-            -o lapse-linux-${{ matrix.arch }} \
-            main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp silero.cpp \
-            -static-libgcc -static-libstdc++ \
-            /opt/ffmpeg/lib/libavformat.a \
-            /opt/ffmpeg/lib/libavcodec.a \
-            /opt/ffmpeg/lib/libswresample.a \
-            /opt/ffmpeg/lib/libavutil.a \
-            /opt/libfvad/lib/libfvad.a \
-            -Wl,-Bstatic -lfftw3 -Wl,-Bdynamic \
-            -lm -lpthread -lz -ldl
+        run: .github/scripts/build-lapse.sh "$HOME/deps" stage/lapse
 
       - name: Test the binary with nothing beside it
         run: |
-          engine/lapse-linux-${{ matrix.arch }} --formats
-          .github/scripts/smoke-engine.sh engine/lapse-linux-${{ matrix.arch }}
+          stage/lapse --formats
+          .github/scripts/smoke-engine.sh stage/lapse
 
       - name: Check it falls back to libfvad when onnxruntime is missing
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y espeak-ng ffmpeg
-          .github/scripts/smoke-fallback.sh engine/lapse-linux-${{ matrix.arch }}
+          .github/scripts/smoke-fallback.sh stage/lapse
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Check Silero is picked up when it is there
+        run: |
+          .github/scripts/fetch-onnxruntime.sh \
+            ${{ matrix.ort }} "${{ matrix.ort_version || env.ORT_VERSION }}" stage
+          if [ "$(stage/lapse --vad)" != "silero" ]; then
+            echo "onnxruntime was shipped but the binary did not load it"
+            exit 1
+          fi
+
+      - name: Does it actually sync things correctly
+        if: runner.os == 'Linux'
+        run: .github/scripts/accuracy.sh stage/lapse
+
+      - name: Check the release archive builds
+        run: .github/scripts/package.sh lapse-${{ matrix.name }} stage dist
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: lapse-linux-${{ matrix.arch }}
-          path: engine/lapse-linux-${{ matrix.arch }}
+          name: lapse-${{ matrix.name }}
+          path: dist/*
+
+  windows:
+    name: Release binary (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            msystem: MINGW64
+            pkgprefix: mingw-w64-x86_64
+            ort: win-x64
+            cc: gcc
+            cxx: g++
+            windres: windres
+          - name: windows-arm64
+            os: windows-11-arm
+            msystem: CLANGARM64
+            pkgprefix: mingw-w64-clang-aarch64
+            ort: win-arm64
+            cc: clang
+            cxx: clang++
+            windres: llvm-windres
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+      WINDRES: ${{ matrix.windres }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            base-devel git make diffutils curl tar xz zip unzip nasm
+            autoconf automake libtool
+            ${{ matrix.pkgprefix }}-toolchain
+            ${{ matrix.pkgprefix }}-zlib
+
+      - name: Build FFmpeg, FFTW and libfvad
+        run: |
+          .github/scripts/build-ffmpeg.sh "$HOME/deps"
+          .github/scripts/build-fftw.sh "$HOME/deps"
+          .github/scripts/build-libfvad.sh "$HOME/deps"
+
+      - name: Build lapse
+        run: .github/scripts/build-lapse.sh "$HOME/deps" stage/lapse.exe
+
+      - name: Test the binary with nothing beside it
+        run: |
+          stage/lapse.exe --formats
+          .github/scripts/smoke-engine.sh stage/lapse.exe
+
+      - name: Check nothing outside Windows itself is linked in
+        run: |
+          dump=$(command -v objdump || command -v llvm-objdump || true)
+          if [ -z "$dump" ]; then exit 0; fi
+          "$dump" -p stage/lapse.exe | grep -i 'DLL Name'
+          if "$dump" -p stage/lapse.exe | grep -iE 'DLL Name:.*(libgcc|libstdc|libc\+\+|libwinpthread|libfftw|msys-)'; then
+            echo "the binary still needs a DLL from the build environment"
+            exit 1
+          fi
+
+      - name: Check Silero is picked up when it is there
+        run: |
+          .github/scripts/fetch-onnxruntime.sh \
+            ${{ matrix.ort }} "${{ matrix.ort_version || env.ORT_VERSION }}" stage
+          if [ "$(stage/lapse.exe --vad)" != "silero" ]; then
+            echo "onnxruntime was shipped but the binary did not load it"
+            exit 1
+          fi
+
+      - name: Check the release archive builds
+        run: .github/scripts/package.sh lapse-${{ matrix.name }} stage dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lapse-${{ matrix.name }}
+          path: dist/*
 
   image:
     name: Docker image

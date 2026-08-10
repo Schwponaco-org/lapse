@@ -1,3 +1,4 @@
+#!/bin/bash
 # LAPSE - Language-Agnostic subtitle synchronization engine
 # Copyright (C) 2026 Rasmus Stisen Jensen (rs-jensen)
 # This program is free software: you can redistribute it and/or modify
@@ -12,29 +13,30 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
+set -e
 
-services:
-  lapse:
-    container_name: lapse
-    image: ghcr.io/rs-jensen/lapse:latest
-    restart: always
-    ulimits:
-      core: 0
-    tmpfs:
-      - /tmp
-    volumes:
-      - ./data:/data
-      - /mnt/media:/media
-    environment:
-      - MEDIA_ROOT=/media
-      - DB_PATH=/data/lapse.db
-      - LAPSE_BIN=/app/lapse
-      - PUID=1000
-      - PGID=1000
-      - MODE=auto
-      - PENALTY=6
-      - SCAN_INTERVAL=900
-      - MIN_CONFIDENCE=0
-      - MAX_ATTEMPTS=3
-      - TIMEOUT=1800
-      - POLLING=0
+PREFIX=${1:?usage: build-fftw.sh <prefix>}
+VERSION=${FFTW_VERSION:-3.3.10}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+cd "$WORK"
+
+curl -fsSL -o fftw.tar.gz "https://www.fftw.org/fftw-${VERSION}.tar.gz"
+tar xf fftw.tar.gz
+cd "fftw-${VERSION}"
+
+./configure \
+    --prefix="$PREFIX" \
+    --enable-static \
+    --disable-shared \
+    --disable-fortran \
+    --disable-doc
+
+make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+make install
+
+if [ ! -f "$PREFIX/lib/libfftw3.a" ]; then
+    echo "Missing $PREFIX/lib/libfftw3.a, the static FFTW build failed"
+    exit 1
+fi
