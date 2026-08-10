@@ -1,2 +1,16 @@
 __pycache__/
 *.pyc
+
+engine/libonnxruntime.*
+engine/onnxruntime.dll
+engine/silero_vad.onnx
+engine/lapse.rc.o
+stage/
+dist/
+.DS_Store
+lapse.db
+engine/lapse
+engine/lapse.exe
+/lapse
+
+engine/lapse.dSYM/

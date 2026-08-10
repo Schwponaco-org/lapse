@@ -16,52 +16,47 @@
 #include "write_subtitle.h"
 #include "srt_parser.h"
 
-// Writes the original file as .bak, but never on top of one we already made -
-// running lapse twice used to replace the untouched original with the shifted
-// version and then there was no way back
+
 void backup_file(const char* path) {
     std::string backup = std::string(path) + ".bak";
     if (std::filesystem::exists(backup)) return;
     std::filesystem::copy_file(path, backup, std::filesystem::copy_options::overwrite_existing);
 }
 
-// How a timestamp gets moved. Either one line for the whole file, or a lookup
-// per cue for nosplit and split
+// How a timestamp gets moved. Either one line for the whole file, or a lookup per cue, and both together when the file drifts and was also cut about
 struct Shift {
-    bool ols = false;
     double slope = 0;
     double intercept_s = 0;
     std::vector<int> offsets;
     std::vector<int> mapping;
 
     int apply(int ms, int cue) const {
-        if (ols) return (int)(ms * (1.0 + slope) + intercept_s * 1000.0);
-        if (cue < 0 || cue >= (int)mapping.size()) return ms;
+        double stretched = ms * (1.0 + slope) + intercept_s * 1000.0;
+        if (mapping.empty()) return (int)stretched;
+        if (cue < 0 || cue >= (int)mapping.size()) return (int)stretched;
         int span = mapping[cue];
-        if (span < 0 || span >= (int)offsets.size()) return ms;
-        return ms + offsets[span];
+        if (span < 0 || span >= (int)offsets.size()) return (int)stretched;
+        return (int)stretched + offsets[span];
     }
 };
 
-// Reads the file in one go and drops a utf-8 BOM if it is there
+// goes back out the way it came in - utf-16 used to come back as utf-8
+static Charset came_as = Charset::Legacy;
+
 static std::string load_file(const char* path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) throw std::runtime_error("Cannot open subtitle: " + std::string(path));
+    return load_text(path, &came_as);
+}
 
-    std::string raw((std::istreambuf_iterator<char>(in)), {});
+// temp file then rename, so a throw halfway leaves the old file whole
+static void save_file(const char* output_path, const std::string& text) {
+    std::string temp_path = std::string(output_path) + ".tmp";
+    std::ofstream out(temp_path, std::ios::binary);
+    if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
 
-    if (raw.size() >= 2 && (unsigned char)raw[0] == 0xFF && (unsigned char)raw[1] == 0xFE)
-        throw std::runtime_error("File looks like utf-16, convert it to utf-8 first: " + std::string(path));
-    if (raw.size() >= 2 && (unsigned char)raw[0] == 0xFE && (unsigned char)raw[1] == 0xFF)
-        throw std::runtime_error("File looks like utf-16, convert it to utf-8 first: " + std::string(path));
-
-    if (raw.size() >= 3 &&
-        (unsigned char)raw[0] == 0xEF &&
-        (unsigned char)raw[1] == 0xBB &&
-        (unsigned char)raw[2] == 0xBF)
-        return raw.substr(3);
-
-    return raw;
+    std::string bytes = encode(text, came_as);
+    out.write(bytes.data(), bytes.size());
+    out.close();
+    std::filesystem::rename(temp_path, output_path);
 }
 
 static std::string ms_to_ts(int ms, char ms_sep) {
@@ -89,17 +84,20 @@ static std::string ms_to_ass_ts(int ms) {
 // milliseconds, so they go through here together. We write to a temp file and
 // move it into place at the end if something throws halfway the subtitle the user already had is still whole
 static void write_cues(const char* input_path, const char* output_path, char ms_sep, const Shift& shift) {
-    std::istringstream ss(load_file(input_path));
+    std::string text = load_file(input_path);
+    bool ends_clean = !text.empty() && text.back() == '\n';
+    std::istringstream ss(text);
 
-    std::string temp_path = std::string(output_path) + ".tmp";
-    std::ofstream out(temp_path, std::ios::binary);
-    if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
+    std::string out;
 
     std::string line;
     int cue = 0;
+    const char* eol = "\n";
     while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r')
+        if (!line.empty() && line.back() == '\r') {
             line.pop_back();
+            eol = "\r\n";
+        }
 
         size_t arrow = line.find("-->");
         if (arrow != std::string::npos) {
@@ -114,34 +112,36 @@ static void write_cues(const char* input_path, const char* output_path, char ms_
                     size_t space = line.find_first_of(" \t", after);
                     if (space != std::string::npos) tail = line.substr(space);
                 }
-                line = ms_to_ts(shift.apply(start_ms, cue), ms_sep) + " --> " +
-                       ms_to_ts(shift.apply(end_ms, cue), ms_sep) + tail;
+                line = ms_to_ts(shift.apply(start_ms, cue), ms_sep) + " --> " + ms_to_ts(shift.apply(end_ms, cue), ms_sep) + tail;
             }
             cue++;       // counted even when it did not parse, the reader did the same
         }
 
-        out << line << "\n";
+        out += line;
+        if (ends_clean || !ss.eof()) out += eol;
     }
 
-    out.close();
-    std::filesystem::rename(temp_path, output_path);
+    save_file(output_path, out);
 }
 
 static void write_dialogue(const char* input_path, const char* output_path, const Shift& shift) {
-    std::istringstream ss(load_file(input_path));
+    std::string text = load_file(input_path);
+    bool ends_clean = !text.empty() && text.back() == '\n';
+    std::istringstream ss(text);
 
-    std::string temp_path = std::string(output_path) + ".tmp";
-    std::ofstream out(temp_path, std::ios::binary);
-    if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
+    std::string out;
 
     std::string line;
     int cue = 0;
     int start_col = 1;
     int end_col = 2;
+    const char* eol = "\n";
 
     while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r')
+        if (!line.empty() && line.back() == '\r') {
             line.pop_back();
+            eol = "\r\n";
+        }
 
         if (line.rfind("Format:", 0) == 0) {
             auto [s, e] = ass_time_columns(line);
@@ -173,54 +173,48 @@ static void write_dialogue(const char* input_path, const char* output_path, cons
             cue++;
         }
 
-        out << line << "\n";
+        out += line;
+        if (ends_clean || !ss.eof()) out += eol;
     }
 
-    out.close();
-    std::filesystem::rename(temp_path, output_path);
+    save_file(output_path, out);
+}
+
+static Shift one_line(double slope, double intercept_s) {
+    Shift shift;
+    shift.slope = slope;
+    shift.intercept_s = intercept_s;
+    return shift;
+}
+
+static Shift per_cue(double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    Shift shift;
+    shift.slope = slope;
+    shift.offsets = offsets;
+    shift.mapping = mapping;
+    return shift;
 }
 
 void write_srt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    Shift shift;
-    shift.ols = true;
-    shift.slope = slope;
-    shift.intercept_s = intercept_s;
-    write_cues(input_path, output_path, ',', shift);
+    write_cues(input_path, output_path, ',', one_line(slope, intercept_s));
 }
 
 void write_vtt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    Shift shift;
-    shift.ols = true;
-    shift.slope = slope;
-    shift.intercept_s = intercept_s;
-    write_cues(input_path, output_path, '.', shift);
+    write_cues(input_path, output_path, '.', one_line(slope, intercept_s));
 }
 
 void write_ass_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    Shift shift;
-    shift.ols = true;
-    shift.slope = slope;
-    shift.intercept_s = intercept_s;
-    write_dialogue(input_path, output_path, shift);
+    write_dialogue(input_path, output_path, one_line(slope, intercept_s));
 }
 
-void write_srt_split(const char* input_path, const char* output_path, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    Shift shift;
-    shift.offsets = offsets;
-    shift.mapping = mapping;
-    write_cues(input_path, output_path, ',', shift);
+void write_srt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_cues(input_path, output_path, ',', per_cue(slope, offsets, mapping));
 }
 
-void write_vtt_split(const char* input_path, const char* output_path, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    Shift shift;
-    shift.offsets = offsets;
-    shift.mapping = mapping;
-    write_cues(input_path, output_path, '.', shift);
+void write_vtt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_cues(input_path, output_path, '.', per_cue(slope, offsets, mapping));
 }
 
-void write_ass_split(const char* input_path, const char* output_path, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    Shift shift;
-    shift.offsets = offsets;
-    shift.mapping = mapping;
-    write_dialogue(input_path, output_path, shift);
+void write_ass_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_dialogue(input_path, output_path, per_cue(slope, offsets, mapping));
 }

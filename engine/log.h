@@ -14,23 +14,12 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 #pragma once
-#include <string>
+#include <ostream>
 
-// Silero wants 512 samples at a time when it is fed 16kHz audio
-const int SILERO_WINDOW = 512;
-const int SILERO_RATE = 16000;
+// anything meant for a person goes to stderr, stdout belongs to --json
+extern bool quiet;
 
-bool silero_open();
-void silero_close();
+std::ostream& say();
 
-// the model does not care how many streams you hand it at once and the per call
-// overhead is most of the cost, so a film gets cut into lanes and they all walk
-// forward together. silero_begin returns how many lanes it actually got
-#include <vector>
-struct Lanes {
-    int count = 0;
-    std::vector<float> state, context, window;
-};
-
-int silero_begin(Lanes& run, int lanes);
-bool silero_step(Lanes& run, const float* lanes_pcm, float* out);
+void progress(const char* what, int done, int total);
+void progress_done();

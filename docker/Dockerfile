@@ -42,11 +42,13 @@ ENV LAPSE_BIN=/app/lapse
 WORKDIR /app
 COPY docker/requirements.txt .
 RUN pip3 install -r requirements.txt --break-system-packages
-COPY engine/correlate.cpp engine/correlate.h engine/decoder.cpp engine/decoder.h \
+COPY engine/correlate.cpp engine/correlate.h engine/align.cpp engine/align.h engine/decoder.cpp engine/decoder.h \
      engine/srt_parser.cpp engine/srt_parser.h engine/main.cpp \
      engine/write_subtitle.cpp engine/write_subtitle.h \
-     engine/silero.cpp engine/silero.h engine/onnxruntime_c_api.h ./
-RUN g++ -O2 -std=c++20 -o lapse main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp silero.cpp \
+     engine/silero.cpp engine/silero.h engine/onnxruntime_c_api.h \
+     engine/cuetext.cpp engine/cuetext.h engine/charset.cpp engine/charset.h \
+     engine/log.cpp engine/log.h ./
+RUN g++ -O2 -std=c++20 -o lapse main.cpp correlate.cpp align.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp silero.cpp cuetext.cpp charset.cpp log.cpp \
     -lavcodec -lavformat -lavutil -lswresample -lfvad -lfftw3 -ldl
 
 ARG ORT_VERSION=1.28.0

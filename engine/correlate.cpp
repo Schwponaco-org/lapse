@@ -14,6 +14,9 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 #include "correlate.h"
+#include "align.h"
+#include "log.h"
+#include <cstdlib>
 
 // slope og intercept for y = slope*x + intercept
 std::pair<double, double> linear_regression(const std::vector<double>& x, const std::vector<double>& y, const std::vector<double>& w) {
@@ -26,8 +29,6 @@ std::pair<double, double> linear_regression(const std::vector<double>& x, const 
         swxy += w[i] * x[i] * y[i];
     }
 
-    // One usable chunk cannot hold a line - fall back to a flat offset instead
-    // of dividing by zero and writing NaN into every timestamp
     double denom = sw*swxx - swx*swx;
     if (sw <= 0) return {0.0, 0.0};
     if (std::abs(denom) < 1e-9) return {0.0, swy / sw};
@@ -41,7 +42,7 @@ std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_pr
     int padded = 262144;
     int chunk_size = 90000;
     int half = padded / 2 + 1;
-    int max_lag = MAX_OFFSET_MS / 10;   // profiles hold one entry per 10ms
+    int max_lag = MAX_OFFSET_MS / 10; // profiles hold one entry per 10ms
 
     std::vector<double> t_vals, delta_vals, weights;
     int chunk_number = 0;
@@ -64,9 +65,6 @@ std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_pr
     for (int chunks = 45000; chunks + chunk_size <= (int)activity_profile.size(); chunks += chunk_size) {
         chunk_number++;
 
-        // Both profiles are just ones and zeros so they carry a big constant
-        // term. Taking the mean out first stops the correlation from mostly
-        // measuring how much talking there is and gives a peak worth finding
         double a_mean = 0, b_mean = 0;
         for (int i = 0; i < chunk_size; ++i) {
             a_mean += activity_profile[chunks + i];
@@ -79,7 +77,6 @@ std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_pr
         for (int i = 0; i < padded; ++i)
             activity_buf[i] = (i < chunk_size) ? activity_profile[chunks + i] - a_mean : 0.0;
 
-        // Fill srt buffer same window then zeros
         for (int i = 0; i < padded; ++i)
             srt_buf[i] = (i < chunk_size && chunks + i < (int)srt_profile.size()) ? srt_profile[chunks + i] - b_mean : 0.0;
 
@@ -117,9 +114,6 @@ std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_pr
             }
         }
 
-        // The runner up has to come from somewhere else entirely. Taking the
-        // bin next to the peak told us nothing - it is always nearly as high,
-        // so every chunk came out with a sharpness of about 1
         double second_val = -std::numeric_limits<double>::infinity();
         for (int i = 0; i < padded; ++i) {
             int lag = (i < padded / 2) ? i : i - padded;
@@ -128,18 +122,25 @@ std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_pr
             if (corr_out[i] > second_val) second_val = corr_out[i];
         }
 
-        double offset_ms = best_lag * 10.0;
+
+        int at = (best_lag >= 0) ? best_lag : best_lag + padded;
+        double left  = corr_out[(at - 1 + padded) % padded];
+        double right = corr_out[(at + 1) % padded];
+        double curve = left - 2 * best_val + right;
+        double shift = (std::abs(curve) > 1e-12) ? 0.5 * (left - right) / curve : 0.0;
+        if (shift > 0.5) shift = 0.5;
+        if (shift < -0.5) shift = -0.5;
+
+        double offset_ms = (best_lag + shift) * 10.0;
         double sharpness = (second_val > 0) ? best_val / second_val : 0.0;
 
-        std::cout << "t_" << chunk_number << " offset: " << offset_ms << "ms\n";
-        std::cout << "Sharpness_" << chunk_number << ": " << sharpness << '\n';
+        say() << "t_" << chunk_number << " offset: " << offset_ms << "ms\n";
+        say() << "Sharpness_" << chunk_number << ": " << sharpness << '\n';
 
-        // A chunk that did not really lock onto anything only drags the line
-        // around, so leave it out instead of weighting it
+
         if (sharpness < 1.05) continue;
 
-        // Time of the middle of this chunk in seconds. The chunks start seven
-        // and a half minutes in, which the old chunk_number*900 forgot about
+
         t_vals.push_back((chunks + chunk_size / 2) * 0.01);
         delta_vals.push_back(offset_ms / 1000.0);
         weights.push_back(sharpness);
@@ -157,8 +158,8 @@ std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_pr
     fftw_free(corr_out);
 
     auto [slope, intercept] = linear_regression(t_vals, delta_vals, weights);
-    std::cout << "Slope: " << slope << '\n';
-    std::cout << "Intercept: " << intercept << '\n';
+    say() << "Slope: " << slope << '\n';
+    say() << "Intercept: " << intercept << '\n';
 
     return {slope, intercept};
 }
@@ -195,9 +196,52 @@ double score_calculator(const std::vector<std::pair<int, int>>& read_srt, const 
     return score;
 }
 
-// Slides the subtitle spans over the reference and returns the offset where
-// they overlap best, together with how much of the file that offset explains
-std::pair<int, double> best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights) {
+
+Lock best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights, double coverage, int max_offset) {
+
+    if (align_ready() && max_offset <= align_reach() && !read_srt.empty()) {
+        std::vector<Hit> tops = align_peaks(read_srt, 10);
+
+
+        Hit stay;
+        tops.push_back(stay);
+
+
+        std::vector<std::pair<double, Hit>> ranked;
+        for (auto& h : tops) {
+            if (std::abs(h.offset) > max_offset) continue;
+            ranked.push_back({onset_z(read_srt, h.offset), h});
+        }
+        std::sort(ranked.begin(), ranked.end(), [](auto& a, auto& b) { return a.first > b.first; });
+
+        Hit best;
+        double best_lock = -1;
+        bool have = false;
+
+        for (int i = 0; i < (int)ranked.size() && i < 4; i++) {
+            Hit c = ranked[i].second;
+            c.offset = align_refine(read_srt, c.offset, 1200);
+            if (std::abs(c.offset) > max_offset) continue;
+            c.score = align_score(read_srt, c.offset);
+            double lock = onset_z(read_srt, c.offset);
+
+            if (!have || lock > best_lock) {
+                best_lock = lock;
+                best = c;
+                have = true;
+            }
+        }
+        if (have) {
+            if (coverage <= 0) coverage = 1.0;
+            double confidence = best.score / (read_srt.size() * coverage);
+            if (confidence > 1.0) confidence = 1.0;
+            double margin = 1.0 - best.runner;
+            if (margin < 0) margin = 0;
+            if (best_lock < 0) best_lock = 0;
+            return {best.offset, confidence, margin, best_lock};
+        }
+    }
+
     std::vector<std::pair<int, float>> slope_changes;
     bool weighted = reference_weights.size() == reference_spans.size();
 
@@ -207,7 +251,7 @@ std::pair<int, double> best_offset(const std::vector<std::pair<int, int>>& read_
             // so skip it when that whole stretch is further out than we search
             int reach_lo = reference_spans[k].first - read_srt[n].second;
             int reach_hi = reference_spans[k].second - read_srt[n].first;
-            if (reach_hi < -MAX_OFFSET_MS || reach_lo > MAX_OFFSET_MS) continue;
+            if (reach_hi < -max_offset || reach_lo > max_offset) continue;
 
             int min_length = std::min(reference_spans[k].second - reference_spans[k].first, read_srt[n].second - read_srt[n].first);
             int max_length = std::max(reference_spans[k].second - reference_spans[k].first, read_srt[n].second - read_srt[n].first);
@@ -239,9 +283,10 @@ std::pair<int, double> best_offset(const std::vector<std::pair<int, int>>& read_
 
     std::sort(slope_changes.begin(), slope_changes.end());
 
-    // These have to be doubles. The slopes are fractions of a millisecond and
-    // adding them to a long threw every one of them away, so the score never
-    // moved off zero and the answer was always an offset of 0
+    const int bucket_ms = 1000;
+    int buckets = (2 * max_offset) / bucket_ms + 1;
+    std::vector<double> peak(buckets, 0.0);
+
     int  sig_last = 0;
     double fvalue = 0;
     double fmax = 0;
@@ -249,30 +294,71 @@ std::pair<int, double> best_offset(const std::vector<std::pair<int, int>>& read_
     int best = 0;
     for (int i = 0; i < (int)slope_changes.size(); i++) {
         fvalue += current_slope * (slope_changes[i].first - sig_last);
-        if (fvalue > fmax && std::abs(slope_changes[i].first) <= MAX_OFFSET_MS) {
-            fmax = fvalue;
-            best = slope_changes[i].first;
+        if (std::abs(slope_changes[i].first) <= max_offset) {
+            if (fvalue > fmax) {
+                fmax = fvalue;
+                best = slope_changes[i].first;
+            }
+            int b = (slope_changes[i].first + max_offset) / bucket_ms;
+            if (fvalue > peak[b]) peak[b] = fvalue;
         }
         sig_last = slope_changes[i].first;
         current_slope += slope_changes[i].second;
     }
 
-    // A cue that lands right on top of a reference span is worth 1, so this
-    // reads as the share of the subtitle file that ended up on speech
-    double confidence = read_srt.empty() ? 0.0 : fmax / read_srt.size();
+    if (coverage <= 0) coverage = 1.0;
+    double confidence = read_srt.empty() ? 0.0 : fmax / (read_srt.size() * coverage);
     if (confidence > 1.0) confidence = 1.0;
 
-    return {best, confidence};
+    int best_bucket = (best + max_offset) / bucket_ms;
+    double rival = 0;
+    for (int b = 0; b < buckets; b++)
+        if (std::abs(b - best_bucket) > 1 && peak[b] > rival) rival = peak[b];
+
+    double margin = (fmax > 0) ? (fmax - rival) / fmax : 0.0;
+    if (margin < 0) margin = 0;
+
+    return {best, confidence, margin, peak_sigma(peak, best_bucket, fmax)};
 }
 
-// Stretches the subtitle by each framerate ratio in turn and keeps whichever
-// one lines up best. Measuring the drift chunk by chunk never really worked 
-// a quarter of an hour of film drifts more than half a minute at 4 percent, so
-// there is no single lag that fits the chunk and the peak just smears out
-std::tuple<double, int, double> best_framerate(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights) {
+double peak_sigma(const std::vector<double>& peak, int best_bucket, double fmax) {
+    if (fmax <= 0) return 0.0;
+
+    std::vector<double> noise;
+    noise.reserve(peak.size());
+    for (int b = 0; b < (int)peak.size(); b++) {
+        if (std::abs(b - best_bucket) <= 2) continue;   // the peak's own shoulders
+        noise.push_back(peak[b]);
+    }
+    if (noise.size() < 8) return 0.0;
+
+    std::sort(noise.begin(), noise.end());
+    double middle = noise[noise.size() / 2];
+
+    std::vector<double> away;
+    away.reserve(noise.size());
+    for (double v : noise) away.push_back(std::abs(v - middle));
+    std::sort(away.begin(), away.end());
+    double spread = 1.4826 * away[away.size() / 2];
+
+    if (spread < 1e-9) {
+        double sum = 0;
+        for (double v : noise) sum += std::abs(v - middle);
+        spread = sum / noise.size();
+    }
+    if (spread < 1e-9) return (fmax > middle) ? 99.0 : 0.0;
+
+    double sigma = (fmax - middle) / spread;
+    if (sigma < 0) sigma = 0;
+    if (sigma > 99.0) sigma = 99.0;
+    return sigma;
+}
+
+std::tuple<double, int, double, double> best_framerate(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights, double coverage) {
     double best_ratio = 1.0;
     int best_shift = 0;
-    double best_confidence = -1;
+    double best_confidence = 0;
+    double best_sigma = -1;
 
     for (double ratio : FRAMERATE_RATIOS) {
         std::vector<std::pair<int, int>> scaled;
@@ -280,16 +366,163 @@ std::tuple<double, int, double> best_framerate(const std::vector<std::pair<int, 
         for (auto& s : read_srt)
             scaled.push_back({(int)(s.first * ratio), (int)(s.second * ratio)});
 
-        auto [offset, confidence] = best_offset(scaled, reference_spans, reference_weights);
-        std::cout << "ratio " << ratio << ": offset=" << offset << "ms confidence=" << confidence << '\n';
+        Lock got = best_offset(scaled, reference_spans, reference_weights, coverage);
+        say() << "ratio " << ratio << ": offset=" << got.offset << "ms confidence=" << got.confidence
+              << " sigma=" << got.sigma << '\n';
 
-        if (confidence > best_confidence) {
-            best_confidence = confidence;
+        // picking on confidence handed it to whichever ratio smeared widest
+        if (got.sigma > best_sigma) {
+            best_sigma = got.sigma;
+            best_confidence = got.confidence;
             best_ratio = ratio;
-            best_shift = offset;
+            best_shift = got.offset;
         }
     }
-    return {best_ratio, best_shift, best_confidence};
+    return {best_ratio, best_shift, best_confidence, best_sigma};
+}
+
+
+std::vector<Chunk> chunk_offsets(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights, int count, double coverage, int max_offset) {
+    std::vector<Chunk> chunks;
+    if ((int)read_srt.size() < count * 5) count = (int)read_srt.size() / 5;
+    if (count < 2) return chunks;
+
+    int per = (int)read_srt.size() / count;
+
+    for (int c = 0; c < count; c++) {
+        int from = c * per;
+        int to = (c == count - 1) ? (int)read_srt.size() : (c + 1) * per;
+
+        std::vector<std::pair<int, int>> part(read_srt.begin() + from, read_srt.begin() + to);
+        Lock got = best_offset(part, reference_spans, reference_weights, coverage, max_offset);
+
+        double middle = 0;
+        for (auto& s : part) middle += (s.first + s.second) / 2.0;
+        middle /= part.size();
+
+        chunks.push_back({middle, (double)got.offset, got.confidence * got.margin, got.sigma});
+        progress("Checking the file in slices", c + 1, count);
+    }
+    progress_done();
+    return chunks;
+}
+
+std::vector<int> backward_jumps(const std::vector<std::pair<int, int>>& read_srt) {
+    std::vector<int> cuts;
+    for (size_t i = 1; i < read_srt.size(); i++)
+        if (read_srt[i].first < read_srt[i - 1].first - CONCAT_BACK_MS)
+            cuts.push_back((int)i);
+    return cuts;
+}
+
+std::vector<int> offsets_for_cuts(const std::vector<std::pair<int, int>>& read_srt,
+    const std::vector<std::pair<int, int>>& reference_spans,
+    const std::vector<float>& reference_weights,
+    const std::vector<int>& cuts,
+    double coverage,
+    double* worst_sigma) {
+    int n = (int)read_srt.size();
+    std::vector<int> offsets(n, 0);
+    double worst = 99.0;
+
+    std::vector<int> edge;
+    edge.push_back(0);
+    for (int c : cuts) if (c > 0 && c < n) edge.push_back(c);
+    edge.push_back(n);
+
+    for (size_t e = 0; e + 1 < edge.size(); e++) {
+        int from = edge[e], to = edge[e + 1];
+        if (from >= to) continue;
+
+        std::vector<std::pair<int, int>> part(read_srt.begin() + from, read_srt.begin() + to);
+        Lock got = best_offset(part, reference_spans, reference_weights,
+                                                        coverage, CONCAT_SEARCH_MS);
+        say() << "part " << (e + 1) << ": cues " << from << "-" << to
+                  << " offset=" << got.offset << "ms confidence=" << got.confidence
+                  << " sigma=" << got.sigma << '\n';
+
+        for (int k = from; k < to; k++) offsets[k] = got.offset;
+        if (got.sigma < worst) worst = got.sigma;
+    }
+
+    if (worst_sigma) *worst_sigma = worst;
+    return offsets;
+}
+
+std::vector<int> concat_offsets(const std::vector<std::pair<int, int>>& read_srt,
+                                const std::vector<std::pair<int, int>>& reference_spans,
+                                const std::vector<float>& reference_weights,
+                                double coverage,
+                                double* worst_sigma) {
+    std::vector<Chunk> chunks = chunk_offsets(read_srt, reference_spans, reference_weights,
+        16, coverage, CONCAT_SEARCH_MS);
+    if (chunks.size() < 4) return {};
+
+    std::vector<int> anchor;
+    for (auto& c : chunks) {
+        if (c.confidence < 0.02) continue;
+        if (anchor.empty() || std::abs(c.offset - anchor.back()) > CONCAT_JUMP_MS)
+            anchor.push_back((int)c.offset);
+    }
+    if (anchor.size() < 2) return {};
+
+    int n = (int)read_srt.size();
+    std::vector<int> cuts;
+    int from = 0;
+
+    for (size_t a = 0; a + 1 < anchor.size(); a++) {
+        int lo = anchor[a], hi = anchor[a + 1];
+        double best = -1;
+        int cut = from;
+
+        for (int j = from; j <= n; j++) {
+            std::vector<std::pair<int, int>> left(read_srt.begin() + from, read_srt.begin() + j);
+            std::vector<std::pair<int, int>> right(read_srt.begin() + j, read_srt.end());
+            double sc = score_calculator(left, reference_spans, lo) + score_calculator(right, reference_spans, hi);
+            if (sc > best) { best = sc; cut = j; }
+        }
+        if (cut > from && cut < n) cuts.push_back(cut);
+        from = cut;
+    }
+    if (cuts.empty()) return {};
+
+    return offsets_for_cuts(read_srt, reference_spans, reference_weights, cuts, coverage, worst_sigma);
+}
+
+
+std::pair<double, double> robust_line(const std::vector<Chunk>& chunks) {
+    std::vector<double> slopes;
+    for (size_t i = 0; i < chunks.size(); i++) {
+        for (size_t j = i + 1; j < chunks.size(); j++) {
+            double dt = chunks[j].time - chunks[i].time;
+            if (std::abs(dt) < 1000) continue;
+            slopes.push_back((chunks[j].offset - chunks[i].offset) / dt);
+        }
+    }
+    if (slopes.empty()) return {0.0, 0.0};
+
+    std::sort(slopes.begin(), slopes.end());
+    double slope = slopes[slopes.size() / 2];
+
+    std::vector<double> intercepts;
+    for (auto& c : chunks) intercepts.push_back(c.offset - slope * c.time);
+    std::sort(intercepts.begin(), intercepts.end());
+
+    return {slope, intercepts[intercepts.size() / 2]};
+}
+
+
+double snap_ratio(double ratio) {
+    double best = ratio;
+    double closest = 0.004;
+    for (double candidate : FRAMERATE_RATIOS) {
+        double away = std::abs(candidate - ratio);
+        if (away < closest) {
+            closest = away;
+            best = candidate;
+        }
+    }
+    return best;
 }
 
 //  Same idea as best_offset but for a single span, and instead of the best
@@ -301,7 +534,13 @@ std::vector<double> score_curve(const std::pair<int,int>& span, const std::vecto
     std::vector<double> curve;
     bool weighted = reference_weights.size() == reference_spans.size();
 
-    for (int k = 0; k < (int)reference_spans.size(); k++) {
+    // only the spans this cue could ever reach over the window we are drawing. walking all of them cost more than the whole rest of split mode
+    int first = (int)(std::lower_bound(reference_spans.begin(), reference_spans.end(),
+        std::make_pair(span.first + lo, span.first + lo),
+        [](const std::pair<int,int>& a, const std::pair<int,int>& b) { return a.second < b.second; }) - reference_spans.begin());
+
+    for (int k = first; k < (int)reference_spans.size(); k++) {
+        if (reference_spans[k].first > span.second + hi) break;
         int min_length = std::min(reference_spans[k].second - reference_spans[k].first, span.second - span.first);
         int max_length = std::max(reference_spans[k].second - reference_spans[k].first, span.second - span.first);
         if (min_length <= 0) continue;
@@ -352,25 +591,102 @@ std::vector<double> score_curve(const std::pair<int,int>& span, const std::vecto
     return curve;
 }
 
-std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, float p, int base_offset) {
-    // Every span is scored on the same grid of offsets around the one nosplit
-    // already found. Sharing the grid is what makes the indexes comparable
-    // from one span to the next each span having its own base was why the offsets came out wrong before
-    int lo = base_offset - SPLIT_WINDOW_MS;
-    int hi = base_offset + SPLIT_WINDOW_MS;
+// what one cue is worth at one offset. the reference is sorted and does not overlap itself so a binary search finds the few spans that can touch it
+static double span_score(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, int x) {
+    bool weighted = reference_weights.size() == reference_spans.size();
+    int from = span.first + x;
+    int to = span.second + x;
 
-    std::vector<double> t_prev = score_curve(read_srt[0], reference_spans, reference_weights, lo, hi, SPLIT_STEP_MS);
+    int lo = (int)(std::lower_bound(reference_spans.begin(), reference_spans.end(), std::make_pair(from, from),
+        [](const std::pair<int,int>& a, const std::pair<int,int>& b) { return a.second < b.second; }) - reference_spans.begin());
+
+    double total = 0;
+    for (int k = lo; k < (int)reference_spans.size() && reference_spans[k].first < to; k++) {
+        int overlap = std::min(reference_spans[k].second, to) - std::max(reference_spans[k].first, from);
+        if (overlap <= 0) continue;
+
+        int a = reference_spans[k].second - reference_spans[k].first;
+        int b = to - from;
+        int shortest = std::min(a, b);
+        int longest = std::max(a, b);
+        if (shortest <= 0) continue;
+
+        double w = (double)shortest / longest;
+        if (weighted) w *= reference_weights[k];
+        total += w * overlap / shortest;
+    }
+    return total;
+}
+
+// the dp puts a boundary anywhere inside a stretch with no dialogue, because every position there scores the same. slide it to where it actually pays,
+// and when that is still a tie put it in the biggest gap between two cues a film gets recut at a scene change, not in the middle of a conversation
+static void settle_boundaries(std::vector<int>& offsets, const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights) {
+    const int REACH = 60;
+    int n = (int)offsets.size();
+
+    for (int i = 1; i < n; i++) {
+        if (offsets[i] == offsets[i - 1]) continue;
+
+        int before = offsets[i - 1];
+        int after = offsets[i];
+        int from = std::max(1, i - REACH);
+        int to = std::min(n - 1, i + REACH);
+
+        // walking the boundary right moves one cue from the after side to the before side, so the running total only changes by that one cue
+        double running = 0;
+        for (int k = from; k < i; k++) running += span_score(read_srt[k], reference_spans, reference_weights, before);
+        for (int k = i; k <= to; k++) running += span_score(read_srt[k], reference_spans, reference_weights, after);
+
+        double best = running;
+        int at = i;
+        int widest = read_srt[i].first - read_srt[i - 1].second;
+
+        double walk = running;
+        for (int j = i + 1; j <= to; j++) {
+            walk += span_score(read_srt[j - 1], reference_spans, reference_weights, before)
+                  - span_score(read_srt[j - 1], reference_spans, reference_weights, after);
+            int gap = read_srt[j].first - read_srt[j - 1].second;
+            if (walk > best + 1e-9 || (walk > best - 1e-9 && gap > widest)) {
+                best = std::max(best, walk);
+                widest = gap;
+                at = j;
+            }
+        }
+
+        walk = running;
+        for (int j = i - 1; j >= from; j--) {
+            walk += span_score(read_srt[j], reference_spans, reference_weights, after)
+                  - span_score(read_srt[j], reference_spans, reference_weights, before);
+            int gap = read_srt[j].first - read_srt[j - 1].second;
+            if (walk > best + 1e-9 || (walk > best - 1e-9 && gap > widest)) {
+                best = std::max(best, walk);
+                widest = gap;
+                at = j;
+            }
+        }
+
+        for (int k = std::min(at, i); k < std::max(at, i); k++)
+            offsets[k] = (k < at) ? before : after;
+        i = std::max(at, i);
+    }
+}
+
+std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, float p, int base_offset, int window_ms, int step_ms) {
+
+    int lo = base_offset - window_ms;
+    int hi = base_offset + window_ms;
+
+    std::vector<double> t_prev = score_curve(read_srt[0], reference_spans, reference_weights, lo, hi, step_ms);
     std::vector<std::vector<int>> all_to;
 
     for (int n = 1; n < (int)read_srt.size(); n++) {
-        std::vector<double> scores = score_curve(read_srt[n], reference_spans, reference_weights, lo, hi, SPLIT_STEP_MS);
+        if (n % 64 == 0) progress("Looking for cuts", n, (int)read_srt.size());
+        std::vector<double> scores = score_curve(read_srt[n], reference_spans, reference_weights, lo, hi, step_ms);
         std::vector<double> t_new(scores.size(), 0);
         std::vector<int> to(scores.size(), 0);
 
-        // Subtitles are not allowed to swap places. If this span sits at sigma
-        // the one before it can sit anywhere up to sigma plus the gap between
-        // them, so we walk a running best over everything allowed so far
-        int gap = (read_srt[n].first - read_srt[n-1].second) / SPLIT_STEP_MS;
+
+        int gap = (read_srt[n].first - read_srt[n-1].second) / step_ms;
         double s_max = -std::numeric_limits<double>::infinity();
         int s_max_at = 0;
         int reached = -1;
@@ -385,8 +701,11 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
                 }
             }
 
-            // Staying where the previous span sits is free, moving somewhere else costs the split penalty
-            if (t_prev[sigma] >= s_max - p) {
+            if (allowed < 0) {
+                t_new[sigma] = -std::numeric_limits<double>::infinity();
+                to[sigma] = 0;
+            } else if (gap >= 0 && t_prev[sigma] >= s_max - p) {
+                //Staying where the previous cue sits is free, moving somewhere else costs the split penalty
                 t_new[sigma] = scores[sigma] + t_prev[sigma];
                 to[sigma] = sigma;
             } else {
@@ -405,120 +724,32 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
         }
     }
 
-     // Walk the choices back and turn the grid positions into real offsets
     std::vector<int> offsets(read_srt.size());
-    offsets[read_srt.size() - 1] = lo + sigma_best * SPLIT_STEP_MS;
+    offsets[read_srt.size() - 1] = lo + sigma_best * step_ms;
 
     for (int n = all_to.size() - 1; n >= 0; n--) {
         sigma_best = all_to[n][sigma_best];
-        offsets[n] = lo + sigma_best * SPLIT_STEP_MS;
+        offsets[n] = lo + sigma_best * step_ms;
     }
+
+    int from = 0;
+    while (from < (int)offsets.size()) {
+        int to = from;
+        while (to + 1 < (int)offsets.size() && offsets[to + 1] == offsets[from]) to++;
+
+        std::vector<std::pair<int, int>> part;
+        for (int k = from; k <= to; k++)
+            part.push_back({read_srt[k].first + offsets[from], read_srt[k].second + offsets[from]});
+
+        Lock got = best_offset(part, reference_spans, reference_weights);
+        if (std::abs(got.offset) <= 2 * step_ms)
+            for (int k = from; k <= to; k++) offsets[k] += got.offset;
+
+        from = to + 1;
+    }
+
+    settle_boundaries(offsets, read_srt, reference_spans, reference_weights);
+    progress_done();
     return offsets;
 }
 
-/*
-// Finds the offset between the movie and subtitles
-std::tuple<double, double, float> cross_correlation(std::vector<int> activity_profile, std::vector<float> RMS) {
-    // starts checking one minute behind
-    std::vector<double> t_vals, delta_vals, weights;
-    float best_sum = -std::numeric_limits<float>::infinity();
-    float second_best_sum = -std::numeric_limits<float>::infinity();
-    int initial_offset {};
-    int offset_other {};
-    float all_sums = 0;
-    float all_sums_other = 0;
-    int count = 0;
-    int chunk_number = 0;
-    long long activity = 0;
-    int best_chunk_start = 0;
-    long long best_activity = 0;
-
-    for (int c = 45000; c + 90000 <= activity_profile.size(); c += 90000) {
-        long long act = 0;
-        for (int i = c; i < c + 90000; ++i)
-            act += activity_profile[i];
-        if (act > best_activity) {
-            best_activity = act;
-            best_chunk_start = c;
-        }
-    }
-
-    for (int  chunks = 45000; chunks + 90000 <= activity_profile.size(); chunks += 90000) {
-        chunk_number += 1;
-        activity = 0;
-        for (int i = chunks; i < chunks + 90000; ++i)
-            activity += activity_profile[i];
-
-        if (chunk_number == best_chunk_start) {
-            for (int offset = -120000; offset <= 120000; offset += 10) {
-                float sum = 0;
-                int offset_index = offset / 10;
-
-                // The idea is: slide the subtitle timeline over the audio energy profile, multiply
-                // and sum at each offset. Loud audio + subtitle activity aligned = high score.
-                // The offset with the highest score is the sync point.
-
-                for (int i = 0; i < 90000; ++i) {
-                    int rms_index = i - offset_index;
-                    if (rms_index >= 0 && rms_index < RMS.size()) {
-                    sum += activity_profile[i] * RMS[rms_index];
-                    }
-                }
-                if (sum > best_sum) {
-                    best_sum = sum;
-                    initial_offset = offset;
-                } else if (abs(offset - initial_offset) > 1000 && sum > second_best_sum) {
-                    second_best_sum = sum;
-                }
-                all_sums += sum;
-                count++;
-                //if (offset <= -120000 + 200)
-                //    std::cout << "offset: " << offset << " sum: " << sum << " best: " << best_sum << '\n';
-            }
-        float sharpness = best_sum / second_best_sum;
-        std::cout << "t_" << chunk_number << " " << initial_offset << '\n';
-        std::cout << "Activity: " << activity << '\n';
-        std::cout << "Sharpness_" << chunk_number << ": " << sharpness << '\n';
-        t_vals.push_back((chunk_number - 0.5) * 900);
-        delta_vals.push_back(initial_offset / 1000.0);
-        weights.push_back(sharpness);
-        } else {
-            best_sum = -std::numeric_limits<float>::infinity();
-            second_best_sum = -std::numeric_limits<float>::infinity();
-            offset_other = 0;
-
-            for (int offset = -10000; offset <= 10000; offset += 10) {
-                float sum = 0;
-                int offset_index = offset / 10;
-
-                for (int i = chunks; i < chunks + 90000; ++i) {
-                    int rms_index = i - offset_index;
-                    if (rms_index >= 0 && rms_index < RMS.size()) {
-                    sum += activity_profile[i] * RMS[rms_index];
-                    }
-                }
-                if (sum > best_sum) {
-                    best_sum = sum;
-                    offset_other = offset;
-                } else if (abs(offset - offset_other) > 1000 && sum > second_best_sum) {
-                    second_best_sum = sum;
-                }
-            }
-        float sharpness = best_sum / second_best_sum;
-        std::cout << "t_" << chunk_number << " " << offset_other << '\n';
-        std::cout << "Activity_" << chunk_number << ": " << activity << '\n';
-        std::cout << "Sharpness_" << chunk_number << ": " << sharpness << '\n';
-        t_vals.push_back((chunk_number - 0.5) * 900);
-        delta_vals.push_back(offset_other / 1000.0);
-        weights.push_back(sharpness);
-        }
-    }
-
-    auto [slope, intercept] = linear_regression(t_vals, delta_vals, weights);
-    std::cout << "Slope: " << slope << '\n';
-    std::cout << "Intercept: " << intercept << '\n';
-
-    float confidence = best_sum / (all_sums / count);
-    return {slope, intercept, confidence};
-}
-*/

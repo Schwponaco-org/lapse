@@ -14,6 +14,8 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 #include "srt_parser.h"
+#include "charset.h"
+#include "log.h"
 
 // A utf-8 BOM sits in front of the very first line and would otherwise trip up
 // whatever we try to read out of it
@@ -23,6 +25,23 @@ static void strip_bom(std::string& line) {
         (unsigned char)line[1] == 0xBB &&
         (unsigned char)line[2] == 0xBF)
         line.erase(0, 3);
+}
+
+std::string load_text(const std::string& path, Charset* was) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("Cannot open subtitle: " + path);
+
+    in.seekg(0, std::ios::end);
+    std::streamoff bytes = in.tellg();
+    if (bytes > (std::streamoff)MAX_SUBTITLE_BYTES)
+        throw std::runtime_error("That file is " + std::to_string((long long)(bytes / (1024 * 1024))) +
+                                 "MB, which is not a subtitle: " + path);
+    in.seekg(0, std::ios::beg);
+
+    std::string raw((std::istreambuf_iterator<char>(in)), {});
+    Charset how = sniff(raw);
+    if (was) *was = how;
+    return decode(raw, how);
 }
 
 std::string trim(const std::string& s) {
@@ -37,10 +56,11 @@ std::string trim(const std::string& s) {
 // the wild write 0:00:01.00, 00:00:01,000 and 00:01.000 and all of them are
 // supposed to work
 int parse_timestamp(const std::string& line, size_t from) {
-    std::vector<int> parts;
-    int value = 0;
+    std::vector<long long> parts;
+    long long value = 0;
     int digits = 0;
     bool started = false;
+    bool fraction = false;
 
     size_t i = from;
     while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) i++;
@@ -48,11 +68,13 @@ int parse_timestamp(const std::string& line, size_t from) {
     for (; i < line.size(); i++) {
         char c = line[i];
         if (c >= '0' && c <= '9') {
-            value = value * 10 + (c - '0');
+            if (digits < 9) value = value * 10 + (c - '0');
             digits++;
             started = true;
         } else if (started && (c == ':' || c == ',' || c == '.')) {
+            if (parts.size() >= 3) return -1;
             parts.push_back(value);
+            fraction = (c == ',' || c == '.');
             value = 0;
             digits = 0;
         } else {
@@ -64,17 +86,23 @@ int parse_timestamp(const std::string& line, size_t from) {
 
     // Last group is the fraction. Three digits means milliseconds, two means
     // the centiseconds that ass files use
-    int frac = parts.back();
-    parts.pop_back();
-    if (digits == 2) frac *= 10;
-    else if (digits == 1) frac *= 100;
+    long long frac = 0;
+    if (fraction) {
+        frac = parts.back();
+        parts.pop_back();
+        if (digits == 2) frac *= 10;
+        else if (digits == 1) frac *= 100;
+        else for (int d = digits; d > 3; d--) frac /= 10;
+    }
 
     if (parts.size() < 2 || parts.size() > 3) return -1;
-    int sec = parts.back(); parts.pop_back();
-    int min = parts.back(); parts.pop_back();
-    int hour = parts.empty() ? 0 : parts.back();
+    long long sec = parts.back(); parts.pop_back();
+    long long min = parts.back(); parts.pop_back();
+    long long hour = parts.empty() ? 0 : parts.back();
 
-    return hour * 3600000 + min * 60000 + sec * 1000 + frac;
+    long long ms = hour * 3600000 + min * 60000 + sec * 1000 + frac;
+    if (ms < 0 || ms > MAX_TIME_MS) return -1;
+    return (int)ms;
 }
 
 std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
@@ -92,13 +120,18 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
 std::vector<std::pair<int, int>> read_srt(const char* filename) {
     std::vector<std::pair<int, int>> timestamps;
     std::string line {};
-    std::ifstream read_file(filename);
+    std::istringstream read_file(load_text(filename));
     bool first = true;
     while (getline (read_file, line)) {
         if (first) { strip_bom(line); first = false; }
 
         size_t arrow = line.find("-->");
         if (arrow == std::string::npos) continue;
+
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
 
         int start_ms = parse_timestamp(line, 0);
         int end_ms   = parse_timestamp(line, arrow + 3);
@@ -152,7 +185,7 @@ std::pair<int,int> ass_time_columns(const std::string& format_line) {
 std::vector<std::pair<int, int>> read_ass(const char* filename) {
     std::vector<std::pair<int, int>> timestamps;
     std::string line {};
-    std::ifstream read_file(filename);
+    std::istringstream read_file(load_text(filename));
     int start_col = 1;
     int end_col = 2;
     bool first = true;
@@ -166,6 +199,11 @@ std::vector<std::pair<int, int>> read_ass(const char* filename) {
             continue;
         }
         if (line.rfind("Dialogue:", 0) != 0) continue;
+
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
 
         std::vector<size_t> commas = ass_commas(line);
         size_t from, len;
@@ -196,7 +234,7 @@ std::vector<std::pair<int,int>> read_vtt(const char* filename) {
 // Split mode asks for them separately though: when a file jumps halfway through
 // the two halves overlap each other once sorted, and merging across that jump
 // welds cues from either side of it together so they can never come apart again
-std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const std::vector<std::pair<int, int>>& timestamps, bool merge) {
+std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const std::vector<std::pair<int, int>>& timestamps, bool merge, bool sort_by_time) {
     // Sort the cues by time but remember where each one sat in the file the
     // writers go through the file top to bottom and look their span back up
     std::vector<std::pair<std::pair<int,int>, int>> ys;
@@ -208,7 +246,10 @@ std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const
         ys.push_back({{start, end}, i});
     }
 
-    std::sort(ys.begin(), ys.end());
+    // Split mode wants them in the order they appear in the file. Everywhere
+    // else that is the same order, but where a file has been recut the two
+    // disagree, and there the file is the one telling the truth
+    if (sort_by_time) std::sort(ys.begin(), ys.end());
 
     std::vector<std::pair<int,int>> spans;
     std::vector<int> mapping(timestamps.size(), 0);
@@ -223,6 +264,11 @@ std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const
         mapping[ys[i].second] = (int)spans.size() - 1;
         kept[ys[i].second] = true;
     }
+
+    // a sign left up for forty seconds used to outweigh a dozen real lines
+    // just for being long. only the scoring sees this, the file keeps its times
+    for (auto& s : spans)
+        if (s.second - s.first > MAX_CUE_MS) s.second = s.first + MAX_CUE_MS;
 
     // The cues we threw out still take up a line in the file point them at
     // the span before them so the writer keeps shifting them along with it
@@ -265,7 +311,7 @@ std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(
     int frames = 0;
 
     for (int i = 0; i < (int)probability.size(); i++) {
-        bool speech = probability[i] >= 0.25f;
+        bool speech = probability[i] >= SPEECH_THRESHOLD;
 
         if (speech && !check) {
             check = true;
@@ -304,7 +350,9 @@ std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(
     std::vector<std::pair<int, int>> out_spans;
     std::vector<float> out_weights;
     for (int i = 0; i < (int)spans.size(); i++) {
-        if (spans[i].second - spans[i].first >= 100) {
+        // nobody says anything in a fifth of a second - below that it is a
+        // door, a cough, or the vad twitching
+        if (spans[i].second - spans[i].first >= MIN_SPEECH_MS) {
             out_spans.push_back(spans[i]);
             out_weights.push_back(weights[i]);
         }

@@ -28,7 +28,7 @@ extern "C" {
 }
 
 AVFormatContext* open_file(const char* filename);
-int find_audio_stream(const AVFormatContext* pFormatContext);
+int find_audio_stream(const AVFormatContext* pFormatContext, int wanted = -1);
 AVCodecContext* open_audio_decoder(const AVFormatContext* pFormatContext, int audio_stream_index);
-std::vector<std::pair<int, int>> embedded_spans(AVFormatContext* pFormatContext);
-std::vector<float> speech_profile(AVFormatContext* pFormatContext, AVCodecContext* dec_ctx, int audio_stream_index);
+std::vector<std::pair<int, int>> embedded_spans(AVFormatContext* pFormatContext, int wanted = -1);
+std::vector<float> speech_profile(AVFormatContext* pFormatContext, AVCodecContext* dec_ctx, int audio_stream_index, int windows = 0, double* coverage = nullptr);

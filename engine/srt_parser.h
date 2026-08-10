@@ -20,8 +20,10 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
+#include "charset.h"
 
 int parse_timestamp(const std::string& line, size_t from);
+std::string load_text(const std::string& path, Charset* was = nullptr);
 std::string trim(const std::string& s);
 
 std::vector<size_t> ass_commas(const std::string& line);
@@ -32,6 +34,15 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path);
 std::vector<std::pair<int, int>> read_srt(const char* filename);
 std::vector<std::pair<int, int>> read_ass(const char* filename);
 std::vector<std::pair<int,int>> read_vtt(const char* filename);
-std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const std::vector<std::pair<int, int>>& timestamps, bool merge = true);
+std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const std::vector<std::pair<int, int>>& timestamps, bool merge = true, bool sort_by_time = true);
+const float SPEECH_THRESHOLD = 0.25f;
+const int MIN_CUES = 10;
+const int MIN_SPEECH_MS = 200;
+const int MAX_CUE_MS = 10000;
+
+const int MAX_TIME_MS = 24 * 3600 * 1000;
+const int MAX_CUES = 100000;
+const size_t MAX_SUBTITLE_BYTES = 64u * 1024 * 1024;
+
 std::vector<int> activity(const std::vector<std::pair<int, int>>& spans);
 std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(const std::vector<float>& probability);

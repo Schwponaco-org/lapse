@@ -1,136 +1,212 @@
+# LAPSE - Language-Agnostic subtitle synchronization engine
+# Copyright (C) 2026 Rasmus Stisen Jensen (rs-jensen)
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
 name: Release
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+
+env:
+  ORT_VERSION: 1.28.0
+
 jobs:
-  build:
+  unix:
+    name: ${{ matrix.name }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - arch: amd64
+          - name: linux-amd64
             os: ubuntu-latest
-          - arch: arm64
+            ort: linux-x64
+          - name: linux-arm64
             os: ubuntu-24.04-arm
+            ort: linux-aarch64
+          - name: macos-arm64
+            os: macos-14
+            ort: osx-arm64
+            deployment: '11.0'
+          - name: macos-x86_64
+            os: macos-15-intel
+            ort: osx-x86_64
+            ort_version: '1.22.0'
+            deployment: '10.15'
     runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install build tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential autoconf automake libtool pkg-config \
-            nasm yasm libfftw3-dev zlib1g-dev
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y build-essential autoconf automake libtool \
+              pkg-config nasm yasm zlib1g-dev
+          else
+            for pkg in nasm automake autoconf libtool pkg-config; do
+              brew list --formula "$pkg" > /dev/null 2>&1 || brew install "$pkg"
+            done
+          fi
 
-      - name: Build FFmpeg 7.x static
+      - name: Build FFmpeg, FFTW and libfvad
         run: |
-          wget -q https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz
-          tar xf ffmpeg-7.1.tar.xz
-          cd ffmpeg-7.1
-          ./configure \
-            --prefix=/opt/ffmpeg \
-            --enable-static \
-            --disable-shared \
-            --disable-programs \
-            --disable-doc \
-            --disable-debug \
-            --disable-everything \
-            --enable-avformat \
-            --enable-avcodec \
-            --enable-avutil \
-            --enable-swresample \
-            --enable-demuxer=matroska,mov,avi,mp4,ogg,wav,flac,aac \
-            --enable-decoder=aac,ac3,eac3,mp3,flac,vorbis,opus,dca,truehd,pcm_s16le,pcm_s16be,pcm_s24le,pcm_f32le,pcm_f32be \
-            --enable-parser=aac,mp3,flac,vorbis,opus,ac3 \
-            --enable-protocol=file
-          make -j$(nproc)
-          sudo make install
-
-      - name: Verify FFmpeg static build
-        run: |
-          for lib in libavformat libavcodec libavutil libswresample; do
-            if [ ! -f "/opt/ffmpeg/lib/${lib}.a" ]; then
-              echo "Missing /opt/ffmpeg/lib/${lib}.a — static FFmpeg build failed"
-              exit 1
-            fi
-          done
-          ls -la /opt/ffmpeg/lib/*.a
-
-      - name: Build libfvad static
-        run: |
-          git clone https://github.com/dpirch/libfvad.git
-          cd libfvad
-          autoreconf -i
-          ./configure --prefix=/opt/libfvad --enable-static --disable-shared
-          make
-          sudo make install
-
-      - name: Fetch ONNX Runtime and the Silero model
-        run: |
-          if [ "${{ matrix.arch }}" = "amd64" ]; then ORT_ARCH=x64; else ORT_ARCH=aarch64; fi
-          wget -q https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}.tgz
-          tar xf onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}.tgz
-          cp onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} \
-             libonnxruntime-linux-${{ matrix.arch }}.so
-          wget -q -O silero_vad.onnx \
-            https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx
-          ls -la libonnxruntime-linux-${{ matrix.arch }}.so silero_vad.onnx
-        env:
-          ORT_VERSION: 1.28.0
+          .github/scripts/build-ffmpeg.sh "$HOME/deps"
+          .github/scripts/build-fftw.sh "$HOME/deps"
+          .github/scripts/build-libfvad.sh "$HOME/deps"
 
       - name: Build lapse
-        run: |
-          cd engine
-          g++ -O2 -std=c++20 \
-            -I/opt/ffmpeg/include \
-            -I/opt/libfvad/include \
-            -o lapse-linux-${{ matrix.arch }} \
-            main.cpp correlate.cpp decoder.cpp srt_parser.cpp write_subtitle.cpp silero.cpp \
-            -static-libgcc -static-libstdc++ \
-            /opt/ffmpeg/lib/libavformat.a \
-            /opt/ffmpeg/lib/libavcodec.a \
-            /opt/ffmpeg/lib/libswresample.a \
-            /opt/ffmpeg/lib/libavutil.a \
-            /opt/libfvad/lib/libfvad.a \
-            -Wl,-Bstatic -lfftw3 -Wl,-Bdynamic \
-            -lm -lpthread -lz -ldl
+        run: .github/scripts/build-lapse.sh "$HOME/deps" stage/lapse
 
-      - name: Check that the binary starts without onnxruntime beside it
+      - name: Check it works with nothing beside it
         run: |
-          cd engine
-          ./lapse-linux-${{ matrix.arch }} --formats
+          stage/lapse --formats
+          .github/scripts/smoke-engine.sh stage/lapse
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Fetch onnxruntime and the Silero model
+        run: |
+          .github/scripts/fetch-onnxruntime.sh \
+            ${{ matrix.ort }} "${{ matrix.ort_version || env.ORT_VERSION }}" stage
+
+      - name: Check Silero is picked up now it is there
+        run: |
+          if [ "$(stage/lapse --vad)" != "silero" ]; then
+            echo "onnxruntime was shipped but the binary did not load it"
+            exit 1
+          fi
+
+      - name: Package
+        run: |
+          .github/scripts/package.sh lapse-${{ matrix.name }} stage dist
+          cp stage/lapse dist/lapse-${{ matrix.name }}
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: lapse-linux-${{ matrix.arch }}
-          path: |
-            engine/lapse-linux-${{ matrix.arch }}
-            libonnxruntime-linux-${{ matrix.arch }}.so
-            silero_vad.onnx
+          name: lapse-${{ matrix.name }}
+          path: dist/*
+
+  windows:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            msystem: MINGW64
+            pkgprefix: mingw-w64-x86_64
+            ort: win-x64
+            cc: gcc
+            cxx: g++
+            windres: windres
+          - name: windows-arm64
+            os: windows-11-arm
+            msystem: CLANGARM64
+            pkgprefix: mingw-w64-clang-aarch64
+            ort: win-arm64
+            cc: clang
+            cxx: clang++
+            windres: llvm-windres
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+      WINDRES: ${{ matrix.windres }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            base-devel git make diffutils curl tar xz zip unzip nasm
+            autoconf automake libtool
+            ${{ matrix.pkgprefix }}-toolchain
+            ${{ matrix.pkgprefix }}-zlib
+
+      - name: Build FFmpeg, FFTW and libfvad
+        run: |
+          .github/scripts/build-ffmpeg.sh "$HOME/deps"
+          .github/scripts/build-fftw.sh "$HOME/deps"
+          .github/scripts/build-libfvad.sh "$HOME/deps"
+
+      - name: Build lapse
+        run: .github/scripts/build-lapse.sh "$HOME/deps" stage/lapse.exe
+
+      - name: Check it works with nothing beside it
+        run: |
+          stage/lapse.exe --formats
+          .github/scripts/smoke-engine.sh stage/lapse.exe
+
+      - name: Check nothing outside Windows itself is linked in
+        run: |
+          dump=$(command -v objdump || command -v llvm-objdump || true)
+          if [ -z "$dump" ]; then exit 0; fi
+          "$dump" -p stage/lapse.exe | grep -i 'DLL Name'
+          if "$dump" -p stage/lapse.exe | grep -iE 'DLL Name:.*(libgcc|libstdc|libc\+\+|libwinpthread|libfftw|msys-)'; then
+            echo "the binary still needs a DLL from the build environment"
+            exit 1
+          fi
+
+      - name: Fetch onnxruntime and the Silero model
+        run: |
+          .github/scripts/fetch-onnxruntime.sh \
+            ${{ matrix.ort }} "${{ matrix.ort_version || env.ORT_VERSION }}" stage
+
+      - name: Check Silero is picked up now it is there
+        run: |
+          if [ "$(stage/lapse.exe --vad)" != "silero" ]; then
+            echo "onnxruntime was shipped but the binary did not load it"
+            exit 1
+          fi
+
+      - name: Package
+        run: |
+          .github/scripts/package.sh lapse-${{ matrix.name }} stage dist
+          cp stage/lapse.exe dist/lapse-${{ matrix.name }}.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lapse-${{ matrix.name }}
+          path: dist/*
 
   release:
-    needs: build
+    needs: [unix, windows]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-      - name: Collect files
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect the files
         run: |
           mkdir -p out
-          cp lapse-linux-amd64/engine/lapse-linux-amd64 out/
-          cp lapse-linux-arm64/engine/lapse-linux-arm64 out/
-          cp lapse-linux-amd64/libonnxruntime-linux-amd64.so out/
-          cp lapse-linux-arm64/libonnxruntime-linux-arm64.so out/
-          cp lapse-linux-amd64/silero_vad.onnx out/
-          ls -la out
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+          find artifacts -type f -exec cp {} out/ \;
+          cd out
+          sha256sum * > ../SHA256SUMS
+          mv ../SHA256SUMS .
+          ls -la
+
+      - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            out/lapse-linux-amd64
-            out/lapse-linux-arm64
-            out/libonnxruntime-linux-amd64.so
-            out/libonnxruntime-linux-arm64.so
-            out/silero_vad.onnx
+          files: out/*
+          generate_release_notes: true

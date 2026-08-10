@@ -13,28 +13,20 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-services:
-  lapse:
-    container_name: lapse
-    image: ghcr.io/rs-jensen/lapse:latest
-    restart: always
-    ulimits:
-      core: 0
-    tmpfs:
-      - /tmp
-    volumes:
-      - ./data:/data
-      - /mnt/media:/media
-    environment:
-      - MEDIA_ROOT=/media
-      - DB_PATH=/data/lapse.db
-      - LAPSE_BIN=/app/lapse
-      - PUID=1000
-      - PGID=1000
-      - MODE=auto
-      - PENALTY=6
-      - SCAN_INTERVAL=900
-      - MIN_CONFIDENCE=0
-      - MAX_ATTEMPTS=3
-      - TIMEOUT=1800
-      - POLLING=0
+# Prints how far the worst cue in the first file is from the second one
+
+import re
+import sys
+
+
+def starts(path):
+    text = open(path, encoding="utf-8", errors="replace").read()
+    found = re.findall(r"(\d+):(\d\d):(\d\d)[,.](\d\d\d)\s*-->", text)
+    return [((int(h) * 60 + int(m)) * 60 + int(s)) * 1000 + int(ms) for h, m, s, ms in found]
+
+
+got, want = starts(sys.argv[1]), starts(sys.argv[2])
+if not got or len(got) != len(want):
+    print(999999)
+else:
+    print(max(abs(a - b) for a, b in zip(got, want)))
