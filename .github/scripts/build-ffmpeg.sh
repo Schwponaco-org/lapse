@@ -22,9 +22,28 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
 
-curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${VERSION}.tar.xz"
-tar xf ffmpeg.tar.xz
-cd "ffmpeg-${VERSION}"
+for url in "https://ffmpeg.org/releases/ffmpeg-${VERSION}.tar.xz" \
+           "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n${VERSION}.tar.gz"; do
+    echo "Fetching $url"
+    if curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 \
+            -o ffmpeg.tar "$url"; then
+        break
+    fi
+    rm -f ffmpeg.tar
+done
+
+if [ ! -s ffmpeg.tar ]; then
+    echo "Could not download FFmpeg ${VERSION} from any mirror"
+    exit 1
+fi
+
+tar xf ffmpeg.tar
+SRC=$(ls -d "ffmpeg-${VERSION}" "FFmpeg-n${VERSION}" 2>/dev/null | head -1)
+if [ -z "$SRC" ]; then
+    echo "The FFmpeg archive did not unpack into a directory we recognise"
+    exit 1
+fi
+cd "$SRC"
 
 TOOLS=""
 if [ -n "$CC" ]; then
