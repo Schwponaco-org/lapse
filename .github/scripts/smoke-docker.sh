@@ -68,12 +68,16 @@ if docker logs $CONTAINER 2>&1 | grep -q "@eaDir"; then
     exit 1
 fi
 
-if ! docker logs $CONTAINER 2>&1 | grep -q "Using embedded subtitle track"; then
+if ! docker logs $CONTAINER 2>&1 | grep -q "reference=embedded"; then
     echo "FAIL: the film with a subtitle track inside it was synced off the audio"
     exit 1
 fi
-if ! docker logs $CONTAINER 2>&1 | grep -q "Silero VAD"; then
-    echo "FAIL: the films without a track did not reach Silero"
+if ! docker logs $CONTAINER 2>&1 | grep -q "reference=vad"; then
+    echo "FAIL: the films without a track were not synced off their audio"
+    exit 1
+fi
+if [ "$(docker run --rm --entrypoint /app/lapse $IMAGE --vad)" != "silero" ]; then
+    echo "FAIL: the image does not carry a Silero the engine can load"
     exit 1
 fi
 echo "both references were used, the embedded track and the audio"
@@ -81,7 +85,7 @@ echo "both references were used, the embedded track and the audio"
 echo "== dropping a new episode in while it runs"
 docker run --rm -v $MEDIA:/media -v "$SCRIPTS:/scripts:ro" --entrypoint /scripts/make-media.sh $IMAGE extra
 wait_for "Show.S01E03.english.srt"
-wait_for "Done (nosplit)"
+wait_for "Show.S01E03.english.srt: "
 sleep 5
 docker run --rm -v $DATA:/data -v $MEDIA:/media -v "$SCRIPTS:/scripts:ro" \
     --entrypoint python3 $IMAGE /scripts/check-db.py extra

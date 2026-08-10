@@ -26,8 +26,13 @@ curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 -o 
 tar xf ffmpeg.tar.xz
 cd "ffmpeg-${VERSION}"
 
+TOOLS=""
+if [ -n "$CC" ]; then TOOLS="--cc=$CC"; fi
+if [ -n "$CXX" ]; then TOOLS="$TOOLS --cxx=$CXX"; fi
+
 ./configure \
     --prefix="$PREFIX" \
+    $TOOLS \
     --enable-static \
     --disable-shared \
     --disable-programs \
