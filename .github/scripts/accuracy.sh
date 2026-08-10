@@ -44,7 +44,9 @@ speech() {
         echo "SKIP: no espeak-ng and no say, cannot make speech"
         exit 0
     fi
-    ffmpeg -v error -y -i line.wav -ar 16000 -ac 1 spoken.wav
+    trim="silenceremove=start_periods=1:start_threshold=-40dB:detection=peak"
+    ffmpeg -v error -y -i line.wav -ar 16000 -ac 1 \
+        -af "${trim},areverse,${trim},areverse" spoken.wav
     mv spoken.wav line.wav
 }
 

@@ -22,7 +22,7 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
 
-curl -fsSL -o fftw.tar.gz "https://www.fftw.org/fftw-${VERSION}.tar.gz"
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 -o fftw.tar.gz "https://www.fftw.org/fftw-${VERSION}.tar.gz"
 tar xf fftw.tar.gz
 cd "fftw-${VERSION}"
 

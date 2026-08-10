@@ -302,9 +302,9 @@ def run_sync(video_path, srt_path):
     if not values:
         raise RuntimeError((result.stderr or "").strip() or "lapse said nothing")
 
-    print("%s: %s offset=%sms sigma=%.1f agree=%.2f" % (
+    print("%s: %s offset=%sms sigma=%.1f agree=%.2f reference=%s" % (
         os.path.basename(srt_path), values.get("verdict"), values.get("offset_ms"),
-        values.get("sigma", 0), values.get("agreement", 0)))
+        values.get("sigma", 0), values.get("agreement", 0), values.get("reference")))
     return values
 
 

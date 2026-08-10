@@ -12,7 +12,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
-#
+
 
 
 cmake_minimum_required(VERSION 3.22)
@@ -58,9 +58,9 @@ if(LAPSE_DEPS_PREFIX)
         list(APPEND FFMPEG_PREFIX_LIBRARIES "${FFMPEG_${lib}_LIBRARY}")
     endforeach()
     if(FFMPEG_INCLUDE_DIR AND NOT "FFMPEG_avformat_LIBRARY-NOTFOUND" IN_LIST FFMPEG_PREFIX_LIBRARIES
-       AND NOT "FFMPEG_avcodec_LIBRARY-NOTFOUND" IN_LIST FFMPEG_PREFIX_LIBRARIES
-       AND NOT "FFMPEG_swresample_LIBRARY-NOTFOUND" IN_LIST FFMPEG_PREFIX_LIBRARIES
-       AND NOT "FFMPEG_avutil_LIBRARY-NOTFOUND" IN_LIST FFMPEG_PREFIX_LIBRARIES)
+        AND NOT "FFMPEG_avcodec_LIBRARY-NOTFOUND" IN_LIST FFMPEG_PREFIX_LIBRARIES
+        AND NOT "FFMPEG_swresample_LIBRARY-NOTFOUND" IN_LIST FFMPEG_PREFIX_LIBRARIES
+        AND NOT "FFMPEG_avutil_LIBRARY-NOTFOUND" IN_LIST FFMPEG_PREFIX_LIBRARIES)
         set(FFMPEG_FROM_PREFIX TRUE)
     endif()
 endif()
@@ -136,7 +136,6 @@ elseif(LAPSE_FETCH_MISSING)
     FetchContent_MakeAvailable(fftw3)
     set(BUILD_SHARED_LIBS "${lapse_shared_was}" CACHE BOOL "" FORCE)
     unset(CMAKE_POLICY_VERSION_MINIMUM)
-    # its own include directories are install-time only
     target_include_directories(lapse_fftw3 INTERFACE "${fftw3_SOURCE_DIR}/api")
     target_link_libraries(lapse_fftw3 INTERFACE fftw3)
     set(LAPSE_FFTW3_FROM "built here (3.3.10)")
@@ -197,7 +196,6 @@ elseif(LAPSE_FETCH_MISSING)
     target_include_directories(fvad
         PUBLIC  "${libfvad_SOURCE_DIR}/include"
         PRIVATE "${libfvad_SOURCE_DIR}/src")
-    # C11 rather than C99, it uses static_assert
     set_target_properties(fvad PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 
     target_link_libraries(lapse_fvad INTERFACE fvad)
@@ -230,12 +228,10 @@ find_package(Threads REQUIRED)
 target_link_libraries(lapse PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 
 if(UNIX AND NOT APPLE)
-    # static FFmpeg and FFTW both want libm spelled out, macOS has it in libSystem
     target_link_libraries(lapse PRIVATE m)
 endif()
 
-# zlib comes in for static FFmpeg. on a static build take the .a, an import
-# library here would put a zlib1.dll next to the binary at the last moment
+
 if(LAPSE_STATIC_DEPS)
     set(lapse_suffixes_was "${CMAKE_FIND_LIBRARY_SUFFIXES}")
     set(CMAKE_FIND_LIBRARY_SUFFIXES .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
