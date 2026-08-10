@@ -1,3 +1,4 @@
+#!/bin/bash
 # LAPSE - Language-Agnostic subtitle synchronization engine
 # Copyright (C) 2026 Rasmus Stisen Jensen (rs-jensen)
 # This program is free software: you can redistribute it and/or modify
@@ -12,29 +13,29 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
+# Usage: package.sh <name> <stage-dir> <out-dir>
+set -e
 
-services:
-  lapse:
-    container_name: lapse
-    image: ghcr.io/rs-jensen/lapse:latest
-    restart: always
-    ulimits:
-      core: 0
-    tmpfs:
-      - /tmp
-    volumes:
-      - ./data:/data
-      - /mnt/media:/media
-    environment:
-      - MEDIA_ROOT=/media
-      - DB_PATH=/data/lapse.db
-      - LAPSE_BIN=/app/lapse
-      - PUID=1000
-      - PGID=1000
-      - MODE=auto
-      - PENALTY=6
-      - SCAN_INTERVAL=900
-      - MIN_CONFIDENCE=0
-      - MAX_ATTEMPTS=3
-      - TIMEOUT=1800
-      - POLLING=0
+NAME=${1:?usage: package.sh <name> <stage-dir> <out-dir>}
+STAGE=${2:?usage: package.sh <name> <stage-dir> <out-dir>}
+OUT=${3:?usage: package.sh <name> <stage-dir> <out-dir>}
+
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+STAGE=$(cd "$STAGE" && pwd)
+mkdir -p "$OUT"
+OUT=$(cd "$OUT" && pwd)
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+cp -R "$STAGE" "$WORK/$NAME"
+cp "$ROOT/LICENSE" "$ROOT/README.md" "$WORK/$NAME/"
+chmod +x "$WORK/$NAME"/lapse* 2>/dev/null || true
+
+cd "$WORK"
+case "$NAME" in
+    *windows*) zip -qr "$OUT/$NAME.zip" "$NAME" ;;
+    *)         tar czf "$OUT/$NAME.tar.gz" "$NAME" ;;
+esac
+
+ls -la "$OUT"

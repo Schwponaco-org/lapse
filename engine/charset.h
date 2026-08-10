@@ -16,21 +16,19 @@
 #pragma once
 #include <string>
 
-// Silero wants 512 samples at a time when it is fed 16kHz audio
-const int SILERO_WINDOW = 512;
-const int SILERO_RATE = 16000;
-
-bool silero_open();
-void silero_close();
-
-// the model does not care how many streams you hand it at once and the per call
-// overhead is most of the cost, so a film gets cut into lanes and they all walk
-// forward together. silero_begin returns how many lanes it actually got
-#include <vector>
-struct Lanes {
-    int count = 0;
-    std::vector<float> state, context, window;
+// what the file was when we picked it up so we can put it back the same way.
+// legacy is any ascii compatible codepage - cp1251, gbk, big5, sjis. we never
+// need to know which: we only touch the digits in a timestamp and those are
+// ascii everywhere, the rest of the line goes back out untouched
+enum class Charset {
+    Legacy,
+    Utf8Bom,
+    Utf16Le,
+    Utf16LeBom,
+    Utf16Be,
+    Utf16BeBom
 };
 
-int silero_begin(Lanes& run, int lanes);
-bool silero_step(Lanes& run, const float* lanes_pcm, float* out);
+Charset sniff(const std::string& raw);
+std::string decode(const std::string& raw, Charset how);
+std::string encode(const std::string& utf8, Charset how);
