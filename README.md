@@ -4,7 +4,7 @@
 
 Automatically fixes subtitle sync in your media library. Detects how far off your subtitles are and corrects them, including linear drift caused by framerate mismatches between the video and the subtitle file.
 
-A Jellyfin plugin is available at [rs-jensen/lapse-jellyfin-plugin](https://github.com/rs-jensen/lapse-jellyfin-plugin) for direct integration with your media server.
+A Jellyfin plugin is available at [r-stisen/lapse-jellyfin-plugin](https://github.com/r-stisen/lapse-jellyfin-plugin) for direct integration with your media server.
 
 The `lapse` binary is a C++ engine built on FFmpeg, libfvad and FFTW3, and it syncs one file at a time. The Docker image wraps that engine with a Python watcher that scans your library, matches subtitles to video and keeps a SQLite record so nothing gets processed twice. Run the binary by hand for a single file, or run the container to keep a whole library synced on its own.
 
@@ -89,7 +89,7 @@ The Docker image includes the C++ binary and the Python file watcher. Point it a
 ```yaml
 services:
   lapse:
-    image: ghcr.io/rs-jensen/lapse:latest
+    image: ghcr.io/r-stisen/lapse:latest
     restart: always
     volumes:
       - ./data:/data
