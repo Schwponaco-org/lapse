@@ -243,7 +243,7 @@ where it should be. Best value in each row is in bold.
 | Requiem for a Dream   | shift -33000ms | 2113ms      | YES | 140672ms     | no  | **1790ms**   | YES |
 | Saving Private Ryan   | drift x1.00100 | 3646ms      | YES | 3574ms       | YES | **3525ms**   | YES |
 | Seven Samurai         | drift x1.04167 | 60ms        | YES | 38ms         | YES | **0ms**      | YES |
-| Stalker               | shift +52500ms | 89302ms     | YES | 101286ms     | YES | **0ms**      | no  |
+| Stalker               | shift +52500ms | 89302ms     | no | 101286ms     | YES | **0ms**      | no  |
 | The Seventh Seal      | shift +33000ms | 58ms        | YES | **26ms**     | YES | **0ms**      | YES |
 | Uncut Gems            | shift -33000ms | 16076ms     | YES | 16105ms      | YES | **16054ms**  | YES |
 | Whiplash              | shift +38500ms | 266ms       | YES | 172ms        | YES | **170ms**    | YES |
