@@ -272,7 +272,7 @@ lapse/
 
 Planned to support: `.sup`, `.idx/.sub`, `.sub`, `.smi`, `.ttml`/`.dfxp`, `.sbv`, embedded MKV/MP4 tracks via mkvmerge/ffmpeg.
 
-Run `lapse --formats` to print the subtitle formats your binary can read, one per line.
+Run `lapse --formats` to print the subtitle formats your binary can read, one per line
 
 ---
 
