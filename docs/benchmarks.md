@@ -75,8 +75,8 @@ same table.
 | Correct framerate drift                      | yes                 | yes            | yes                  |
 | Split the file into segments                 | yes                 | yes            | yes                  |
 | Read an embedded subtitle track as reference | yes, automatic      | no             | yes, with a flag     |
-| **Decide per file whether to split**         | **yes**             | no, always on  | no, off unless asked |
-| **Pick the split penalty itself**            | **yes**             | no, fixed at 7 | no, supplied by hand |
+| **Decide per file whether to split**         | **yes**             | yes            | no, off unless asked |
+| **Pick the split penalty itself**            | **yes**             | no             | no, supplied by hand |
 | **Report a confidence verdict**              | **yes, always**     | no             | a score in the log   |
 | **Leave the file alone when unsure**         | **yes, by default** | no             | only with a flag     |
 | **Reuse the speech profile next run**        | **yes, automatic**  | no             | no                   |
