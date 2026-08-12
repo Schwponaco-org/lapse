@@ -367,7 +367,7 @@ only one that left the original alone. `Manchester by the Sea` reported
 ## Wrong subtitle
 
 A subtitle for a documentary about Oppenheimer, run against the film
-`Oppenheimer`.
+`Oppenheimer`
 
 | Tool      | Time   | What it worked out                                          | What happened to the file                                                                                                |
 | --------- | ------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
