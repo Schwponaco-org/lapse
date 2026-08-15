@@ -172,7 +172,7 @@ Sync with split mode for director's cuts or ad-break versions:
 ./lapse video.mkv subtitles.srt split 6
 ```
 
-The fourth argument is the split penalty. A value of 6 is a good default. Higher values produce fewer splits. Leave the mode off and LAPSE decides for itself whether the file needs shifting, drifting, splitting, or some combination (`auto` mode).
+The fourth argument is the split penalty. A value of 6 is a good default. Higher values produce fewer splits. Leave the mode off and LAPSE decides for itself whether the file needs shifting, drifting, splitting, or some combination (`auto` mode)
 
 ### Output options
 
