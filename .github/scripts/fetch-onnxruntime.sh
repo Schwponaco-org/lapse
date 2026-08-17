@@ -36,7 +36,11 @@ DIR="onnxruntime-${TARGET}-${VERSION}"
 case "$TARGET" in
     win-*)
         curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 -o ort.zip "${BASE}/${DIR}.zip"
-        unzip -q ort.zip "${DIR}/lib/onnxruntime.dll"
+        # MSYS2's unzip has been seen mangling this binary, likely a text mode line
+        # ending conversion, so extract it with Windows' own tool instead
+        pwsh=powershell.exe
+        command -v "$pwsh" > /dev/null 2>&1 || pwsh="/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+        "$pwsh" -NoProfile -Command "Expand-Archive -LiteralPath '$(cygpath -w "$PWD/ort.zip")' -DestinationPath '$(cygpath -w "$PWD")' -Force"
         cp "${DIR}/lib/onnxruntime.dll" "$DEST/onnxruntime.dll"
         ;;
     osx-*)
