@@ -579,7 +579,7 @@ int run(int argc, const char *argv[]) {
             write_offsets(input_path, output_path, slope, offs, map);
         }
         report(card);
-        return (verdict == Verdict::Unsure && !force) ? 3 : 0;
+        return (verdict != Verdict::Solid && !force) ? 3 : 0;
     };
 
     auto save_ols = [&](double slope, double intercept, Verdict verdict) {
@@ -598,7 +598,7 @@ int run(int argc, const char *argv[]) {
                 write_vtt_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
         }
         report(card);
-        return (verdict == Verdict::Unsure && !force) ? 3 : 0;
+        return (verdict != Verdict::Solid && !force) ? 3 : 0;
     };
 
     if (mode == "ols") {
