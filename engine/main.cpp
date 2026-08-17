@@ -306,6 +306,7 @@ static void report(const Report& r) {
 void usage() {
     std::cerr << "Usage: lapse <video_or_subtitle> <subtitle> [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N]\n";
     std::cerr << "       --confidence N   how far the answer has to stand out before the original is overwritten (default " << sure_sigma << ")\n";
+    std::cerr << "       lapse --version\n";
     std::cerr << "       lapse --formats\n";
     std::cerr << "       lapse --vad\n";
     std::cerr << "       lapse --undo <subtitle>\n";
@@ -354,6 +355,9 @@ int run(int argc, const char *argv[]) {
         } else if (arg == "--undo") {
             if (i + 1 >= argc) { usage(); return -1; }
             return restore_backup(argv[++i]) ? 0 : 1;
+        } else if (arg == "--version") {
+            std::cout << LAPSE_VERSION << '\n';
+            return 0;
         } else if (arg == "--formats") {
             for (auto& ext : subtitle_formats)
                 std::cout << ext << '\n';

@@ -222,6 +222,7 @@ add_executable(lapse
 
 target_compile_features(lapse PRIVATE cxx_std_20)
 target_include_directories(lapse PRIVATE engine)
+target_compile_definitions(lapse PRIVATE LAPSE_VERSION="${PROJECT_VERSION}")
 target_link_libraries(lapse PRIVATE lapse_ffmpeg lapse_fftw3 lapse_fvad)
 
 find_package(Threads REQUIRED)
