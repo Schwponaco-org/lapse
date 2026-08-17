@@ -89,7 +89,7 @@ The Docker image includes the C++ binary and the Python file watcher. Point it a
 ```yaml
 services:
   lapse:
-    image: ghcr.io/r-stisen/lapse:latest
+    image: ghcr.io/schwponaco-org/lapse:latest
     restart: always
     volumes:
       - ./data:/data
