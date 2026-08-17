@@ -77,7 +77,9 @@ static library_handle load_from(const std::filesystem::path& path) {
     std::filesystem::path full = std::filesystem::absolute(path, ec);
     if (ec) full = path;
 #ifdef _WIN32
-    return LoadLibraryExW(full.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    library_handle handle = LoadLibraryExW(full.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    if (!handle) say() << "Silero VAD: LoadLibrary(" << full.string() << ") failed, error " << GetLastError() << '\n';
+    return handle;
 #else
     return dlopen(full.string().c_str(), RTLD_LAZY | RTLD_LOCAL);
 #endif
