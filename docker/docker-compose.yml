@@ -16,7 +16,7 @@
 services:
   lapse:
     container_name: lapse
-    image: ghcr.io/r-stisen/lapse:latest
+    image: ghcr.io/schwponaco-org/lapse:latest
     restart: always
     ulimits:
       core: 0
