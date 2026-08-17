@@ -197,7 +197,7 @@ By default LAPSE overwrites the subtitle file it was given and leaves a `.bak` n
 
 `--undo <subtitle>` puts the `.bak` back and removes it.
 
-Two flags answer a question and exit instead of syncing anything. `--formats` lists the subtitle extensions the engine reads and writes, and `--vad` prints `silero` or `libfvad` depending on which detector this copy can reach, exiting non-zero on the fallback.
+Three flags answer a question and exit instead of syncing anything. `--version` prints the version number, `--formats` lists the subtitle extensions the engine reads and writes, and `--vad` prints `silero` or `libfvad` depending on which detector this copy can reach, exiting non-zero on the fallback.
 
 Together they cover the four ways a caller may want the output handled:
 
