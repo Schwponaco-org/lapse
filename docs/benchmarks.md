@@ -5,6 +5,12 @@ one test with a subtitle file that belongs to a different film entirely.
 
 ## Read this before the tables
 
+***Note: LAPSE has since received significant changes that improve both
+accuracy and speed, so its current results are likely better than the numbers
+below. ffsubsync is still under active development, so its numbers may have
+shifted too. alass sees little to no maintenance these days, so its numbers
+here should still be a reasonably accurate picture.***
+
 **The films were picked to be hard.** They are not a random sample. They were
 chosen out of an ordinary home library for the traits that give a subtitle
 sync tool trouble: long running times, long stretches with no dialogue, heavy
