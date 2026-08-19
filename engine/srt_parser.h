@@ -30,10 +30,16 @@ std::vector<size_t> ass_commas(const std::string& line);
 bool ass_field(const std::string& line, const std::vector<size_t>& commas, int index, size_t& from, size_t& len);
 std::pair<int,int> ass_time_columns(const std::string& format_line);
 
+bool sub_frames(const std::string& line, long long& a, long long& b, size_t& text_from);
+double sub_fps(const std::string& text);
+void set_sub_fps(double fps);
+int frames_to_ms(long long frame, double fps);
+
 std::vector<std::pair<int,int>> read_subtitle(const std::string& path);
 std::vector<std::pair<int, int>> read_srt(const char* filename);
 std::vector<std::pair<int, int>> read_ass(const char* filename);
 std::vector<std::pair<int,int>> read_vtt(const char* filename);
+std::vector<std::pair<int,int>> read_sub(const char* filename);
 std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const std::vector<std::pair<int, int>>& timestamps, bool merge = true, bool sort_by_time = true);
 const float SPEECH_THRESHOLD = 0.25f;
 const int MIN_CUES = 10;

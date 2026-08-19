@@ -35,13 +35,38 @@
 
 // The formats the parsers and the writers both handle. Callers can ask for the
 // list with --formats so they know what is safe to hand us
-const char* subtitle_formats[] = {".srt", ".ass", ".ssa", ".vtt"};
+const char* subtitle_formats[] = {".srt", ".ass", ".ssa", ".vtt", ".sub"};
 
 bool is_subtitle(const std::string& path) {
     for (auto& ext : subtitle_formats)
         if (path.size() > strlen(ext) && path.substr(path.size() - strlen(ext)) == ext)
             return true;
     return false;
+}
+
+// Nobody said what rate the frames count in and there is no video to ask. Both
+// files cover the same film though, so how long each of them runs for gives it
+// away, near enough to tell the handful of rates anyone ever used apart
+static double fps_from_length(const std::string& sub_path, const std::string& other_path) {
+    static const double rates[] = {23.976, 24, 25, 29.97, 30};
+
+    set_sub_fps(25);        // provisional, it is a ratio so this cancels out
+    auto [ours, _o] = process_spans(read_subtitle(sub_path));
+    auto [theirs, _t] = process_spans(read_subtitle(other_path));
+    set_sub_fps(0);
+    if (ours.empty() || theirs.empty()) return 0;
+
+    double we_run = ours.back().second - ours.front().first;
+    double they_run = theirs.back().second - theirs.front().first;
+    if (we_run <= 0 || they_run <= 0) return 0;
+
+    double got = 25.0 * we_run / they_run;
+    double best = 0;
+    for (double rate : rates)
+        if (best == 0 || std::fabs(rate - got) < std::fabs(best - got)) best = rate;
+
+    if (std::fabs(best - got) > best * 0.08) return 0;
+    return best;
 }
 
 // The format follows the file we read, the destination is wherever the caller asked us to put it
@@ -52,6 +77,8 @@ void write_offsets(const std::string& in_path, const std::string& out_path, doub
         write_ass_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
     else if (in_path.ends_with(".vtt"))
         write_vtt_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
+    else if (in_path.ends_with(".sub"))
+        write_sub_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
 }
 
 static bool number(const char* text, double& into) {
@@ -304,7 +331,7 @@ static void report(const Report& r) {
 }
 
 void usage() {
-    std::cerr << "Usage: lapse <video_or_subtitle> <subtitle> [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N]\n";
+    std::cerr << "Usage: lapse <video_or_subtitle> <subtitle> [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N]\n";
     std::cerr << "       --confidence N   how far the answer has to stand out before the original is overwritten (default " << sure_sigma << ")\n";
     std::cerr << "       lapse --version\n";
     std::cerr << "       lapse --formats\n";
@@ -325,6 +352,7 @@ int run(int argc, const char *argv[]) {
     bool no_sidecar = false;
     int audio_track = -1;
     int sub_track = -1;
+    double fps = 0;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -345,6 +373,10 @@ int run(int argc, const char *argv[]) {
             double got;
             if (i + 1 >= argc || !number(argv[++i], got)) { usage(); return -1; }
             sub_track = (int)got;
+        } else if (arg == "--fps") {
+            double got;
+            if (i + 1 >= argc || !number(argv[++i], got) || got < 10 || got > 120) { usage(); return -1; }
+            fps = got;
         } else if (arg == "--confidence") {
             double got;
             if (i + 1 >= argc || !number(argv[++i], got) || got <= 0) {
@@ -416,6 +448,28 @@ int run(int argc, const char *argv[]) {
     std::vector<std::pair<int,int>> ref_spans;
     std::vector<float> ref_weights;
     double ref_coverage = 1.0;
+
+    // MicroDVD counts frames, not time, so nothing in the file means anything
+    // until we know the rate. Ask the video, it is the one the frames get
+    // counted against, then whatever the subtitle says about itself. A rate we
+    // made up would land every cue in the wrong place, so we stop instead
+    if (input_path.ends_with(".sub") || ref_path.ends_with(".sub")) {
+        if (fps <= 0 && !is_subtitle(ref_path)) fps = probe_fps(ref_path.c_str());
+        set_sub_fps(fps);
+
+        std::string which = input_path.ends_with(".sub") ? input_path : ref_path;
+        double used = sub_fps(load_text(which));
+        if (used <= 0 && is_subtitle(ref_path)) {
+            used = fps_from_length(which, which == ref_path ? input_path : ref_path);
+            set_sub_fps(used);
+        }
+        if (used <= 0) {
+            std::cerr << "Cannot tell what frame rate " << which << " counts in. "
+                      << "It has no {1}{1} line and there is no video to ask, so pass --fps N\n";
+            return 1;
+        }
+        say() << "MicroDVD frames at " << used << " fps\n";
+    }
 
     std::vector<std::pair<int,int>> timestamps = read_subtitle(input_path);
 
@@ -600,6 +654,8 @@ int run(int argc, const char *argv[]) {
                 write_ass_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
             else if (input_path.ends_with(".vtt"))
                 write_vtt_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
+            else if (input_path.ends_with(".sub"))
+                write_sub_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
         }
         report(card);
         return (verdict != Verdict::Solid && !force) ? 3 : 0;
