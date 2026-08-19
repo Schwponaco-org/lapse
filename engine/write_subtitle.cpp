@@ -230,6 +230,45 @@ static void write_frames(const char* input_path, const char* output_path, const 
     save_file(output_path, out);
 }
 
+static void write_sup(const char* input_path, const char* output_path, const Shift& shift) {
+    std::ifstream in(input_path, std::ios::binary);
+    if (!in) throw std::runtime_error("Cannot open subtitle: " + std::string(input_path));
+    std::string data((std::istreambuf_iterator<char>(in)), {});
+    in.close();
+
+    unsigned char* b = (unsigned char*)&data[0];
+    size_t n = data.size();
+    size_t pos = 0;
+    int cue = -1;
+    long last_pts = -1;
+
+    while (pos + 13 <= n) {
+        if (b[pos] != 'P' || b[pos + 1] != 'G') break;
+        unsigned int pts = ((unsigned int)b[pos+2] << 24) | ((unsigned int)b[pos+3] << 16) | ((unsigned int)b[pos+4] << 8) | b[pos+5];
+        unsigned int size = ((unsigned int)b[pos+11] << 8) | b[pos+12];
+        size_t payload = pos + 13;
+        if (payload + size > n) break;
+
+        if ((long)pts != last_pts) { cue++; last_pts = (long)pts; }
+        int new_ms = shift.apply((int)(pts / 90), cue);
+        if (new_ms < 0) new_ms = 0;
+        unsigned int new_pts = (unsigned int)new_ms * 90;
+        b[pos+2] = (unsigned char)(new_pts >> 24);
+        b[pos+3] = (unsigned char)(new_pts >> 16);
+        b[pos+4] = (unsigned char)(new_pts >> 8);
+        b[pos+5] = (unsigned char)new_pts;
+
+        pos = payload + size;
+    }
+
+    std::string temp_path = std::string(output_path) + ".tmp";
+    std::ofstream out(temp_path, std::ios::binary);
+    if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
+    out.write(data.data(), (std::streamsize)data.size());
+    out.close();
+    std::filesystem::rename(temp_path, output_path);
+}
+
 static Shift one_line(double slope, double intercept_s) {
     Shift shift;
     shift.slope = slope;
@@ -261,6 +300,10 @@ void write_sub_OLS(const char* input_path, const char* output_path, double slope
     write_frames(input_path, output_path, one_line(slope, intercept_s));
 }
 
+void write_sup_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_sup(input_path, output_path, one_line(slope, intercept_s));
+}
+
 void write_srt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_cues(input_path, output_path, ',', per_cue(slope, offsets, mapping));
 }
@@ -275,4 +318,8 @@ void write_ass_split(const char* input_path, const char* output_path, double slo
 
 void write_sub_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_frames(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_sup_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_sup(input_path, output_path, per_cue(slope, offsets, mapping));
 }
