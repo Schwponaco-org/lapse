@@ -230,6 +230,47 @@ static void write_frames(const char* input_path, const char* output_path, const 
     save_file(output_path, out);
 }
 
+static std::string ms_to_idx_ts(int ms) {
+    if (ms < 0) ms = 0;
+    int h  = ms / 3600000; ms %= 3600000;
+    int m  = ms / 60000;   ms %= 60000;
+    int sc = ms / 1000;    ms %= 1000;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d:%03d", h, m, sc, ms);
+    return buf;
+}
+
+static void write_idx(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string text = load_file(input_path);
+    bool ends_clean = !text.empty() && text.back() == '\n';
+    std::istringstream ss(text);
+
+    std::string out;
+
+    std::string line;
+    int cue = 0;
+    const char* eol = "\n";
+    while (std::getline(ss, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+            eol = "\r\n";
+        }
+
+        size_t vf, vl;
+        if (idx_time_line(line, vf, vl)) {
+            int ms = idx_time_ms(line.substr(vf, vl));
+            if (ms >= 0)
+                line = line.substr(0, vf) + ms_to_idx_ts(shift.apply(ms, cue)) + line.substr(vf + vl);
+            cue++;
+        }
+
+        out += line;
+        if (ends_clean || !ss.eof()) out += eol;
+    }
+
+    save_file(output_path, out);
+}
+
 static Shift one_line(double slope, double intercept_s) {
     Shift shift;
     shift.slope = slope;
@@ -261,6 +302,10 @@ void write_sub_OLS(const char* input_path, const char* output_path, double slope
     write_frames(input_path, output_path, one_line(slope, intercept_s));
 }
 
+void write_idx_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_idx(input_path, output_path, one_line(slope, intercept_s));
+}
+
 void write_srt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_cues(input_path, output_path, ',', per_cue(slope, offsets, mapping));
 }
@@ -275,4 +320,8 @@ void write_ass_split(const char* input_path, const char* output_path, double slo
 
 void write_sub_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_frames(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_idx_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_idx(input_path, output_path, per_cue(slope, offsets, mapping));
 }

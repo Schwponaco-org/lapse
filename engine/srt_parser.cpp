@@ -168,6 +168,8 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
         return read_vtt(path.c_str());
     if (path.ends_with(".sub"))
         return read_sub(path.c_str());
+    if (path.ends_with(".idx"))
+        return read_idx(path.c_str());
     throw std::runtime_error("Unsupported subtitle format: " + path);
 }
 
@@ -315,6 +317,50 @@ std::vector<std::pair<int,int>> read_sub(const char* filename) {
     return timestamps;
 }
 
+bool idx_time_line(const std::string& line, size_t& val_from, size_t& val_len) {
+    size_t at = line.find("timestamp:");
+    if (at == std::string::npos) return false;
+    size_t start = line.find_first_not_of(" ", at + 10);
+    if (start == std::string::npos) return false;
+    size_t end = line.find(',', start);
+    if (end == std::string::npos) return false;
+    val_from = start;
+    val_len = end - start;
+    return true;
+}
+
+int idx_time_ms(const std::string& v) {
+    int h, m, s, ms;
+    if (sscanf(v.c_str(), "%d:%d:%d:%d", &h, &m, &s, &ms) != 4) return -1;
+    return h * 3600000 + m * 60000 + s * 1000 + ms;
+}
+
+std::vector<std::pair<int,int>> read_idx(const char* filename) {
+    std::vector<int> starts;
+    std::string line {};
+    std::istringstream read_file(load_text(filename));
+
+    while (getline(read_file, line)) {
+        size_t vf, vl;
+        if (!idx_time_line(line, vf, vl)) continue;
+
+        if ((int)starts.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+
+        starts.push_back(idx_time_ms(line.substr(vf, vl)));
+    }
+
+    std::vector<std::pair<int,int>> timestamps;
+    for (int i = 0; i < (int)starts.size(); i++) {
+        if (starts[i] < 0) { timestamps.push_back({0, 0}); continue; }
+        int end = (i + 1 < (int)starts.size() && starts[i + 1] > starts[i]) ? starts[i + 1] : starts[i] + 2000;
+        if (end - starts[i] > MAX_CUE_MS) end = starts[i] + MAX_CUE_MS;
+        timestamps.push_back({starts[i], end});
+    }
+    return timestamps;
+}
 
 // Cues that sit on top of each other normally get glued into one span - they
 // are the same moment on screen and counting them twice only skews the score.
