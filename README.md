@@ -154,6 +154,12 @@ Sync subtitles to a video file (no-split, default):
 ./lapse video.mkv subtitles.srt
 ```
 
+Take the subtitles out of the video, sync them, and leave them next to it as `video.lapse.srt`:
+
+```bash
+./lapse video.mkv
+```
+
 Sync subtitles to another subtitle file (faster, more accurate):
 
 ```bash

@@ -331,7 +331,7 @@ static void report(const Report& r) {
 }
 
 void usage() {
-    std::cerr << "Usage: lapse <video_or_subtitle> <subtitle> [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N]\n";
+    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N]\n";
     std::cerr << "       --confidence N   how far the answer has to stand out before the original is overwritten (default " << sure_sigma << ")\n";
     std::cerr << "       lapse --version\n";
     std::cerr << "       lapse --formats\n";
@@ -417,6 +417,25 @@ int run(int argc, const char *argv[]) {
         } else {
             args.push_back(arg);
         }
+    }
+
+    if (args.size() == 1 && !is_subtitle(args[0])) {
+        std::string got = embedded_text(args[0].c_str(), sub_track);
+        if (got.empty()) {
+            std::cerr << "No subtitles inside " << args[0] << " to take out\n";
+            return 1;
+        }
+        std::string put = args[0].substr(0, args[0].find_last_of('.')) + ".lapse.srt";
+        std::ofstream file(put, std::ios::binary);
+        if (!file) {
+            std::cerr << "Cannot write " << put << '\n';
+            return 1;
+        }
+        file << got;
+        file.close();
+        args.push_back(put);
+        use_embedded = false;
+        say() << "Wrote " << put << '\n';
     }
 
     if (args.size() < 2) {
