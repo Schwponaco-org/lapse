@@ -240,16 +240,18 @@ static void write_sup(const char* input_path, const char* output_path, const Shi
     size_t n = data.size();
     size_t pos = 0;
     int cue = -1;
-    long last_pts = -1;
 
     while (pos + 13 <= n) {
         if (b[pos] != 'P' || b[pos + 1] != 'G') break;
         unsigned int pts = ((unsigned int)b[pos+2] << 24) | ((unsigned int)b[pos+3] << 16) | ((unsigned int)b[pos+4] << 8) | b[pos+5];
+        unsigned char type = b[pos + 10];
         unsigned int size = ((unsigned int)b[pos+11] << 8) | b[pos+12];
         size_t payload = pos + 13;
         if (payload + size > n) break;
 
-        if ((long)pts != last_pts) { cue++; last_pts = (long)pts; }
+        bool show = type == 0x16 && size >= 11 && b[payload + 10] > 0;
+        if (show) cue++;
+
         int new_ms = shift.apply((int)(pts / 90), cue);
         if (new_ms < 0) new_ms = 0;
         unsigned int new_pts = (unsigned int)new_ms * 90;
