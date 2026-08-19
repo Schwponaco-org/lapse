@@ -112,6 +112,8 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
         return read_ass(path.c_str());
     if (path.ends_with(".vtt"))
         return read_vtt(path.c_str());
+    if (path.ends_with(".sbv"))
+        return read_sbv(path.c_str());
     throw std::runtime_error("Unsupported subtitle format: " + path);
 }
 
@@ -226,6 +228,52 @@ std::vector<std::pair<int, int>> read_ass(const char* filename) {
 // vtt cues look just like srt ones once we stop counting characters
 std::vector<std::pair<int,int>> read_vtt(const char* filename) {
     return read_srt(filename);
+}
+
+// sbv is youtubes old export format. no cue numbers, just
+// 0:00:01.599,0:00:04.760
+// then some text, then a blank line and the next one
+bool sbv_time_line(const std::string& line) {
+    int commas = 0;
+    for (int i = 0; i < (int)line.size(); i++) {
+        char c = line[i];
+        if (c == ',') commas = commas + 1;
+        else if (c >= '0' && c <= '9') continue;
+        else if (c == ':' || c == '.') continue;
+        else return false;
+    }
+    if (commas != 1) return false;
+    if (line.size() < 5) return false;
+    return true;
+}
+
+std::vector<std::pair<int, int>> read_sbv(const char* filename) {
+    std::vector<std::pair<int, int>> timestamps;
+    std::string line {};
+    std::istringstream read_file(load_text(filename));
+    bool first = true;
+    while (getline(read_file, line)) {
+        if (first) { strip_bom(line); first = false; }
+        std::string t = trim(line);
+        if (!sbv_time_line(t)) continue;
+
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+
+        size_t comma = t.find(',');
+        std::string left = t.substr(0, comma);
+        std::string right = t.substr(comma + 1);
+        int start_ms = parse_timestamp(left, 0);
+        int end_ms   = parse_timestamp(right, 0);
+
+        if (start_ms < 0 || end_ms < 0)
+            timestamps.push_back({0, 0});
+        else
+            timestamps.push_back({start_ms, end_ms});
+    }
+    return timestamps;
 }
 
 
