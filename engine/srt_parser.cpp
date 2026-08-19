@@ -105,6 +105,60 @@ int parse_timestamp(const std::string& line, size_t from) {
     return (int)ms;
 }
 
+// A MicroDVD line is {start}{end}text, both frame numbers. Gives back where the
+// text begins so the writer can put the same line back together
+bool sub_frames(const std::string& line, long long& a, long long& b, size_t& text_from) {
+    if (line.empty() || line[0] != '{') return false;
+    size_t one = line.find('}');
+    if (one == std::string::npos || one + 1 >= line.size() || line[one + 1] != '{') return false;
+    size_t two = line.find('}', one + 2);
+    if (two == std::string::npos) return false;
+
+    a = atoll(line.substr(1, one - 1).c_str());
+    b = atoll(line.substr(one + 2, two - one - 2).c_str());
+    text_from = two + 1;
+    return true;
+}
+
+// What the video runs at, once somebody has looked it up. That beats anything
+// the subtitle claims about itself, since the frames get counted against that
+// video in the end
+static double known_fps = 0;
+
+void set_sub_fps(double fps) {
+    known_fps = (fps >= 10 && fps <= 120) ? fps : 0;
+}
+
+// Frames only mean something once we know the rate. MicroDVD files declare it
+// as the text of a {1}{1} line at the top. Zero when nobody ever said, and
+// then we are not going to invent one
+double sub_fps(const std::string& text) {
+    if (known_fps > 0) return known_fps;
+
+
+    std::istringstream ss(text);
+    std::string line;
+    while (getline(ss, line)) {
+        strip_bom(line);
+        if (trim(line).empty()) continue;
+
+        long long a, b;
+        size_t text_from;
+        if (!sub_frames(line, a, b, text_from)) break;
+        double fps = atof(trim(line.substr(text_from)).c_str());
+        if (a <= 1 && b <= 1 && fps >= 10 && fps <= 120) return fps;
+        break;
+    }
+    return 0;
+}
+
+int frames_to_ms(long long frame, double fps) {
+    if (frame < 0 || fps <= 0) return -1;
+    long long ms = (long long)(frame * 1000.0 / fps + 0.5);
+    if (ms > MAX_TIME_MS) return -1;
+    return (int)ms;
+}
+
 std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
     if (path.ends_with(".srt"))
         return read_srt(path.c_str());
@@ -112,6 +166,8 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
         return read_ass(path.c_str());
     if (path.ends_with(".vtt"))
         return read_vtt(path.c_str());
+    if (path.ends_with(".sub"))
+        return read_sub(path.c_str());
     throw std::runtime_error("Unsupported subtitle format: " + path);
 }
 
@@ -226,6 +282,37 @@ std::vector<std::pair<int, int>> read_ass(const char* filename) {
 // vtt cues look just like srt ones once we stop counting characters
 std::vector<std::pair<int,int>> read_vtt(const char* filename) {
     return read_srt(filename);
+}
+
+std::vector<std::pair<int,int>> read_sub(const char* filename) {
+    std::vector<std::pair<int,int>> timestamps;
+    std::string text = load_text(filename);
+    double fps = sub_fps(text);
+    std::istringstream read_file(text);
+    std::string line {};
+    bool first = true;
+
+    while (getline(read_file, line)) {
+        if (first) { strip_bom(line); first = false; }
+
+        long long a, b;
+        size_t text_from;
+        if (!sub_frames(line, a, b, text_from)) continue;
+
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+
+        int start_ms = frames_to_ms(a, fps);
+        int end_ms   = frames_to_ms(b, fps);
+
+        if (start_ms < 0 || end_ms < 0)
+            timestamps.push_back({0, 0});
+        else
+            timestamps.push_back({start_ms, end_ms});
+    }
+    return timestamps;
 }
 
 

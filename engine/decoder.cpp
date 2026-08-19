@@ -52,6 +52,65 @@ AVFormatContext* open_file(const char* filename) {
     return pFormatContext;
 }
 
+// Plenty of files carry no frame rate worth having, or claim something silly
+// like 1000 because they were muxed as variable rate. Time the packets instead
+// and take the middle gap, which is the rate whatever plays this will land on
+static double measure_fps(AVFormatContext* fmt, int stream) {
+    std::vector<int64_t> stamps;
+    AVPacket* packet = av_packet_alloc();
+    if (!packet) return 0;
+
+    while ((int)stamps.size() < 240 && av_read_frame(fmt, packet) >= 0) {
+        if (packet->stream_index == stream && packet->pts != AV_NOPTS_VALUE)
+            stamps.push_back(packet->pts);
+        av_packet_unref(packet);
+    }
+    av_packet_free(&packet);
+    if (stamps.size() < 30) return 0;
+
+    // packets arrive in the order they decode, not the order they are shown
+    std::sort(stamps.begin(), stamps.end());
+    std::vector<int64_t> gaps;
+    for (int i = 1; i < (int)stamps.size(); i++) gaps.push_back(stamps[i] - stamps[i - 1]);
+    std::sort(gaps.begin(), gaps.end());
+
+    int64_t middle = gaps[gaps.size() / 2];
+    if (middle <= 0) return 0;
+    double fps = 1.0 / (middle * av_q2d(fmt->streams[stream]->time_base));
+
+    // mkv counts in whole milliseconds, so 29.97 comes back as 30.303. Land on
+    // a rate somebody actually shot at when we are already nearly on one
+    static const double rates[] = {23.976, 24, 25, 29.97, 30, 50, 60};
+    for (double rate : rates)
+        if (std::fabs(fps - rate) < rate * 0.02) return rate;
+    return fps;
+}
+
+// MicroDVD subtitles count frames instead of time, so the video has to tell us
+// how long a frame lasts. Zero when the file has no video in it
+double probe_fps(const char* filename) {
+    AVFormatContext* fmt = nullptr;
+    if (avformat_open_input(&fmt, filename, nullptr, nullptr) != 0) return 0;
+
+    double fps = 0;
+    if (avformat_find_stream_info(fmt, nullptr) >= 0) {
+        int video = -1;
+        for (int i = 0; i < (int)fmt->nb_streams; i++) {
+            if (fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) { video = i; break; }
+        }
+
+        if (video >= 0) {
+            AVRational rate = fmt->streams[video]->avg_frame_rate;
+            if (rate.num <= 0 || rate.den <= 0) rate = fmt->streams[video]->r_frame_rate;
+            if (rate.num > 0 && rate.den > 0) fps = av_q2d(rate);
+            if (fps < 10 || fps > 120) fps = measure_fps(fmt, video);
+        }
+    }
+
+    avformat_close_input(&fmt);
+    return fps;
+}
+
 int find_audio_stream(const AVFormatContext* pFormatContext, int wanted) {
     int first = -1;
     int seen = 0;
