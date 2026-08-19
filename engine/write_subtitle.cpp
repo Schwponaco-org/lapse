@@ -230,6 +230,44 @@ static void write_frames(const char* input_path, const char* output_path, const 
     save_file(output_path, out);
 }
 
+static void write_smi(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string text = load_file(input_path);
+    std::string out;
+    size_t pos = 0;
+    size_t written = 0;
+    int cue = -1;
+
+    while (true) {
+        size_t open = ifind(text, "<sync", pos);
+        if (open == std::string::npos) break;
+        size_t tag_end = text.find('>', open);
+        if (tag_end == std::string::npos) break;
+
+        size_t vf, vl;
+        bool has_start = sync_start(text, open, tag_end, vf, vl);
+
+        size_t next = ifind(text, "<sync", tag_end + 1);
+        size_t content_end = (next == std::string::npos) ? text.size() : next;
+        std::string body = text.substr(tag_end + 1, content_end - tag_end - 1);
+        bool show = has_start && !smi_blank(body);
+        if (show) cue++;
+
+        if (has_start) {
+            int ms = atoi(text.substr(vf, vl).c_str());
+            int new_ms = shift.apply(ms, cue);
+            if (new_ms < 0) new_ms = 0;
+            out += text.substr(written, vf - written);
+            out += std::to_string(new_ms);
+            written = vf + vl;
+        }
+
+        pos = tag_end + 1;
+    }
+
+    out += text.substr(written);
+    save_file(output_path, out);
+}
+
 static Shift one_line(double slope, double intercept_s) {
     Shift shift;
     shift.slope = slope;
@@ -261,6 +299,10 @@ void write_sub_OLS(const char* input_path, const char* output_path, double slope
     write_frames(input_path, output_path, one_line(slope, intercept_s));
 }
 
+void write_smi_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_smi(input_path, output_path, one_line(slope, intercept_s));
+}
+
 void write_srt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_cues(input_path, output_path, ',', per_cue(slope, offsets, mapping));
 }
@@ -275,4 +317,8 @@ void write_ass_split(const char* input_path, const char* output_path, double slo
 
 void write_sub_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_frames(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_smi_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_smi(input_path, output_path, per_cue(slope, offsets, mapping));
 }
