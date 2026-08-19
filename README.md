@@ -154,6 +154,12 @@ Sync subtitles to a video file (no-split, default):
 ./lapse video.mkv subtitles.srt
 ```
 
+Take the subtitles out of the video, sync them, and leave them next to it as `video.lapse.srt`:
+
+```bash
+./lapse video.mkv
+```
+
 Sync subtitles to another subtitle file (faster, more accurate):
 
 ```bash
@@ -268,9 +274,9 @@ lapse/
 
 **Video:** All formats supported by FFmpeg (`.mp4`, `.mkv`, `.avi`, `.mov`, `.ts`, `.webm` and more)
 
-**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`
+**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub` (MicroDVD)
 
-Planned to support: `.sup`, `.idx/.sub`, `.sub`, `.smi`, `.ttml`/`.dfxp`, `.sbv`, embedded MKV/MP4 tracks via mkvmerge/ffmpeg.
+Planned to support: `.sup`, `.idx/.sub`, `.smi`, `.ttml`/`.dfxp`, `.sbv`, embedded MKV/MP4 tracks via mkvmerge/ffmpeg.
 
 Run `lapse --formats` to print the subtitle formats your binary can read, one per line
 

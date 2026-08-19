@@ -166,8 +166,28 @@ static std::vector<std::string> ass_cue_text(const std::string& path) {
     return out;
 }
 
+// the text is everything behind the two frame numbers, with | for a line break
+static std::vector<std::string> sub_cue_text(const std::string& path) {
+    std::vector<std::string> out;
+    std::istringstream file(load_text(path));
+    std::string line;
+
+    while (getline(file, line)) {
+        long long a, b;
+        size_t text_from;
+        if (!sub_frames(line, a, b, text_from)) continue;
+
+        std::string body = line.substr(text_from);
+        for (size_t i = 0; i < body.size(); i++)
+            if (body[i] == '|') body[i] = '\n';
+        out.push_back(body);
+    }
+    return out;
+}
+
 std::vector<std::string> read_cue_text(const std::string& path) {
     if (path.ends_with(".ass") || path.ends_with(".ssa")) return ass_cue_text(path);
+    if (path.ends_with(".sub")) return sub_cue_text(path);
     return srt_cue_text(path);
 }
 

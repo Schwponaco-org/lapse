@@ -52,6 +52,65 @@ AVFormatContext* open_file(const char* filename) {
     return pFormatContext;
 }
 
+// Plenty of files carry no frame rate worth having, or claim something silly
+// like 1000 because they were muxed as variable rate. Time the packets instead
+// and take the middle gap, which is the rate whatever plays this will land on
+static double measure_fps(AVFormatContext* fmt, int stream) {
+    std::vector<int64_t> stamps;
+    AVPacket* packet = av_packet_alloc();
+    if (!packet) return 0;
+
+    while ((int)stamps.size() < 240 && av_read_frame(fmt, packet) >= 0) {
+        if (packet->stream_index == stream && packet->pts != AV_NOPTS_VALUE)
+            stamps.push_back(packet->pts);
+        av_packet_unref(packet);
+    }
+    av_packet_free(&packet);
+    if (stamps.size() < 30) return 0;
+
+    // packets arrive in the order they decode, not the order they are shown
+    std::sort(stamps.begin(), stamps.end());
+    std::vector<int64_t> gaps;
+    for (int i = 1; i < (int)stamps.size(); i++) gaps.push_back(stamps[i] - stamps[i - 1]);
+    std::sort(gaps.begin(), gaps.end());
+
+    int64_t middle = gaps[gaps.size() / 2];
+    if (middle <= 0) return 0;
+    double fps = 1.0 / (middle * av_q2d(fmt->streams[stream]->time_base));
+
+    // mkv counts in whole milliseconds, so 29.97 comes back as 30.303. Land on
+    // a rate somebody actually shot at when we are already nearly on one
+    static const double rates[] = {23.976, 24, 25, 29.97, 30, 50, 60};
+    for (double rate : rates)
+        if (std::fabs(fps - rate) < rate * 0.02) return rate;
+    return fps;
+}
+
+// MicroDVD subtitles count frames instead of time, so the video has to tell us
+// how long a frame lasts. Zero when the file has no video in it
+double probe_fps(const char* filename) {
+    AVFormatContext* fmt = nullptr;
+    if (avformat_open_input(&fmt, filename, nullptr, nullptr) != 0) return 0;
+
+    double fps = 0;
+    if (avformat_find_stream_info(fmt, nullptr) >= 0) {
+        int video = -1;
+        for (int i = 0; i < (int)fmt->nb_streams; i++) {
+            if (fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) { video = i; break; }
+        }
+
+        if (video >= 0) {
+            AVRational rate = fmt->streams[video]->avg_frame_rate;
+            if (rate.num <= 0 || rate.den <= 0) rate = fmt->streams[video]->r_frame_rate;
+            if (rate.num > 0 && rate.den > 0) fps = av_q2d(rate);
+            if (fps < 10 || fps > 120) fps = measure_fps(fmt, video);
+        }
+    }
+
+    avformat_close_input(&fmt);
+    return fps;
+}
+
 int find_audio_stream(const AVFormatContext* pFormatContext, int wanted) {
     int first = -1;
     int seen = 0;
@@ -183,6 +242,102 @@ std::vector<std::pair<int, int>> embedded_spans(AVFormatContext* fmt, int wanted
         }
     }
     return {};
+}
+
+static std::string stamp(int ms) {
+    if (ms < 0) ms = 0;
+    char b[32];
+    snprintf(b, sizeof(b), "%02d:%02d:%02d,%03d", ms / 3600000, ms / 60000 % 60, ms / 1000 % 60, ms % 1000);
+    return b;
+}
+
+static std::string packet_text(AVPacket* p, AVCodecID id) {
+    std::string s((const char*)p->data, p->size);
+
+    if (id == AV_CODEC_ID_MOV_TEXT) {
+        if (s.size() < 2) return "";
+        int len = ((unsigned char)s[0] << 8) | (unsigned char)s[1];
+        if (len > (int)s.size() - 2) len = (int)s.size() - 2;
+        s = s.substr(2, len);
+    }
+
+    if (id == AV_CODEC_ID_ASS || id == AV_CODEC_ID_SSA) {
+        size_t at = 0;
+        int commas = 0;
+        while (at < s.size() && commas < 8) {
+            if (s[at] == ',') commas++;
+            at++;
+        }
+        if (commas < 8) return "";
+        s = s.substr(at);
+    }
+
+    std::string out;
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == '\\' && i + 1 < s.size() && (s[i+1] == 'N' || s[i+1] == 'n')) { out += '\n'; i++; }
+        else if (s[i] == '|' && id == AV_CODEC_ID_MICRODVD) out += '\n';
+        else if (s[i] != '\r') out += s[i];
+    }
+    return out;
+}
+
+std::string embedded_text(const char* filename, int wanted) {
+    AVFormatContext* fmt = nullptr;
+    if (avformat_open_input(&fmt, filename, nullptr, nullptr) != 0) return "";
+    if (avformat_find_stream_info(fmt, nullptr) < 0) { avformat_close_input(&fmt); return ""; }
+
+    int index = -1;
+    int seen = 0;
+    for (int i = 0; i < (int)fmt->nb_streams; i++) {
+        AVStream* s = fmt->streams[i];
+        if (s->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE) continue;
+        if (!text_subtitle(s->codecpar->codec_id)) continue;
+        if (wanted >= 0) {
+            if (seen++ == wanted) { index = i; break; }
+            continue;
+        }
+        if (s->disposition & AV_DISPOSITION_FORCED) continue;
+        if (index < 0) index = i;
+        if (s->disposition & AV_DISPOSITION_DEFAULT) { index = i; break; }
+    }
+    if (index < 0) { avformat_close_input(&fmt); return ""; }
+
+    AVCodecID id = fmt->streams[index]->codecpar->codec_id;
+    AVRational tb = fmt->streams[index]->time_base;
+    AVRational millis = {1, 1000};
+    int offset = container_start_ms(fmt);
+
+    keep_only(fmt, index);
+    rewind_file(fmt);
+
+    std::vector<std::pair<std::pair<int,int>, std::string>> cues;
+    AVPacket* packet = av_packet_alloc();
+    if (!packet) { avformat_close_input(&fmt); return ""; }
+
+    while (av_read_frame(fmt, packet) >= 0) {
+        if (packet->stream_index == index && packet->pts != AV_NOPTS_VALUE && packet->duration > 0) {
+            int start = (int)av_rescale_q(packet->pts, tb, millis) - offset;
+            int length = (int)av_rescale_q(packet->duration, tb, millis);
+            std::string text = packet_text(packet, id);
+            if (start >= 0 && length > 0 && !text.empty())
+                cues.push_back({{start, start + length}, text});
+        }
+        av_packet_unref(packet);
+    }
+    av_packet_free(&packet);
+    avformat_close_input(&fmt);
+
+    if (cues.empty()) return "";
+    std::sort(cues.begin(), cues.end());
+    say() << "Taking subtitle track " << index << " out of the file, " << cues.size() << " cues\n";
+
+    std::string out;
+    for (int i = 0; i < (int)cues.size(); i++) {
+        out += std::to_string(i + 1) + "\n";
+        out += stamp(cues[i].first.first) + " --> " + stamp(cues[i].first.second) + "\n";
+        out += cues[i].second + "\n\n";
+    }
+    return out;
 }
 
 static void suppress_music(std::vector<float>& probability, const std::vector<float>& level) {
