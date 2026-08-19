@@ -244,6 +244,102 @@ std::vector<std::pair<int, int>> embedded_spans(AVFormatContext* fmt, int wanted
     return {};
 }
 
+static std::string stamp(int ms) {
+    if (ms < 0) ms = 0;
+    char b[32];
+    snprintf(b, sizeof(b), "%02d:%02d:%02d,%03d", ms / 3600000, ms / 60000 % 60, ms / 1000 % 60, ms % 1000);
+    return b;
+}
+
+static std::string packet_text(AVPacket* p, AVCodecID id) {
+    std::string s((const char*)p->data, p->size);
+
+    if (id == AV_CODEC_ID_MOV_TEXT) {
+        if (s.size() < 2) return "";
+        int len = ((unsigned char)s[0] << 8) | (unsigned char)s[1];
+        if (len > (int)s.size() - 2) len = (int)s.size() - 2;
+        s = s.substr(2, len);
+    }
+
+    if (id == AV_CODEC_ID_ASS || id == AV_CODEC_ID_SSA) {
+        size_t at = 0;
+        int commas = 0;
+        while (at < s.size() && commas < 8) {
+            if (s[at] == ',') commas++;
+            at++;
+        }
+        if (commas < 8) return "";
+        s = s.substr(at);
+    }
+
+    std::string out;
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == '\\' && i + 1 < s.size() && (s[i+1] == 'N' || s[i+1] == 'n')) { out += '\n'; i++; }
+        else if (s[i] == '|' && id == AV_CODEC_ID_MICRODVD) out += '\n';
+        else if (s[i] != '\r') out += s[i];
+    }
+    return out;
+}
+
+std::string embedded_text(const char* filename, int wanted) {
+    AVFormatContext* fmt = nullptr;
+    if (avformat_open_input(&fmt, filename, nullptr, nullptr) != 0) return "";
+    if (avformat_find_stream_info(fmt, nullptr) < 0) { avformat_close_input(&fmt); return ""; }
+
+    int index = -1;
+    int seen = 0;
+    for (int i = 0; i < (int)fmt->nb_streams; i++) {
+        AVStream* s = fmt->streams[i];
+        if (s->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE) continue;
+        if (!text_subtitle(s->codecpar->codec_id)) continue;
+        if (wanted >= 0) {
+            if (seen++ == wanted) { index = i; break; }
+            continue;
+        }
+        if (s->disposition & AV_DISPOSITION_FORCED) continue;
+        if (index < 0) index = i;
+        if (s->disposition & AV_DISPOSITION_DEFAULT) { index = i; break; }
+    }
+    if (index < 0) { avformat_close_input(&fmt); return ""; }
+
+    AVCodecID id = fmt->streams[index]->codecpar->codec_id;
+    AVRational tb = fmt->streams[index]->time_base;
+    AVRational millis = {1, 1000};
+    int offset = container_start_ms(fmt);
+
+    keep_only(fmt, index);
+    rewind_file(fmt);
+
+    std::vector<std::pair<std::pair<int,int>, std::string>> cues;
+    AVPacket* packet = av_packet_alloc();
+    if (!packet) { avformat_close_input(&fmt); return ""; }
+
+    while (av_read_frame(fmt, packet) >= 0) {
+        if (packet->stream_index == index && packet->pts != AV_NOPTS_VALUE && packet->duration > 0) {
+            int start = (int)av_rescale_q(packet->pts, tb, millis) - offset;
+            int length = (int)av_rescale_q(packet->duration, tb, millis);
+            std::string text = packet_text(packet, id);
+            if (start >= 0 && length > 0 && !text.empty())
+                cues.push_back({{start, start + length}, text});
+        }
+        av_packet_unref(packet);
+    }
+    av_packet_free(&packet);
+    avformat_close_input(&fmt);
+
+    if (cues.empty()) return "";
+    std::sort(cues.begin(), cues.end());
+    say() << "Taking subtitle track " << index << " out of the file, " << cues.size() << " cues\n";
+
+    std::string out;
+    for (int i = 0; i < (int)cues.size(); i++) {
+        out += std::to_string(i + 1) + "\n";
+        out += stamp(cues[i].first.first) + " --> " + stamp(cues[i].first.second) + "\n";
+        out += cues[i].second + "\n\n";
+    }
+    return out;
+}
+
 static void suppress_music(std::vector<float>& probability, const std::vector<float>& level) {
     int n = (int)level.size();
     if (n < 200) return;
