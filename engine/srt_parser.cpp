@@ -168,6 +168,8 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
         return read_vtt(path.c_str());
     if (path.ends_with(".sub"))
         return read_sub(path.c_str());
+    if (path.ends_with(".sup"))
+        return read_sup(path.c_str());
     if (path.ends_with(".sbv"))
         return read_sbv(path.c_str());
     throw std::runtime_error("Unsupported subtitle format: " + path);
@@ -317,9 +319,46 @@ std::vector<std::pair<int,int>> read_sub(const char* filename) {
     return timestamps;
 }
 
-// sbv is youtubes old export format. no cue numbers, just
-// 0:00:01.599,0:00:04.760
-// then some text, then a blank line and the next one
+std::vector<std::pair<int,int>> read_sup(const char* filename) {
+    std::ifstream in(filename, std::ios::binary);
+    if (!in) throw std::runtime_error("Cannot open subtitle: " + std::string(filename));
+    std::string data((std::istreambuf_iterator<char>(in)), {});
+    const unsigned char* b = (const unsigned char*)data.data();
+    size_t n = data.size();
+
+    std::vector<std::pair<int,bool>> marks;
+    size_t pos = 0;
+    while (pos + 13 <= n) {
+        if (b[pos] != 'P' || b[pos + 1] != 'G') break;
+        unsigned int pts = ((unsigned int)b[pos+2] << 24) | ((unsigned int)b[pos+3] << 16) | ((unsigned int)b[pos+4] << 8) | b[pos+5];
+        unsigned char type = b[pos + 10];
+        unsigned int size = ((unsigned int)b[pos+11] << 8) | b[pos+12];
+        size_t payload = pos + 13;
+        if (payload + size > n) break;
+
+        if (type == 0x16) {
+            bool show = size >= 11 && b[payload + 10] > 0;
+            marks.push_back({(int)(pts / 90), show});
+        }
+        pos = payload + size;
+    }
+
+    std::vector<std::pair<int,int>> timestamps;
+    for (size_t i = 0; i < marks.size(); i++) {
+        if (!marks[i].second) continue;
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+        int start = marks[i].first;
+        int end = (i + 1 < marks.size()) ? marks[i + 1].first : start + 2000;
+        if (end <= start) end = start + 2000;
+        if (end - start > MAX_CUE_MS) end = start + MAX_CUE_MS;
+        timestamps.push_back({start, end});
+    }
+    return timestamps;
+}
+
 bool sbv_time_line(const std::string& line) {
     int commas = 0;
     for (int i = 0; i < (int)line.size(); i++) {

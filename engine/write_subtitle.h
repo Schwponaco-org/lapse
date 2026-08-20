@@ -28,9 +28,11 @@ void write_srt_OLS(const char* input_path, const char* output_path, double slope
 void write_ass_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_vtt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_sub_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
+void write_sup_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_sbv_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_srt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
 void write_ass_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
 void write_vtt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
 void write_sub_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
+void write_sup_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
 void write_sbv_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
