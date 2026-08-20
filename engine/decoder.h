@@ -28,6 +28,8 @@ extern "C" {
 }
 
 AVFormatContext* open_file(const char* filename);
+double probe_fps(const char* filename);
+std::string embedded_text(const char* filename, int wanted = -1);
 int find_audio_stream(const AVFormatContext* pFormatContext, int wanted = -1);
 AVCodecContext* open_audio_decoder(const AVFormatContext* pFormatContext, int audio_stream_index);
 std::vector<std::pair<int, int>> embedded_spans(AVFormatContext* pFormatContext, int wanted = -1);

@@ -80,6 +80,11 @@ static std::string ms_to_ass_ts(int ms) {
     return buf;
 }
 
+static std::string ms_to_frames(int ms, double fps) {
+    if (ms < 0) ms = 0;
+    return std::to_string((long long)(ms * fps / 1000.0 + 0.5));
+}
+
 // srt and vtt are the same file with a different character in front of the
 // milliseconds, so they go through here together. We write to a temp file and
 // move it into place at the end if something throws halfway the subtitle the user already had is still whole
@@ -216,6 +221,51 @@ static void write_dialogue(const char* input_path, const char* output_path, cons
     save_file(output_path, out);
 }
 
+// MicroDVD lines get counted in frames, so the times go back out through the
+// rate the file was read at. The {1}{1} line at the top is the rate itself and
+// has to stay where it is
+static void write_frames(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string text = load_file(input_path);
+    double fps = sub_fps(text);
+    bool ends_clean = !text.empty() && text.back() == '\n';
+    std::istringstream ss(text);
+
+    std::string out;
+
+    std::string line;
+    int cue = 0;
+    const char* eol = "\n";
+    while (std::getline(ss, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+            eol = "\r\n";
+        }
+
+        long long a, b;
+        size_t text_from;
+        if (sub_frames(line, a, b, text_from)) {
+            int start_ms = frames_to_ms(a, fps);
+            int end_ms   = frames_to_ms(b, fps);
+            bool rate_line = (cue == 0 && a <= 1 && b <= 1);
+
+            // the frames we are about to write mean this rate, so say so
+            if (rate_line) {
+                char rate[32];
+                snprintf(rate, sizeof(rate), "%.3f", fps);
+                line = "{1}{1}" + std::string(rate);
+            } else if (start_ms >= 0 && end_ms >= 0)
+                line = "{" + ms_to_frames(shift.apply(start_ms, cue), fps) + "}{" +
+                       ms_to_frames(shift.apply(end_ms, cue), fps) + "}" + line.substr(text_from);
+            cue++;
+        }
+
+        out += line;
+        if (ends_clean || !ss.eof()) out += eol;
+    }
+
+    save_file(output_path, out);
+}
+
 static Shift one_line(double slope, double intercept_s) {
     Shift shift;
     shift.slope = slope;
@@ -243,6 +293,10 @@ void write_ass_OLS(const char* input_path, const char* output_path, double slope
     write_dialogue(input_path, output_path, one_line(slope, intercept_s));
 }
 
+void write_sub_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_frames(input_path, output_path, one_line(slope, intercept_s));
+}
+
 void write_sbv_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
     write_sbv(input_path, output_path, one_line(slope, intercept_s));
 }
@@ -257,6 +311,10 @@ void write_vtt_split(const char* input_path, const char* output_path, double slo
 
 void write_ass_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_dialogue(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_sub_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_frames(input_path, output_path, per_cue(slope, offsets, mapping));
 }
 
 void write_sbv_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
