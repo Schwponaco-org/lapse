@@ -40,6 +40,7 @@ std::vector<std::pair<int, int>> read_srt(const char* filename);
 std::vector<std::pair<int, int>> read_ass(const char* filename);
 std::vector<std::pair<int,int>> read_vtt(const char* filename);
 std::vector<std::pair<int,int>> read_sub(const char* filename);
+std::vector<std::pair<int,int>> read_sup(const char* filename);
 std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const std::vector<std::pair<int, int>>& timestamps, bool merge = true, bool sort_by_time = true);
 const float SPEECH_THRESHOLD = 0.25f;
 const int MIN_CUES = 10;
