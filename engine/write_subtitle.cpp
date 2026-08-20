@@ -129,6 +129,42 @@ static void write_cues(const char* input_path, const char* output_path, char ms_
     save_file(output_path, out);
 }
 
+static void write_sbv(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string text = load_file(input_path);
+    bool ends_clean = !text.empty() && text.back() == '\n';
+    std::istringstream ss(text);
+
+    std::string out;
+
+    std::string line;
+    int cue = 0;
+    const char* eol = "\n";
+    while (std::getline(ss, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+            eol = "\r\n";
+        }
+
+        std::string t = trim(line);
+        if (sbv_time_line(t)) {
+            size_t comma = t.find(',');
+            std::string left = t.substr(0, comma);
+            std::string right = t.substr(comma + 1);
+            int start_ms = parse_timestamp(left, 0);
+            int end_ms   = parse_timestamp(right, 0);
+
+            if (start_ms >= 0 && end_ms >= 0)
+                line = ms_to_ts(shift.apply(start_ms, cue), '.') + "," + ms_to_ts(shift.apply(end_ms, cue), '.');
+            cue++;
+        }
+
+        out += line;
+        if (ends_clean || !ss.eof()) out += eol;
+    }
+
+    save_file(output_path, out);
+}
+
 static void write_dialogue(const char* input_path, const char* output_path, const Shift& shift) {
     std::string text = load_file(input_path);
     bool ends_clean = !text.empty() && text.back() == '\n';
@@ -306,6 +342,10 @@ void write_sup_OLS(const char* input_path, const char* output_path, double slope
     write_sup(input_path, output_path, one_line(slope, intercept_s));
 }
 
+void write_sbv_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_sbv(input_path, output_path, one_line(slope, intercept_s));
+}
+
 void write_srt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_cues(input_path, output_path, ',', per_cue(slope, offsets, mapping));
 }
@@ -324,4 +364,8 @@ void write_sub_split(const char* input_path, const char* output_path, double slo
 
 void write_sup_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_sup(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_sbv_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_sbv(input_path, output_path, per_cue(slope, offsets, mapping));
 }
