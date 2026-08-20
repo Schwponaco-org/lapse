@@ -103,12 +103,12 @@ reports a verdict on every run and does not overwrite unless that verdict is
 
 ## Subtitle formats
 
-|                                   | lapse 2.0.0 | alass 2.0.0 | ffsubsync 0.5.1 |
+|                                   | lapse       | alass       | ffsubsync 0.5.1 |
 | --------------------------------- | :---------: | :---------: | :-------------: |
 | `.srt`                            |     yes     |     yes     |       yes       |
-| `.ass` / `.ssa`                   |     yes     |     yes     |       no        |
-| `.vtt`                            |     yes     |     no      |       no        |
-| `.sub` (MicroDVD)                 |     yes     |     no      |       no        |
+| `.ass` / `.ssa`                   |     yes     |     yes     |       yes       |
+| `.vtt`                            |     yes     |     no      |       yes       |
+| `.sub` (MicroDVD)                 |     yes     |     no      |    read only    |
 | `.sup` (PGS)                      |     yes     |     no      |       no        |
 | `.idx` (VobSub)                   |     yes     |  reference only  |     no     |
 | `.smi`                            |     yes     |     no      |       no        |
@@ -119,10 +119,12 @@ reports a verdict on every run and does not overwrite unless that verdict is
 alass reads `.srt`, `.ssa`/`.ass` and `.idx` and writes back in whatever
 format the file it corrected came in, so an `.ass` file stays `.ass`. `.idx`
 is timing only (it has no text of its own), so alass only reads it as a
-reference, the same way LAPSE does. ffsubsync reads and writes `.srt` and
-nothing else, an ASS/SSA request has sat open against the project since
-2019. Neither tool pulls a subtitle track out of the video file itself, so a
-film whose only subtitle lives inside the mkv has to be extracted by hand
+reference, the same way LAPSE does. ffsubsync also reads and writes `.ass`,
+`.ssa` and `.vtt` through pysubs2, and can read `.sub` (MicroDVD) the same
+way, but its writer has no MicroDVD branch, so asking it to save back out as
+`.sub` fails; that combination has to land as `.srt` or an SSA-family format
+instead. Neither tool pulls a subtitle track out of the video file itself, so
+a film whose only subtitle lives inside the mkv has to be extracted by hand
 first.
 
 ## Summary
