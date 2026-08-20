@@ -212,10 +212,43 @@ static std::vector<std::string> sub_cue_text(const std::string& path) {
     return out;
 }
 
+static std::vector<std::string> ttml_cue_text(const std::string& path) {
+    std::vector<std::string> out;
+    std::string text = load_text(path);
+    size_t pos = 0;
+
+    while (true) {
+        size_t open = text.find("<p", pos);
+        if (open == std::string::npos) break;
+        char after = (open + 2 < text.size()) ? text[open + 2] : ' ';
+        if (after != ' ' && after != '\t' && after != '\n' && after != '\r' && after != '>') {
+            pos = open + 2;
+            continue;
+        }
+        size_t tag_end = text.find('>', open);
+        if (tag_end == std::string::npos) break;
+
+        size_t close = text.find("</p>", tag_end);
+        std::string body = (close == std::string::npos) ? "" : text.substr(tag_end + 1, close - tag_end - 1);
+        pos = (close == std::string::npos) ? tag_end + 1 : close + 4;
+
+        std::string flat;
+        bool in_tag = false;
+        for (size_t i = 0; i < body.size(); i++) {
+            if (body[i] == '<') { in_tag = true; continue; }
+            if (body[i] == '>') { in_tag = false; continue; }
+            if (!in_tag) flat += body[i];
+        }
+        out.push_back(flat);
+    }
+    return out;
+}
+
 std::vector<std::string> read_cue_text(const std::string& path) {
     if (path.ends_with(".ass") || path.ends_with(".ssa")) return ass_cue_text(path);
     if (path.ends_with(".sub")) return sub_cue_text(path);
     if (path.ends_with(".sbv")) return sbv_cue_text(path);
+    if (path.ends_with(".ttml") || path.ends_with(".dfxp")) return ttml_cue_text(path);
     return srt_cue_text(path);
 }
 

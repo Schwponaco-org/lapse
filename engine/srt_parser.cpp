@@ -176,6 +176,8 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
         return read_idx(path.c_str());
     if (path.ends_with(".smi"))
         return read_smi(path.c_str());
+    if (path.ends_with(".ttml") || path.ends_with(".dfxp"))
+        return read_ttml(path.c_str());
     throw std::runtime_error("Unsupported subtitle format: " + path);
 }
 
@@ -526,6 +528,69 @@ std::vector<std::pair<int,int>> read_smi(const char* filename) {
         if (end <= start) end = start + 2000;
         if (end - start > MAX_CUE_MS) end = start + MAX_CUE_MS;
         timestamps.push_back({start, end});
+    }
+    return timestamps;
+}
+
+bool ttml_attr(const std::string& text, size_t from, size_t to, const char* name, size_t& val_from, size_t& val_len) {
+    std::string key = std::string(name) + "=\"";
+    size_t pos = text.find(key, from);
+    if (pos == std::string::npos || pos > to) return false;
+    size_t start = pos + key.size();
+    size_t end = text.find('"', start);
+    if (end == std::string::npos || end > to) return false;
+    val_from = start;
+    val_len = end - start;
+    return true;
+}
+
+int ttml_time_ms(const std::string& v) {
+    if (v.empty()) return -1;
+    if (v.find(':') != std::string::npos) return parse_timestamp(v, 0);
+
+    char* stop = nullptr;
+    double num = strtod(v.c_str(), &stop);
+    if (stop == v.c_str()) return -1;
+    if (*stop == 's' && *(stop + 1) == '\0') return (int)(num * 1000 + 0.5);
+    if (stop[0] == 'm' && stop[1] == 's' && stop[2] == '\0') return (int)(num + 0.5);
+    return -1;
+}
+
+std::vector<std::pair<int,int>> read_ttml(const char* filename) {
+    std::vector<std::pair<int,int>> timestamps;
+    std::string text = load_text(filename);
+    size_t pos = 0;
+
+    while (true) {
+        size_t open = text.find("<p", pos);
+        if (open == std::string::npos) break;
+        char after = (open + 2 < text.size()) ? text[open + 2] : ' ';
+        if (after != ' ' && after != '\t' && after != '\n' && after != '\r' && after != '>') {
+            pos = open + 2;
+            continue;
+        }
+        size_t tag_end = text.find('>', open);
+        if (tag_end == std::string::npos) break;
+        pos = tag_end + 1;
+
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+
+        size_t bf, bl, ef, el, df, dl;
+        int start_ms = ttml_attr(text, open, tag_end, "begin", bf, bl) ? ttml_time_ms(text.substr(bf, bl)) : -1;
+        int end_ms = ttml_attr(text, open, tag_end, "end", ef, el) ? ttml_time_ms(text.substr(ef, el)) : -1;
+
+        if (end_ms < 0 && ttml_attr(text, open, tag_end, "dur", df, dl)) {
+            int dur = ttml_time_ms(text.substr(df, dl));
+            if (start_ms >= 0 && dur >= 0) end_ms = start_ms + dur;
+        }
+
+        if (start_ms < 0 || end_ms < 0)
+            timestamps.push_back({0, 0});
+        else
+            timestamps.push_back({start_ms, end_ms});
     }
     return timestamps;
 }

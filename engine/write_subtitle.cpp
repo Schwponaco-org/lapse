@@ -386,6 +386,52 @@ static void write_smi(const char* input_path, const char* output_path, const Shi
     save_file(output_path, out);
 }
 
+static void write_ttml(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string text = load_file(input_path);
+    std::string out;
+    size_t pos = 0;
+    size_t written = 0;
+    int cue = 0;
+
+    while (true) {
+        size_t open = text.find("<p", pos);
+        if (open == std::string::npos) break;
+        char after = (open + 2 < text.size()) ? text[open + 2] : ' ';
+        if (after != ' ' && after != '\t' && after != '\n' && after != '\r' && after != '>') {
+            pos = open + 2;
+            continue;
+        }
+        size_t tag_end = text.find('>', open);
+        if (tag_end == std::string::npos) break;
+        pos = tag_end + 1;
+
+        size_t bf, bl;
+        if (ttml_attr(text, open, tag_end, "begin", bf, bl)) {
+            int start_ms = ttml_time_ms(text.substr(bf, bl));
+
+            size_t ef, el;
+            bool has_end = ttml_attr(text, open, tag_end, "end", ef, el);
+            int end_ms = has_end ? ttml_time_ms(text.substr(ef, el)) : 0;
+
+            if (start_ms >= 0 && (!has_end || end_ms >= 0)) {
+                out += text.substr(written, bf - written);
+                out += ms_to_ts(shift.apply(start_ms, cue), '.');
+                written = bf + bl;
+
+                if (has_end) {
+                    out += text.substr(written, ef - written);
+                    out += ms_to_ts(shift.apply(end_ms, cue), '.');
+                    written = ef + el;
+                }
+            }
+        }
+        cue++;
+    }
+
+    out += text.substr(written);
+    save_file(output_path, out);
+}
+
 static Shift one_line(double slope, double intercept_s) {
     Shift shift;
     shift.slope = slope;
@@ -433,6 +479,10 @@ void write_smi_OLS(const char* input_path, const char* output_path, double slope
     write_smi(input_path, output_path, one_line(slope, intercept_s));
 }
 
+void write_ttml_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_ttml(input_path, output_path, one_line(slope, intercept_s));
+}
+
 void write_srt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_cues(input_path, output_path, ',', per_cue(slope, offsets, mapping));
 }
@@ -463,4 +513,8 @@ void write_idx_split(const char* input_path, const char* output_path, double slo
 
 void write_smi_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_smi(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_ttml_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_ttml(input_path, output_path, per_cue(slope, offsets, mapping));
 }
