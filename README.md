@@ -274,9 +274,9 @@ lapse/
 
 **Video:** All formats supported by FFmpeg (`.mp4`, `.mkv`, `.avi`, `.mov`, `.ts`, `.webm` and more)
 
-**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub` (MicroDVD), `.sup` (PGS), `.sbv`, `.idx` (VobSub, point it at the `.idx` file)
+**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub` (MicroDVD), `.sup` (PGS), `.sbv`, `.idx` (VobSub, point it at the `.idx` file), `.smi`
 
-Planned to support: `.smi`, `.ttml`/`.dfxp`, embedded MKV/MP4 tracks via mkvmerge/ffmpeg.
+Planned to support: `.ttml`/`.dfxp`, embedded MKV/MP4 tracks via mkvmerge/ffmpeg.
 
 Run `lapse --formats` to print the subtitle formats your binary can read, one per line
 
