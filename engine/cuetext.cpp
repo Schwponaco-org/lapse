@@ -132,6 +132,33 @@ static std::vector<std::string> srt_cue_text(const std::string& path) {
     return out;
 }
 
+static std::vector<std::string> sbv_cue_text(const std::string& path) {
+    std::vector<std::string> out;
+    std::istringstream file(load_text(path));
+    std::string line, blob;
+    bool inside = false;
+
+    while (getline(file, line)) {
+        if (sbv_time_line(trim(line))) {
+            if (inside) out.push_back(blob);
+            blob.clear();
+            inside = true;
+            continue;
+        }
+        if (!inside) continue;
+        if (trim(line).empty()) {
+            out.push_back(blob);
+            blob.clear();
+            inside = false;
+            continue;
+        }
+        if (!blob.empty()) blob += '\n';
+        blob += line;
+    }
+    if (inside) out.push_back(blob);
+    return out;
+}
+
 // the text is the tail behind the last field the Format line named
 static std::vector<std::string> ass_cue_text(const std::string& path) {
     std::vector<std::string> out;
@@ -220,6 +247,7 @@ static std::vector<std::string> ttml_cue_text(const std::string& path) {
 std::vector<std::string> read_cue_text(const std::string& path) {
     if (path.ends_with(".ass") || path.ends_with(".ssa")) return ass_cue_text(path);
     if (path.ends_with(".sub")) return sub_cue_text(path);
+    if (path.ends_with(".sbv")) return sbv_cue_text(path);
     if (path.ends_with(".ttml") || path.ends_with(".dfxp")) return ttml_cue_text(path);
     return srt_cue_text(path);
 }
