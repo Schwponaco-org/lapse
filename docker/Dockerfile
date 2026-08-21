@@ -72,7 +72,7 @@ RUN pip3 install -r requirements.txt --break-system-packages && \
     rm -rf /root/.cache /var/lib/apt/lists/*
 
 COPY --from=build /lapse /libonnxruntime.so /silero_vad.onnx ./
-COPY docker/main.py docker/web.py docker/healthcheck.py docker/index.html ./
+COPY docker/main.py docker/web.py docker/translate.py docker/healthcheck.py docker/index.html ./
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh /app/lapse && \
     find /app -maxdepth 1 -size 0 -name "*.so" -delete && \

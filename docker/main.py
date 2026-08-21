@@ -22,6 +22,7 @@ import signal
 import sqlite3
 import subprocess
 import time
+import translate
 import web
 from watchdog.observers import Observer
 from watchdog.observers.polling import PollingObserver
@@ -197,6 +198,22 @@ def init_db():
             key TEXT PRIMARY KEY,
             value TEXT
         )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS translations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_path TEXT NOT NULL,
+            output_path TEXT NOT NULL,
+            language TEXT NOT NULL,
+            provider TEXT,
+            status TEXT DEFAULT 'pending',
+            detail TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_translations_source_language
+        ON translations(source_path, language)
     """)
     conn.commit()
     return conn
@@ -445,10 +462,16 @@ def save_result(conn, video_path, srt_path, backup_path, values, attempts, statu
     conn.commit()
 
 
+def our_translation(conn, path):
+    return conn.execute("SELECT 1 FROM translations WHERE output_path = ?", (path,)).fetchone() is not None
+
+
 def process(conn, video_path, srt_path):
     ext = os.path.splitext(srt_path)[1].lower()
     if ext not in ENGINE_FORMATS:
         return "unsupported"
+    if our_translation(conn, srt_path):
+        return "skipped"
 
     row = previous_job(conn, video_path, srt_path)
     if not needs_work(row, file_mtime(srt_path)):
@@ -502,6 +525,13 @@ def process(conn, video_path, srt_path):
             status = "lowconf"
 
     save_result(conn, video_path, srt_path, backup_path, values, attempts, status)
+
+    if status == "done" and translate.TARGETS and translate.ready():
+        source = values.get("output") or srt_path
+        for language in translate.TARGETS:
+            print("Translating", os.path.basename(source), "to", language)
+            translate.work(conn, source, language)
+
     return status
 
 

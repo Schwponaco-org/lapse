@@ -15,15 +15,18 @@
 
 import json
 import os
+import queue
 import sqlite3
 import subprocess
 import threading
+import translate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE = os.path.join(HERE, "index.html")
 
 config = {}
+waiting = queue.Queue()
 
 
 def db():
@@ -68,8 +71,20 @@ def state():
     for status, total in conn.execute("SELECT status, COUNT(*) FROM sync_jobs GROUP BY status"):
         counts[status] = total
 
+    versions = conn.execute(
+        "SELECT id, source_path, output_path, language, provider, status, detail, created_at"
+        " FROM translations ORDER BY id DESC LIMIT 2000"
+    ).fetchall()
+
     answer = {
         "paused": setting(conn, "paused", "0") == "1",
+        "translations": [dict(row) for row in versions],
+        "translate": {
+            "ready": translate.ready(),
+            "provider": translate.PROVIDER,
+            "targets": translate.TARGETS,
+            "waiting": waiting.qsize(),
+        },
         "interval": int(setting(conn, "scan_interval", config["interval"])),
         "excluded": json.loads(setting(conn, "excluded", "[]")),
         "folders": folders(),
@@ -120,6 +135,35 @@ def wanted_ids(body):
     return [int(value) for value in body.get("ids", [])]
 
 
+def queue_translations(conn, ids, language):
+    if not language:
+        raise RuntimeError("Say which language to translate into")
+    if not translate.ready():
+        raise RuntimeError("No translation provider is set up")
+    if not ids:
+        return 0
+
+    marks = ",".join("?" * len(ids))
+    rows = conn.execute("SELECT srt_path FROM sync_jobs WHERE id IN (%s)" % marks, ids).fetchall()
+    for row in rows:
+        source = row["srt_path"]
+        translate.remember(conn, source, translate.named(source, language), language, "waiting", "")
+        waiting.put((source, language))
+    return len(rows)
+
+
+def worker():
+    while True:
+        source, language = waiting.get()
+        conn = db()
+        try:
+            translate.work(conn, source, language)
+        except Exception as e:
+            print("Translation worker:", e)
+        finally:
+            conn.close()
+
+
 def act(path, body):
     conn = db()
     try:
@@ -134,6 +178,8 @@ def act(path, body):
             undo(conn, wanted_ids(body))
         elif path == "/api/resync":
             resync(conn, wanted_ids(body))
+        elif path == "/api/translate":
+            queue_translations(conn, wanted_ids(body), (body.get("language") or "").strip())
         elif path == "/api/scan":
             for root in config["roots"]:
                 config["jobs"].put(root)
@@ -200,4 +246,5 @@ def start(port, jobs, roots, db_path, lapse, interval):
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=worker, daemon=True).start()
     return server

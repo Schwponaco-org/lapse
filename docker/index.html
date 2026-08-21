@@ -160,6 +160,7 @@
 
 <nav>
   <button data-tab="library" class="on">Library</button>
+  <button data-tab="translations">Translations</button>
   <button data-tab="settings">Settings</button>
 </nav>
 
@@ -177,6 +178,8 @@
           <button id="undo">Undo selected</button>
           <button id="resync">Sync selected again</button>
           <button id="resyncAll">Sync everything again</button>
+          <input type="text" id="language" placeholder="da" style="width: 70px">
+          <button id="translate">Translate selected</button>
           <span class="grow"></span>
           <span class="state" id="shown"></span>
         </div>
@@ -195,6 +198,28 @@
             </tr>
           </thead>
           <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="translations" hidden>
+    <div class="card">
+      <h2>Provider</h2>
+      <div class="body">
+        <p class="hint" id="provider"></p>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Subtitle</th>
+              <th style="width: 90px">Language</th>
+              <th class="drop">Written to</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="versions"></tbody>
         </table>
       </div>
     </div>
@@ -353,6 +378,33 @@ function drawRows() {
     </tr>`).join("");
 }
 
+function drawTranslations() {
+  const how = data.translate;
+  $("provider").textContent = how.ready
+    ? "Translating through " + how.provider
+      + (how.targets.length ? ", and every subtitle that syncs is sent to " + how.targets.join(", ") + " on its own." : ", one file at a time when you ask for it.")
+      + (how.waiting ? " " + how.waiting + " waiting." : "")
+    : "No provider is set up. Give the container TRANSLATE_PROVIDER and TRANSLATE_KEY, or an address for a LibreTranslate of your own.";
+
+  $("translate").disabled = !how.ready;
+  if (!$("language").value && how.targets.length) $("language").placeholder = how.targets[0];
+
+  const rows = data.translations;
+  $("versions").innerHTML = rows.length ? rows.map(one => `
+    <tr>
+      <td>
+        <div class="file">${safe(basename(one.source_path))}</div>
+        <div class="path">${safe(one.source_path)}</div>
+      </td>
+      <td>${safe(one.language)}</td>
+      <td class="drop weak">${safe(basename(one.output_path))}</td>
+      <td>
+        <span class="tag ${one.status === "done" ? "done" : one.status === "failed" ? "failed" : "lowconf"}">${safe(one.status)}</span>
+        ${one.detail ? `<div class="path">${safe(one.detail)}</div>` : ""}
+      </td>
+    </tr>`).join("") : `<tr><td colspan="4" class="empty">Nothing translated yet</td></tr>`;
+}
+
 function render(fresh) {
   data = fresh;
   if (!editing) excluded = fresh.excluded.slice();
@@ -366,15 +418,23 @@ function render(fresh) {
   drawTiles();
   drawFolders();
   drawRows();
+  drawTranslations();
+}
+
+const TABS = ["library", "translations", "settings"];
+
+function showTab(wanted) {
+  if (!TABS.includes(wanted)) wanted = "library";
+  document.querySelectorAll("nav button").forEach(tab => tab.classList.toggle("on", tab.dataset.tab === wanted));
+  TABS.forEach(id => $(id).hidden = id !== wanted);
 }
 
 document.querySelectorAll("nav button").forEach(tab => {
-  tab.onclick = () => {
-    document.querySelectorAll("nav button").forEach(other => other.classList.toggle("on", other === tab));
-    $("library").hidden = tab.dataset.tab !== "library";
-    $("settings").hidden = tab.dataset.tab !== "settings";
-  };
+  tab.onclick = () => { location.hash = tab.dataset.tab; };
 });
+
+window.onhashchange = () => showTab(location.hash.slice(1));
+showTab(location.hash.slice(1));
 
 document.querySelectorAll("thead th.sortable").forEach(head => {
   head.onclick = () => {
@@ -428,6 +488,12 @@ $("undo").onclick = () => {
 $("resync").onclick = () => {
   const ids = picked();
   if (ids.length) send("/api/resync", { ids });
+};
+
+$("translate").onclick = () => {
+  const ids = picked();
+  const language = ($("language").value || $("language").placeholder).trim();
+  if (ids.length) send("/api/translate", { ids, language });
 };
 
 $("resyncAll").onclick = () => {
