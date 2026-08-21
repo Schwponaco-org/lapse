@@ -131,6 +131,33 @@ Set `PUID` and `PGID` to the user that owns your media. Without them the contain
 | `MAX_ATTEMPTS` | `3` | How many times a failing pair is retried before it is left alone |
 | `TIMEOUT` | `1800` | Seconds a single sync may take |
 | `POLLING` | `0` | Set to `1` on network shares where file events do not arrive |
+| `CACHE_DAYS` | `30` | Days a cached audio scan is kept before it is deleted. `0` keeps them forever |
+
+### Engine settings
+
+Everything the CLI takes is available in the container. Switches are `0` or `1`, the rest are left empty to use the engine default.
+
+| Variable | Flag | What it does |
+|---|---|---|
+| `OUTPUT_SUFFIX` | `--output` | Write to `name<suffix>.srt` and never touch the original. `.synced` gives `movie.synced.srt` |
+| `NO_BACKUP` | `--no-backup` | Do not leave a `.bak` beside the file that was overwritten |
+| `NO_SIDECAR` | `--no-sidecar` | Do not write a `.lapse-unsure` guess when the result is uncertain |
+| `NO_EMBEDDED` | `--no-embedded` | Ignore subtitle tracks inside the video when picking a reference |
+| `NO_CACHE` | `--no-cache` | Listen to the video every time instead of reusing a cached scan |
+| `FULL_SCAN` | `--full-scan` | Listen to the whole video rather than sampling it |
+| `FORCE` | `--force` | Sync even when there is little to go on |
+| `STRICT` | `--strict` | Only overwrite when the result is clearly right |
+| `DRY_RUN` | `--dry-run` | Work out every offset and write nothing, not even to the database |
+| `CONFIDENCE` | `--confidence` | How far the answer has to stand out before the original is overwritten |
+| `AUDIO_TRACK` | `--audio-track` | Which audio track to listen to |
+| `SUB_TRACK` | `--sub-track` | Which embedded subtitle track to use as reference |
+| `FPS` | `--fps` | Frame rate for frame based subtitles that do not carry one |
+
+`OUTPUT_SUFFIX` is the way to keep a library untouched. The original stays as it is, the synced copy lands beside it, and files the container wrote itself are skipped on later scans. Pair it with `NO_BACKUP=1` if you would rather not collect `.bak` files as well.
+
+`DRY_RUN=1` is worth a first pass over a large library. The log shows what every file would get without anything being written or recorded, so a second run with it off starts from scratch.
+
+Cached audio scans are kept in a `cache` folder next to the database so they survive a restart, and anything unused for `CACHE_DAYS` is deleted. Set `LAPSE_CACHE` to put them somewhere else.
 
 ### Matching
 

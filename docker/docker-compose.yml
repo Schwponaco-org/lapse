@@ -38,3 +38,17 @@ services:
       - MAX_ATTEMPTS=3
       - TIMEOUT=1800
       - POLLING=0
+      - CACHE_DAYS=30
+      - OUTPUT_SUFFIX=
+      - NO_BACKUP=0
+      - NO_SIDECAR=0
+      - NO_EMBEDDED=0
+      - NO_CACHE=0
+      - FULL_SCAN=0
+      - FORCE=0
+      - STRICT=0
+      - DRY_RUN=0
+      - CONFIDENCE=
+      - AUDIO_TRACK=
+      - SUB_TRACK=
+      - FPS=

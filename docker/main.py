@@ -36,8 +36,30 @@ MIN_CONFIDENCE = float(os.environ.get("MIN_CONFIDENCE", "0"))
 MAX_ATTEMPTS   = int(os.environ.get("MAX_ATTEMPTS", "3"))
 TIMEOUT        = int(os.environ.get("TIMEOUT", "1800"))
 POLLING        = os.environ.get("POLLING", "0") == "1"
+OUTPUT_SUFFIX  = os.environ.get("OUTPUT_SUFFIX", "").strip()
+DRY_RUN        = os.environ.get("DRY_RUN", "0") == "1"
+CACHE_DAYS     = int(os.environ.get("CACHE_DAYS", "30"))
+CACHE_DIR      = os.environ.get("LAPSE_CACHE") or os.path.join(os.path.dirname(DB_PATH) or ".", "cache")
 
 MEDIA_ROOTS = [p.strip() for p in MEDIA_ROOT.split(",") if p.strip()]
+
+SWITCHES = [
+    ("NO_BACKUP", "--no-backup"),
+    ("NO_SIDECAR", "--no-sidecar"),
+    ("NO_EMBEDDED", "--no-embedded"),
+    ("NO_CACHE", "--no-cache"),
+    ("FULL_SCAN", "--full-scan"),
+    ("FORCE", "--force"),
+    ("STRICT", "--strict"),
+    ("DRY_RUN", "--dry-run"),
+]
+
+VALUES = [
+    ("CONFIDENCE", "--confidence"),
+    ("AUDIO_TRACK", "--audio-track"),
+    ("SUB_TRACK", "--sub-track"),
+    ("FPS", "--fps"),
+]
 
 VIDEO_EXTS = {
     ".mp4", ".mkv", ".avi", ".mov", ".m4v", ".ts", ".m2ts", ".mts", ".webm",
@@ -70,6 +92,53 @@ LANGUAGE_WORDS = {
 
 jobs = queue.Queue()
 running = True
+ENGINE_FLAGS = []
+
+
+def engine_flags():
+    flags = []
+    for name, option in SWITCHES:
+        if os.environ.get(name, "0") == "1":
+            flags.append(option)
+    for name, option in VALUES:
+        value = os.environ.get(name, "").strip()
+        if value:
+            flags += [option, value]
+    return flags
+
+
+def prune_cache():
+    if CACHE_DAYS <= 0:
+        return
+    cutoff = time.time() - CACHE_DAYS * 86400
+    removed = 0
+    for name in os.listdir(CACHE_DIR):
+        path = os.path.join(CACHE_DIR, name)
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.remove(path)
+                removed += 1
+        except OSError:
+            pass
+    if removed:
+        print("Dropped", removed, "cached scans nobody had asked for in", CACHE_DAYS, "days")
+
+
+def drop_leftovers(*paths):
+    for path in paths:
+        if not path:
+            continue
+        try:
+            os.remove(path + ".tmp")
+        except OSError:
+            pass
+
+
+def output_for(srt_path):
+    if not OUTPUT_SUFFIX:
+        return None
+    base, ext = os.path.splitext(srt_path)
+    return base + OUTPUT_SUFFIX + ext
 
 
 def engine_formats():
@@ -127,6 +196,12 @@ def normalize(name):
     for ch in "._-[]()+'":
         name = name.replace(ch, " ")
     return set(name.lower().split())
+
+
+def ours(base):
+    if base.endswith(".lapse-unsure") or base.endswith(".lapse"):
+        return True
+    return bool(OUTPUT_SUFFIX) and base.endswith(OUTPUT_SUFFIX)
 
 
 def subtitle_tokens(base):
@@ -190,7 +265,7 @@ def scan(path):
 
             if ext in VIDEO_EXTS:
                 videos.setdefault(root, []).append((base, full_path))
-            elif ext in SUBTITLE_EXTS:
+            elif ext in SUBTITLE_EXTS and not ours(base):
                 subtitles.setdefault(root, []).append((base, full_path))
 
     return videos, subtitles
@@ -290,8 +365,17 @@ def run_sync(video_path, srt_path):
     command = [LAPSE, video_path, srt_path, MODE, "--json"]
     if MODE == "split":
         command.insert(4, PENALTY)
+    command += ENGINE_FLAGS
 
-    result = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT)
+    output = output_for(srt_path)
+    if output:
+        command += ["--output", output]
+
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT)
+    finally:
+        drop_leftovers(srt_path, output)
+
     values = parse_output(result.stdout or "")
 
     # 2 is "nothing lined up", 3 is "wrote it next to the original instead"
@@ -352,8 +436,12 @@ def process(conn, video_path, srt_path):
         values = run_sync(video_path, srt_path)
     except Exception as e:
         print("Failed:", srt_path, "->", e)
-        save_result(conn, video_path, srt_path, None, {}, attempts, "failed")
+        if not DRY_RUN:
+            save_result(conn, video_path, srt_path, None, {}, attempts, "failed")
         return "failed"
+
+    if DRY_RUN:
+        return "dryrun"
 
     backup_path = srt_path + ".bak"
     if not os.path.exists(backup_path):
@@ -372,10 +460,16 @@ def process(conn, video_path, srt_path):
 
     confidence = values.get("confidence")
     if status == "done" and MIN_CONFIDENCE > 0 and confidence is not None \
-            and confidence < MIN_CONFIDENCE and backup_path:
-        shutil.copy2(backup_path, srt_path)
-        print("Confidence %.2f is under %.2f, put the original back: %s" % (confidence, MIN_CONFIDENCE, srt_path))
-        status = "lowconf"
+            and confidence < MIN_CONFIDENCE:
+        written_to = values.get("output")
+        if OUTPUT_SUFFIX and written_to and written_to != srt_path:
+            os.remove(written_to)
+            print("Confidence %.2f is under %.2f, threw the result away: %s" % (confidence, MIN_CONFIDENCE, written_to))
+            status = "lowconf"
+        elif backup_path:
+            shutil.copy2(backup_path, srt_path)
+            print("Confidence %.2f is under %.2f, put the original back: %s" % (confidence, MIN_CONFIDENCE, srt_path))
+            status = "lowconf"
 
     save_result(conn, video_path, srt_path, backup_path, values, attempts, status)
     return status
@@ -480,10 +574,22 @@ def stop(signum, frame):
 
 
 def main():
-    global ENGINE_FORMATS, SUBTITLE_EXTS
+    global ENGINE_FORMATS, SUBTITLE_EXTS, ENGINE_FLAGS
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    os.environ["LAPSE_CACHE"] = CACHE_DIR
+    prune_cache()
+
+    ENGINE_FLAGS = engine_flags()
+    if ENGINE_FLAGS:
+        print("Engine flags:", " ".join(ENGINE_FLAGS))
+    if OUTPUT_SUFFIX:
+        print("Writing results as name%s.ext beside the original" % OUTPUT_SUFFIX)
+    if DRY_RUN:
+        print("Dry run, nothing will be written or recorded")
 
     ENGINE_FORMATS = engine_formats()
     SUBTITLE_EXTS = SUBTITLE_EXTS | ENGINE_FORMATS
@@ -510,6 +616,7 @@ def main():
         if running and SCAN_INTERVAL and time.time() - last_scan > SCAN_INTERVAL:
             for root in MEDIA_ROOTS:
                 run_scan(conn, root)
+            prune_cache()
             last_scan = time.time()
 
     print("Shutting down")
