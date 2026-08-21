@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lapse</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1c1f26;
+    --line: #2b3039;
+    --text: #e6e8ec;
+    --dim: #8b929e;
+    --accent: #5b9dd9;
+    --good: #5fb87a;
+    --warn: #d9a441;
+    --bad: #d96b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  h1 { font-size: 18px; margin: 0 auto 0 0; letter-spacing: 2px; }
+  main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin: 0 0 12px; }
+  button {
+    background: var(--line);
+    color: var(--text);
+    border: 0;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font: inherit;
+    cursor: pointer;
+  }
+  button:hover { background: #39414e; }
+  button.primary { background: var(--accent); color: #0d1116; }
+  button.primary:hover { background: #74b0e5; }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=number], input[type=text] {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font: inherit;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
+  .dot.off { background: var(--warn); }
+  .counts { display: flex; gap: 20px; flex-wrap: wrap; }
+  .count b { display: block; font-size: 22px; font-weight: 600; }
+  .count span { color: var(--dim); font-size: 12px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px; margin-bottom: 12px; }
+  .folders label { display: flex; gap: 8px; align-items: center; overflow: hidden; }
+  .folders span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .folders label.root span { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--dim);
+    padding: 0 8px 8px;
+    font-weight: 500;
+  }
+  td { padding: 8px; border-top: 1px solid var(--line); vertical-align: top; }
+  td.name { word-break: break-all; }
+  td.name small { color: var(--dim); display: block; }
+  .status { font-size: 12px; }
+  .done { color: var(--good); }
+  .lowconf, .undone { color: var(--warn); }
+  .failed { color: var(--bad); }
+  .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--dim); padding: 20px 8px; }
+  @media (max-width: 640px) {
+    .hide-small { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>LAPSE</h1>
+  <span class="pill"><i class="dot" id="dot"></i><span id="status">connecting</span></span>
+  <span class="pill" id="queued">0 queued</span>
+  <button id="pause">Pause</button>
+  <button id="scan" class="primary">Scan now</button>
+</header>
+
+<main>
+  <section>
+    <h2>Library</h2>
+    <div class="counts" id="counts"></div>
+  </section>
+
+  <section>
+    <h2>Scanning</h2>
+    <div class="row">
+      <label for="interval">Rescan every</label>
+      <input type="number" id="interval" min="0" step="60" style="width: 110px">
+      <span>seconds, 0 to only follow file events</span>
+      <button id="saveInterval">Save</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Folders</h2>
+    <div class="folders" id="folders"></div>
+    <div class="row">
+      <input type="text" id="customPath" placeholder="/media/some/other/folder" style="flex: 1; min-width: 220px">
+      <button id="addPath">Skip this one too</button>
+      <button id="saveFolders" class="primary">Save folders</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Subtitles</h2>
+    <div class="row" style="margin-bottom: 12px">
+      <select id="filter" style="background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font: inherit">
+        <option value="">Everything</option>
+        <option value="done">Synced</option>
+        <option value="lowconf">Unsure</option>
+        <option value="failed">Failed</option>
+        <option value="undone">Put back</option>
+      </select>
+      <button id="undo">Undo selected</button>
+      <button id="resync">Sync selected again</button>
+      <button id="resyncAll">Sync everything again</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 28px"><input type="checkbox" id="all"></th>
+          <th>Subtitle</th>
+          <th class="num">Offset</th>
+          <th class="num hide-small">Confidence</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="jobs"></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+let state = null;
+let excluded = [];
+let touched = false;
+
+const $ = id => document.getElementById(id);
+
+async function send(path, body) {
+  const answer = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {})
+  });
+  const data = await answer.json();
+  if (data.error) {
+    alert(data.error);
+    return;
+  }
+  touched = false;
+  render(data);
+}
+
+async function refresh() {
+  try {
+    const answer = await fetch("/api/state");
+    render(await answer.json());
+  } catch (e) {
+    $("status").textContent = "no connection";
+    $("dot").className = "dot off";
+  }
+}
+
+function selected() {
+  return [...document.querySelectorAll("#jobs input:checked")].map(box => Number(box.value));
+}
+
+function render(data) {
+  state = data;
+  if (!touched) excluded = data.excluded.slice();
+
+  $("status").textContent = data.paused ? "paused" : "running";
+  $("dot").className = data.paused ? "dot off" : "dot";
+  $("pause").textContent = data.paused ? "Resume" : "Pause";
+  $("queued").textContent = data.queued + " queued";
+
+  if (document.activeElement !== $("interval")) $("interval").value = data.interval;
+
+  const labels = { done: "Synced", lowconf: "Unsure", failed: "Failed", undone: "Put back" };
+  $("counts").innerHTML = Object.keys(labels).map(key =>
+    `<div class="count"><b>${data.counts[key] || 0}</b><span>${labels[key]}</span></div>`
+  ).join("") + `<div class="count"><b>${data.jobs.length}</b><span>Known pairs</span></div>`;
+
+  $("folders").innerHTML = data.folders.concat(excluded.filter(p => !data.folders.includes(p)))
+    .map(path => {
+      const root = data.roots.includes(path);
+      const on = !excluded.some(prefix => path === prefix || path.startsWith(prefix + "/"));
+      return `<label class="${root ? "root" : ""}">
+        <input type="checkbox" data-path="${path}" ${on ? "checked" : ""}>
+        <span title="${path}">${path}</span>
+      </label>`;
+    }).join("");
+
+  const wanted = $("filter").value;
+  const rows = data.jobs.filter(job => !wanted || job.status === wanted);
+  $("jobs").innerHTML = rows.length ? rows.map(job => `
+    <tr>
+      <td><input type="checkbox" value="${job.id}"></td>
+      <td class="name">${job.srt_path.split("/").pop()}<small>${job.srt_path}</small></td>
+      <td class="num">${job.offset_ms === null ? "" : Math.round(job.offset_ms) + " ms"}</td>
+      <td class="num hide-small">${job.confidence === null ? "" : job.confidence.toFixed(1)}</td>
+      <td class="status ${job.status}">${labels[job.status] || job.status}</td>
+    </tr>`).join("") : `<tr><td colspan="5" class="empty">Nothing here yet</td></tr>`;
+}
+
+$("pause").onclick = () => send("/api/pause", { paused: !state.paused });
+$("scan").onclick = () => send("/api/scan");
+$("saveInterval").onclick = () => send("/api/interval", { seconds: Number($("interval").value) });
+$("filter").onchange = () => render(state);
+$("all").onchange = e => document.querySelectorAll("#jobs input").forEach(box => box.checked = e.target.checked);
+
+$("folders").onchange = e => {
+  const path = e.target.dataset.path;
+  touched = true;
+  excluded = excluded.filter(prefix => prefix !== path);
+  if (!e.target.checked) excluded.push(path);
+  render(state);
+};
+
+$("addPath").onclick = () => {
+  const path = $("customPath").value.trim();
+  if (!path) return;
+  touched = true;
+  if (!excluded.includes(path)) excluded.push(path);
+  $("customPath").value = "";
+  render(state);
+};
+
+$("saveFolders").onclick = () => send("/api/excluded", { paths: excluded });
+
+$("undo").onclick = () => {
+  const ids = selected();
+  if (ids.length && confirm("Put the original subtitle back for " + ids.length + " file(s)?"))
+    send("/api/undo", { ids });
+};
+
+$("resync").onclick = () => {
+  const ids = selected();
+  if (ids.length) send("/api/resync", { ids });
+};
+
+$("resyncAll").onclick = () => {
+  if (confirm("Forget every result and sync the whole library again?"))
+    send("/api/resync", { ids: [] });
+};
+
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

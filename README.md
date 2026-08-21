@@ -117,6 +117,30 @@ Everything you mount gets scanned. To use more than one library, add another vol
 
 Set `PUID` and `PGID` to the user that owns your media. Without them the container runs as root and the files it writes end up owned by root.
 
+### Web interface
+
+Publish port `8080` and open `http://your-host:8080`. There is no login, so keep it on your own network or behind whatever you already put in front of the rest of your stack.
+
+```yaml
+    ports:
+      - 8080:8080
+```
+
+From there you can:
+
+- **Pause and resume.** A paused container still watches for new files, it just does not sync anything until you let it go again. The setting survives a restart.
+- **Undo.** Puts the original subtitle back from its `.bak` and leaves that file alone from then on. Select several and undo them in one go.
+- **Sync again.** Forget what is on record for the files you picked and let them run through again, or do the whole library at once.
+- **Set the rescan interval** without editing the compose file.
+- **Leave folders out.** Everything you mounted is listed, one level down. Untick what you do not want touched and the scanner walks past it. Paths deeper than that can be typed in.
+
+What you change here is kept in the database and wins over the environment variables it overlaps with, so `SCAN_INTERVAL` is the starting point rather than the last word.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `WEB` | `1` | Set to `0` to run without the web interface |
+| `WEB_PORT` | `8080` | Port inside the container |
+
 ### Settings
 
 | Variable | Default | What it does |
@@ -290,7 +314,7 @@ LAPSE never simply refuses. If it cannot prove an answer it still writes one, it
 ```
 lapse/
 ├── engine/       C++ source for the CLI binary
-├── docker/       Python orchestrator, Dockerfile, compose file
+├── docker/       Python orchestrator, web interface, Dockerfile, compose file
 ├── docs/         Benchmarks and other reference docs
 └── .github/      CI workflows, and the scripts that build a release binary
 ```
