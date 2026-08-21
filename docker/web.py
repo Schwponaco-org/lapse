@@ -60,8 +60,8 @@ def folders():
 def state():
     conn = db()
     rows = conn.execute(
-        "SELECT id, video_path, srt_path, offset_ms, confidence, status, attempts, backup_path"
-        " FROM sync_jobs ORDER BY id DESC LIMIT 1000"
+        "SELECT id, video_path, srt_path, offset_ms, confidence, status, attempts,"
+        " backup_path, created_at FROM sync_jobs ORDER BY id DESC LIMIT 2000"
     ).fetchall()
 
     counts = {}
