@@ -21,6 +21,7 @@ import shutil
 import signal
 import sqlite3
 import subprocess
+import threading
 import time
 import translate
 import web
@@ -98,6 +99,26 @@ jobs = queue.Queue()
 running = True
 ENGINE_FLAGS = []
 EXCLUDED = []
+
+engine = None
+engine_lock = threading.Lock()
+
+
+class Stopped(Exception):
+    pass
+
+
+def force(child):
+    if child.poll() is None:
+        child.kill()
+
+
+def halt():
+    with engine_lock:
+        child = engine
+    if child:
+        child.terminate()
+        threading.Timer(5, force, [child]).start()
 
 
 def engine_flags():
@@ -418,20 +439,35 @@ def run_sync(video_path, srt_path):
     if output:
         command += ["--output", output]
 
+    global engine
+
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT)
+        with engine_lock:
+            engine = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        child = engine
+        try:
+            out, err = child.communicate(timeout=TIMEOUT)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.communicate()
+            raise
     finally:
+        with engine_lock:
+            engine = None
         drop_leftovers(srt_path, output)
 
-    values = parse_output(result.stdout or "")
+    if child.returncode < 0:
+        raise Stopped()
+
+    values = parse_output(out or "")
 
     # 2 is "nothing lined up", 3 is "wrote it next to the original instead"
-    if result.returncode not in (0, 2, 3):
-        message = (result.stderr or "").strip()
-        raise RuntimeError(message or "lapse exited with %d" % result.returncode)
+    if child.returncode not in (0, 2, 3):
+        message = (err or "").strip()
+        raise RuntimeError(message or "lapse exited with %d" % child.returncode)
 
     if not values:
-        raise RuntimeError((result.stderr or "").strip() or "lapse said nothing")
+        raise RuntimeError((err or "").strip() or "lapse said nothing")
 
     print("%s: %s offset=%sms sigma=%.1f agree=%.2f reference=%s" % (
         os.path.basename(srt_path), values.get("verdict"), values.get("offset_ms"),
@@ -487,6 +523,9 @@ def process(conn, video_path, srt_path):
     print("      to:", video_path)
     try:
         values = run_sync(video_path, srt_path)
+    except Stopped:
+        print("Stopped part way through, it will start over next time:", srt_path)
+        return "stopped"
     except Exception as e:
         print("Failed:", srt_path, "->", e)
         if not DRY_RUN:
@@ -637,6 +676,7 @@ def stop(signum, frame):
     global running
     running = False
     jobs.put(None)
+    halt()
 
 
 def main():
@@ -668,7 +708,7 @@ def main():
     server = None
     if WEB:
         try:
-            server = web.start(WEB_PORT, jobs, MEDIA_ROOTS, DB_PATH, LAPSE, SCAN_INTERVAL)
+            server = web.start(WEB_PORT, jobs, MEDIA_ROOTS, DB_PATH, LAPSE, SCAN_INTERVAL, halt)
             print("Web interface on port", WEB_PORT)
         except OSError as e:
             print("Could not open the web interface:", e)

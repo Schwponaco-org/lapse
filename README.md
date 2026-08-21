@@ -128,7 +128,7 @@ Publish port `8080` and open `http://your-host:8080`. There is no login, so keep
 
 From there you can:
 
-- **Pause and resume.** A paused container still watches for new files, it just does not sync anything until you let it go again. The setting survives a restart.
+- **Pause and resume.** Pause stops it there and then. The file being synced right now is dropped part way through rather than left to finish, and it is not counted as a failed attempt, so it starts over cleanly when you resume. A paused container still watches for new files and keeps a note of them, it just does not sync anything until you let it go again. The setting survives a restart.
 - **Undo.** Puts the original subtitle back from its `.bak` and leaves that file alone from then on. Select several and undo them in one go.
 - **Sync again.** Forget what is on record for the files you picked and let them run through again, or do the whole library at once.
 - **Set the rescan interval** without editing the compose file.
