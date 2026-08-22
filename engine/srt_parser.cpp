@@ -168,6 +168,16 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
         return read_vtt(path.c_str());
     if (path.ends_with(".sub"))
         return read_sub(path.c_str());
+    if (path.ends_with(".sup"))
+        return read_sup(path.c_str());
+    if (path.ends_with(".sbv"))
+        return read_sbv(path.c_str());
+    if (path.ends_with(".idx"))
+        return read_idx(path.c_str());
+    if (path.ends_with(".smi"))
+        return read_smi(path.c_str());
+    if (path.ends_with(".ttml") || path.ends_with(".dfxp"))
+        return read_ttml(path.c_str());
     throw std::runtime_error("Unsupported subtitle format: " + path);
 }
 
@@ -315,6 +325,275 @@ std::vector<std::pair<int,int>> read_sub(const char* filename) {
     return timestamps;
 }
 
+std::vector<std::pair<int,int>> read_sup(const char* filename) {
+    std::ifstream in(filename, std::ios::binary);
+    if (!in) throw std::runtime_error("Cannot open subtitle: " + std::string(filename));
+    std::string data((std::istreambuf_iterator<char>(in)), {});
+    const unsigned char* b = (const unsigned char*)data.data();
+    size_t n = data.size();
+
+    std::vector<std::pair<int,bool>> marks;
+    size_t pos = 0;
+    while (pos + 13 <= n) {
+        if (b[pos] != 'P' || b[pos + 1] != 'G') break;
+        unsigned int pts = ((unsigned int)b[pos+2] << 24) | ((unsigned int)b[pos+3] << 16) | ((unsigned int)b[pos+4] << 8) | b[pos+5];
+        unsigned char type = b[pos + 10];
+        unsigned int size = ((unsigned int)b[pos+11] << 8) | b[pos+12];
+        size_t payload = pos + 13;
+        if (payload + size > n) break;
+
+        if (type == 0x16) {
+            bool show = size >= 11 && b[payload + 10] > 0;
+            marks.push_back({(int)(pts / 90), show});
+        }
+        pos = payload + size;
+    }
+
+    std::vector<std::pair<int,int>> timestamps;
+    for (size_t i = 0; i < marks.size(); i++) {
+        if (!marks[i].second) continue;
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+        int start = marks[i].first;
+        int end = (i + 1 < marks.size()) ? marks[i + 1].first : start + 2000;
+        if (end <= start) end = start + 2000;
+        if (end - start > MAX_CUE_MS) end = start + MAX_CUE_MS;
+        timestamps.push_back({start, end});
+    }
+    return timestamps;
+}
+
+bool sbv_time_line(const std::string& line) {
+    int commas = 0;
+    for (int i = 0; i < (int)line.size(); i++) {
+        char c = line[i];
+        if (c == ',') commas = commas + 1;
+        else if (c >= '0' && c <= '9') continue;
+        else if (c == ':' || c == '.') continue;
+        else return false;
+    }
+    if (commas != 1) return false;
+    if (line.size() < 5) return false;
+    return true;
+}
+
+std::vector<std::pair<int, int>> read_sbv(const char* filename) {
+    std::vector<std::pair<int, int>> timestamps;
+    std::string line {};
+    std::istringstream read_file(load_text(filename));
+    bool first = true;
+    while (getline(read_file, line)) {
+        if (first) { strip_bom(line); first = false; }
+        std::string t = trim(line);
+        if (!sbv_time_line(t)) continue;
+
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+
+        size_t comma = t.find(',');
+        std::string left = t.substr(0, comma);
+        std::string right = t.substr(comma + 1);
+        int start_ms = parse_timestamp(left, 0);
+        int end_ms   = parse_timestamp(right, 0);
+
+        if (start_ms < 0 || end_ms < 0)
+            timestamps.push_back({0, 0});
+        else
+            timestamps.push_back({start_ms, end_ms});
+    }
+    return timestamps;
+}
+
+bool idx_time_line(const std::string& line, size_t& val_from, size_t& val_len) {
+    size_t at = line.find("timestamp:");
+    if (at == std::string::npos) return false;
+    size_t start = line.find_first_not_of(" ", at + 10);
+    if (start == std::string::npos) return false;
+    size_t end = line.find(',', start);
+    if (end == std::string::npos) return false;
+    val_from = start;
+    val_len = end - start;
+    return true;
+}
+
+int idx_time_ms(const std::string& v) {
+    int h, m, s, ms;
+    if (sscanf(v.c_str(), "%d:%d:%d:%d", &h, &m, &s, &ms) != 4) return -1;
+    return h * 3600000 + m * 60000 + s * 1000 + ms;
+}
+
+std::vector<std::pair<int,int>> read_idx(const char* filename) {
+    std::vector<int> starts;
+    std::string line {};
+    std::istringstream read_file(load_text(filename));
+
+    while (getline(read_file, line)) {
+        size_t vf, vl;
+        if (!idx_time_line(line, vf, vl)) continue;
+
+        if ((int)starts.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+
+        starts.push_back(idx_time_ms(line.substr(vf, vl)));
+    }
+
+    std::vector<std::pair<int,int>> timestamps;
+    for (int i = 0; i < (int)starts.size(); i++) {
+        if (starts[i] < 0) { timestamps.push_back({0, 0}); continue; }
+        int end = (i + 1 < (int)starts.size() && starts[i + 1] > starts[i]) ? starts[i + 1] : starts[i] + 2000;
+        if (end - starts[i] > MAX_CUE_MS) end = starts[i] + MAX_CUE_MS;
+        timestamps.push_back({starts[i], end});
+    }
+    return timestamps;
+}
+
+size_t ifind(const std::string& text, const std::string& needle, size_t from) {
+    for (size_t i = from; i + needle.size() <= text.size(); i++) {
+        bool ok = true;
+        for (size_t j = 0; j < needle.size(); j++) {
+            char a = text[i + j], b = needle[j];
+            if (a >= 'A' && a <= 'Z') a += 32;
+            if (b >= 'A' && b <= 'Z') b += 32;
+            if (a != b) { ok = false; break; }
+        }
+        if (ok) return i;
+    }
+    return std::string::npos;
+}
+
+bool sync_start(const std::string& text, size_t from, size_t to, size_t& val_from, size_t& val_len) {
+    size_t p = ifind(text, "start", from);
+    if (p == std::string::npos || p >= to) return false;
+    size_t eq = text.find('=', p);
+    if (eq == std::string::npos || eq >= to) return false;
+    size_t v = eq + 1;
+    while (v < to && (text[v] == ' ' || text[v] == '"' || text[v] == '\'')) v++;
+    size_t start = v;
+    while (v < to && text[v] >= '0' && text[v] <= '9') v++;
+    if (v == start) return false;
+    val_from = start;
+    val_len = v - start;
+    return true;
+}
+
+bool smi_blank(const std::string& body) {
+    std::string flat;
+    bool in_tag = false;
+    for (size_t i = 0; i < body.size(); i++) {
+        if (body[i] == '<') { in_tag = true; continue; }
+        if (body[i] == '>') { in_tag = false; continue; }
+        if (!in_tag) flat += body[i];
+    }
+    std::string t = trim(flat);
+    return t.empty() || t == "&nbsp;" || t == "&NBSP;";
+}
+
+std::vector<std::pair<int,int>> read_smi(const char* filename) {
+    std::string text = load_text(filename);
+    std::vector<std::pair<int,bool>> marks;
+    size_t pos = 0;
+
+    while (true) {
+        size_t open = ifind(text, "<sync", pos);
+        if (open == std::string::npos) break;
+        size_t tag_end = text.find('>', open);
+        if (tag_end == std::string::npos) break;
+
+        size_t vf, vl;
+        int ms = sync_start(text, open, tag_end, vf, vl) ? atoi(text.substr(vf, vl).c_str()) : -1;
+
+        size_t next = ifind(text, "<sync", tag_end + 1);
+        size_t content_end = (next == std::string::npos) ? text.size() : next;
+        std::string body = text.substr(tag_end + 1, content_end - tag_end - 1);
+
+        if (ms >= 0) marks.push_back({ms, !smi_blank(body)});
+        pos = tag_end + 1;
+    }
+
+    std::vector<std::pair<int,int>> timestamps;
+    for (size_t i = 0; i < marks.size(); i++) {
+        if (!marks[i].second) continue;
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+        int start = marks[i].first;
+        int end = (i + 1 < marks.size()) ? marks[i + 1].first : start + 2000;
+        if (end <= start) end = start + 2000;
+        if (end - start > MAX_CUE_MS) end = start + MAX_CUE_MS;
+        timestamps.push_back({start, end});
+    }
+    return timestamps;
+}
+
+bool ttml_attr(const std::string& text, size_t from, size_t to, const char* name, size_t& val_from, size_t& val_len) {
+    std::string key = std::string(name) + "=\"";
+    size_t pos = text.find(key, from);
+    if (pos == std::string::npos || pos > to) return false;
+    size_t start = pos + key.size();
+    size_t end = text.find('"', start);
+    if (end == std::string::npos || end > to) return false;
+    val_from = start;
+    val_len = end - start;
+    return true;
+}
+
+int ttml_time_ms(const std::string& v) {
+    if (v.empty()) return -1;
+    if (v.find(':') != std::string::npos) return parse_timestamp(v, 0);
+
+    char* stop = nullptr;
+    double num = strtod(v.c_str(), &stop);
+    if (stop == v.c_str()) return -1;
+    if (*stop == 's' && *(stop + 1) == '\0') return (int)(num * 1000 + 0.5);
+    if (stop[0] == 'm' && stop[1] == 's' && stop[2] == '\0') return (int)(num + 0.5);
+    return -1;
+}
+
+std::vector<std::pair<int,int>> read_ttml(const char* filename) {
+    std::vector<std::pair<int,int>> timestamps;
+    std::string text = load_text(filename);
+    size_t pos = 0;
+
+    while (true) {
+        size_t open = text.find("<p", pos);
+        if (open == std::string::npos) break;
+        char after = (open + 2 < text.size()) ? text[open + 2] : ' ';
+        if (after != ' ' && after != '\t' && after != '\n' && after != '\r' && after != '>') {
+            pos = open + 2;
+            continue;
+        }
+        size_t tag_end = text.find('>', open);
+        if (tag_end == std::string::npos) break;
+        pos = tag_end + 1;
+
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+
+        size_t bf, bl, ef, el, df, dl;
+        int start_ms = ttml_attr(text, open, tag_end, "begin", bf, bl) ? ttml_time_ms(text.substr(bf, bl)) : -1;
+        int end_ms = ttml_attr(text, open, tag_end, "end", ef, el) ? ttml_time_ms(text.substr(ef, el)) : -1;
+
+        if (end_ms < 0 && ttml_attr(text, open, tag_end, "dur", df, dl)) {
+            int dur = ttml_time_ms(text.substr(df, dl));
+            if (start_ms >= 0 && dur >= 0) end_ms = start_ms + dur;
+        }
+
+        if (start_ms < 0 || end_ms < 0)
+            timestamps.push_back({0, 0});
+        else
+            timestamps.push_back({start_ms, end_ms});
+    }
+    return timestamps;
+}
 
 // Cues that sit on top of each other normally get glued into one span - they
 // are the same moment on screen and counting them twice only skews the score.
