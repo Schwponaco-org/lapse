@@ -274,7 +274,7 @@ lapse/
 
 **Video:** All formats supported by FFmpeg (`.mp4`, `.mkv`, `.avi`, `.mov`, `.ts`, `.webm` and more)
 
-**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub` (MicroDVD), `.sup` (PGS), `.idx` (VobSub, point it at the `.idx` file), `.smi`, `.ttml`, `.dfxp`, `.sbv`
+**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub` (MicroDVD), `.sup` (PGS), `.sbv`, `.idx` (VobSub, point it at the `.idx` file), `.smi`, `.ttml`, `.dfxp`
 
 **Embedded tracks:** `lapse video.mkv` on its own pulls the default subtitle track out of the container and syncs it, see [CLI usage](#cli-usage) above. This covers text tracks, including `mov_text`. PGS and VobSub tracks are bitmap subtitles with no text to pull out, but when one is present LAPSE reads its timing and uses it as a fast, accurate sync reference instead of falling back to decoding the audio.
 

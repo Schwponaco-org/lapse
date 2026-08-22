@@ -129,6 +129,42 @@ static void write_cues(const char* input_path, const char* output_path, char ms_
     save_file(output_path, out);
 }
 
+static void write_sbv(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string text = load_file(input_path);
+    bool ends_clean = !text.empty() && text.back() == '\n';
+    std::istringstream ss(text);
+
+    std::string out;
+
+    std::string line;
+    int cue = 0;
+    const char* eol = "\n";
+    while (std::getline(ss, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+            eol = "\r\n";
+        }
+
+        std::string t = trim(line);
+        if (sbv_time_line(t)) {
+            size_t comma = t.find(',');
+            std::string left = t.substr(0, comma);
+            std::string right = t.substr(comma + 1);
+            int start_ms = parse_timestamp(left, 0);
+            int end_ms   = parse_timestamp(right, 0);
+
+            if (start_ms >= 0 && end_ms >= 0)
+                line = ms_to_ts(shift.apply(start_ms, cue), '.') + "," + ms_to_ts(shift.apply(end_ms, cue), '.');
+            cue++;
+        }
+
+        out += line;
+        if (ends_clean || !ss.eof()) out += eol;
+    }
+
+    save_file(output_path, out);
+}
+
 static void write_dialogue(const char* input_path, const char* output_path, const Shift& shift) {
     std::string text = load_file(input_path);
     bool ends_clean = !text.empty() && text.back() == '\n';
@@ -230,6 +266,172 @@ static void write_frames(const char* input_path, const char* output_path, const 
     save_file(output_path, out);
 }
 
+static void write_sup(const char* input_path, const char* output_path, const Shift& shift) {
+    std::ifstream in(input_path, std::ios::binary);
+    if (!in) throw std::runtime_error("Cannot open subtitle: " + std::string(input_path));
+    std::string data((std::istreambuf_iterator<char>(in)), {});
+    in.close();
+
+    unsigned char* b = (unsigned char*)&data[0];
+    size_t n = data.size();
+    size_t pos = 0;
+    int cue = -1;
+
+    while (pos + 13 <= n) {
+        if (b[pos] != 'P' || b[pos + 1] != 'G') break;
+        unsigned int pts = ((unsigned int)b[pos+2] << 24) | ((unsigned int)b[pos+3] << 16) | ((unsigned int)b[pos+4] << 8) | b[pos+5];
+        unsigned char type = b[pos + 10];
+        unsigned int size = ((unsigned int)b[pos+11] << 8) | b[pos+12];
+        size_t payload = pos + 13;
+        if (payload + size > n) break;
+
+        bool show = type == 0x16 && size >= 11 && b[payload + 10] > 0;
+        if (show) cue++;
+
+        int new_ms = shift.apply((int)(pts / 90), cue);
+        if (new_ms < 0) new_ms = 0;
+        unsigned int new_pts = (unsigned int)new_ms * 90;
+        b[pos+2] = (unsigned char)(new_pts >> 24);
+        b[pos+3] = (unsigned char)(new_pts >> 16);
+        b[pos+4] = (unsigned char)(new_pts >> 8);
+        b[pos+5] = (unsigned char)new_pts;
+
+        pos = payload + size;
+    }
+
+    std::string temp_path = std::string(output_path) + ".tmp";
+    std::ofstream out(temp_path, std::ios::binary);
+    if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
+    out.write(data.data(), (std::streamsize)data.size());
+    out.close();
+    std::filesystem::rename(temp_path, output_path);
+}
+
+static std::string ms_to_idx_ts(int ms) {
+    if (ms < 0) ms = 0;
+    int h  = ms / 3600000; ms %= 3600000;
+    int m  = ms / 60000;   ms %= 60000;
+    int sc = ms / 1000;    ms %= 1000;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d:%03d", h, m, sc, ms);
+    return buf;
+}
+
+static void write_idx(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string text = load_file(input_path);
+    bool ends_clean = !text.empty() && text.back() == '\n';
+    std::istringstream ss(text);
+
+    std::string out;
+
+    std::string line;
+    int cue = 0;
+    const char* eol = "\n";
+    while (std::getline(ss, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+            eol = "\r\n";
+        }
+
+        size_t vf, vl;
+        if (idx_time_line(line, vf, vl)) {
+            int ms = idx_time_ms(line.substr(vf, vl));
+            if (ms >= 0)
+                line = line.substr(0, vf) + ms_to_idx_ts(shift.apply(ms, cue)) + line.substr(vf + vl);
+            cue++;
+        }
+
+        out += line;
+        if (ends_clean || !ss.eof()) out += eol;
+    }
+
+    save_file(output_path, out);
+}
+
+static void write_smi(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string text = load_file(input_path);
+    std::string out;
+    size_t pos = 0;
+    size_t written = 0;
+    int cue = -1;
+
+    while (true) {
+        size_t open = ifind(text, "<sync", pos);
+        if (open == std::string::npos) break;
+        size_t tag_end = text.find('>', open);
+        if (tag_end == std::string::npos) break;
+
+        size_t vf, vl;
+        bool has_start = sync_start(text, open, tag_end, vf, vl);
+
+        size_t next = ifind(text, "<sync", tag_end + 1);
+        size_t content_end = (next == std::string::npos) ? text.size() : next;
+        std::string body = text.substr(tag_end + 1, content_end - tag_end - 1);
+        bool show = has_start && !smi_blank(body);
+        if (show) cue++;
+
+        if (has_start) {
+            int ms = atoi(text.substr(vf, vl).c_str());
+            int new_ms = shift.apply(ms, cue);
+            if (new_ms < 0) new_ms = 0;
+            out += text.substr(written, vf - written);
+            out += std::to_string(new_ms);
+            written = vf + vl;
+        }
+
+        pos = tag_end + 1;
+    }
+
+    out += text.substr(written);
+    save_file(output_path, out);
+}
+
+static void write_ttml(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string text = load_file(input_path);
+    std::string out;
+    size_t pos = 0;
+    size_t written = 0;
+    int cue = 0;
+
+    while (true) {
+        size_t open = text.find("<p", pos);
+        if (open == std::string::npos) break;
+        char after = (open + 2 < text.size()) ? text[open + 2] : ' ';
+        if (after != ' ' && after != '\t' && after != '\n' && after != '\r' && after != '>') {
+            pos = open + 2;
+            continue;
+        }
+        size_t tag_end = text.find('>', open);
+        if (tag_end == std::string::npos) break;
+        pos = tag_end + 1;
+
+        size_t bf, bl;
+        if (ttml_attr(text, open, tag_end, "begin", bf, bl)) {
+            int start_ms = ttml_time_ms(text.substr(bf, bl));
+
+            size_t ef, el;
+            bool has_end = ttml_attr(text, open, tag_end, "end", ef, el);
+            int end_ms = has_end ? ttml_time_ms(text.substr(ef, el)) : 0;
+
+            if (start_ms >= 0 && (!has_end || end_ms >= 0)) {
+                out += text.substr(written, bf - written);
+                out += ms_to_ts(shift.apply(start_ms, cue), '.');
+                written = bf + bl;
+
+                if (has_end) {
+                    out += text.substr(written, ef - written);
+                    out += ms_to_ts(shift.apply(end_ms, cue), '.');
+                    written = ef + el;
+                }
+            }
+        }
+        cue++;
+    }
+
+    out += text.substr(written);
+    save_file(output_path, out);
+}
+
 static Shift one_line(double slope, double intercept_s) {
     Shift shift;
     shift.slope = slope;
@@ -261,6 +463,26 @@ void write_sub_OLS(const char* input_path, const char* output_path, double slope
     write_frames(input_path, output_path, one_line(slope, intercept_s));
 }
 
+void write_sup_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_sup(input_path, output_path, one_line(slope, intercept_s));
+}
+
+void write_sbv_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_sbv(input_path, output_path, one_line(slope, intercept_s));
+}
+
+void write_idx_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_idx(input_path, output_path, one_line(slope, intercept_s));
+}
+
+void write_smi_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_smi(input_path, output_path, one_line(slope, intercept_s));
+}
+
+void write_ttml_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_ttml(input_path, output_path, one_line(slope, intercept_s));
+}
+
 void write_srt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_cues(input_path, output_path, ',', per_cue(slope, offsets, mapping));
 }
@@ -275,4 +497,24 @@ void write_ass_split(const char* input_path, const char* output_path, double slo
 
 void write_sub_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_frames(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_sup_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_sup(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_sbv_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_sbv(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_idx_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_idx(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_smi_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_smi(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_ttml_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_ttml(input_path, output_path, per_cue(slope, offsets, mapping));
 }
