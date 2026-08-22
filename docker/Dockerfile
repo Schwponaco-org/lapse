@@ -54,7 +54,7 @@ RUN set -eux; \
       wget -q -O /app/silero_vad.onnx "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx" && \
       rm -rf /tmp/ort.tgz /tmp/onnxruntime-linux-*; \
     fi
-COPY docker/main.py .
+COPY docker/main.py docker/web.py docker/index.html ./
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]

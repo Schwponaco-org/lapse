@@ -22,6 +22,7 @@ import signal
 import sqlite3
 import subprocess
 import time
+import web
 from watchdog.observers import Observer
 from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
@@ -40,6 +41,8 @@ OUTPUT_SUFFIX  = os.environ.get("OUTPUT_SUFFIX", "").strip()
 DRY_RUN        = os.environ.get("DRY_RUN", "0") == "1"
 CACHE_DAYS     = int(os.environ.get("CACHE_DAYS", "30"))
 CACHE_DIR      = os.environ.get("LAPSE_CACHE") or os.path.join(os.path.dirname(DB_PATH) or ".", "cache")
+WEB            = os.environ.get("WEB", "1") == "1"
+WEB_PORT       = int(os.environ.get("WEB_PORT", "8080"))
 
 MEDIA_ROOTS = [p.strip() for p in MEDIA_ROOT.split(",") if p.strip()]
 
@@ -93,6 +96,7 @@ LANGUAGE_WORDS = {
 jobs = queue.Queue()
 running = True
 ENGINE_FLAGS = []
+EXCLUDED = []
 
 
 def engine_flags():
@@ -188,8 +192,30 @@ def init_db():
             conn.execute("ALTER TABLE sync_jobs ADD COLUMN %s %s" % (name, kind))
         except Exception:
             pass
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
     conn.commit()
     return conn
+
+
+def setting(conn, key, fallback):
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else fallback
+
+
+def paused(conn):
+    return setting(conn, "paused", "0") == "1"
+
+
+def blocked(path):
+    for prefix in EXCLUDED:
+        if path == prefix or path.startswith(prefix + os.sep):
+            return True
+    return False
 
 
 def normalize(name):
@@ -253,8 +279,12 @@ def scan(path):
     videos = {}
     subtitles = {}
 
+    if blocked(path):
+        return videos, subtitles
+
     for root, dirs, files in os.walk(path):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")
+                   and not blocked(os.path.join(root, d))]
 
         for filename in files:
             if filename.startswith("."):
@@ -344,7 +374,7 @@ def needs_work(row, mtime):
     # Somebody replaced the subtitle since we last wrote it, so it is a new job
     if mtime is not None and srt_mtime is not None and abs(mtime - srt_mtime) > 1:
         return True
-    if status in ("done", "lowconf"):
+    if status in ("done", "lowconf", "undone"):
         return False
     return (attempts or 0) < MAX_ATTEMPTS
 
@@ -476,12 +506,18 @@ def process(conn, video_path, srt_path):
 
 
 def run_scan(conn, path, verbose=False):
+    global EXCLUDED
+
     if not os.path.isdir(path):
+        return
+
+    EXCLUDED = json.loads(setting(conn, "excluded", "[]"))
+    if blocked(path):
         return
 
     unsupported = 0
     for video, subtitle in find_pairs(path, verbose):
-        if not running:
+        if not running or paused(conn):
             return
         if process(conn, video, subtitle) == "unsupported":
             unsupported += 1
@@ -599,6 +635,14 @@ def main():
     conn = init_db()
     observer = start_watching()
 
+    server = None
+    if WEB:
+        try:
+            server = web.start(WEB_PORT, jobs, MEDIA_ROOTS, DB_PATH, LAPSE, SCAN_INTERVAL)
+            print("Web interface on port", WEB_PORT)
+        except OSError as e:
+            print("Could not open the web interface:", e)
+
     for root in MEDIA_ROOTS:
         if not os.path.isdir(root):
             print("Not mounted, nothing to scan there:", root)
@@ -608,18 +652,25 @@ def main():
 
     print("Watching for new files...")
     while running:
+        if paused(conn):
+            settle(5)
+            continue
+
         for directory in take_pending():
             if not running:
                 break
             run_scan(conn, directory, verbose=True)
 
-        if running and SCAN_INTERVAL and time.time() - last_scan > SCAN_INTERVAL:
+        interval = int(setting(conn, "scan_interval", SCAN_INTERVAL))
+        if running and interval and time.time() - last_scan > interval:
             for root in MEDIA_ROOTS:
                 run_scan(conn, root)
             prune_cache()
             last_scan = time.time()
 
     print("Shutting down")
+    if server:
+        server.shutdown()
     if observer:
         observer.stop()
         observer.join()
