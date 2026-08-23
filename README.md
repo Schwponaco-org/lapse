@@ -135,6 +135,7 @@ From there you can:
 - **Leave folders out.** Everything you mounted is listed, one level down. Untick what you do not want touched and the scanner walks past it. Paths deeper than that can be typed in.
 - **Translate.** Select subtitles, give a language code and send them off. See `Translation` below.
 - **Light or dark.** The button in the corner follows whatever your system is set to until you press it, and then it stays on what you picked. The choice is kept in the browser, so each device has its own.
+- **Change the engine settings.** Mode, file output, confidence and every switch the CLI takes, under Settings. See `Engine settings` below.
 
 The library list filters by status, by name and by confidence, so `Confidence under 5` is a quick way to find the results that did not stand out much and are worth looking at.
 
@@ -180,6 +181,15 @@ Everything the CLI takes is available in the container. Switches are `0` or `1`,
 | `AUDIO_TRACK` | `--audio-track` | Which audio track to listen to |
 | `SUB_TRACK` | `--sub-track` | Which embedded subtitle track to use as reference |
 | `FPS` | `--fps` | Frame rate for frame based subtitles that do not carry one |
+
+All of it is in the web interface as well, under Settings, and what you save there is used from the next scan onwards. `OUTPUT_SUFFIX` and `NO_BACKUP` are the two halves of the file output picker there:
+
+| File output | What happens |
+|---|---|
+| Write a new file | The original is left alone. `Movie.en.srt` gets `Movie.en.synced.srt` beside it |
+| Write a new file, keep a backup | Same, and a copy of the original is kept as `.bak` as well |
+| Overwrite, keep a backup | The subtitle is replaced and the old one is kept as `.bak`. Default |
+| Overwrite, no backup | The subtitle is replaced and nothing is kept |
 
 `OUTPUT_SUFFIX` is the way to keep a library untouched. The original stays as it is, the synced copy lands beside it, and files the container wrote itself are skipped on later scans. Pair it with `NO_BACKUP=1` if you would rather not collect `.bak` files as well.
 

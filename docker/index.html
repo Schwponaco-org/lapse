@@ -146,6 +146,11 @@
   .folders label.root span { font-weight: 550; }
   .hint { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
   #theme { min-width: 74px; }
+
+  .switches { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 4px; margin: 14px 0; }
+  .switches label { display: flex; gap: 9px; align-items: center; padding: 5px 7px; border-radius: 6px; }
+  .switches label:hover { background: var(--line-soft); }
+  .row + .row { margin-top: 10px; }
   @media (max-width: 720px) { .drop { display: none; } main { padding: 16px; } header, nav { padding-left: 16px; padding-right: 16px; } }
 </style>
 <script>
@@ -242,6 +247,56 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
 
   <div id="settings" hidden>
     <div class="card">
+      <h2>Engine</h2>
+      <div class="body" id="engine">
+        <p class="hint">What the engine is told on every run. The environment variables are the starting point, what you save here wins from then on.</p>
+        <div class="bar row">
+          <label class="inline" for="mode">Mode</label>
+          <select id="mode">
+            <option value="auto">Work it out</option>
+            <option value="nosplit">One offset for the whole file</option>
+            <option value="ols">Offset and drift</option>
+            <option value="split">Split into parts</option>
+          </select>
+          <label class="inline" for="penalty">Split penalty</label>
+          <input type="number" id="penalty" min="0" step="1" style="width: 80px">
+          <label class="inline" for="confidence">Confidence</label>
+          <input type="number" id="confidence" min="0" step="0.5" placeholder="default" style="width: 92px">
+        </div>
+        <div class="bar row">
+          <label class="inline" for="output">File output</label>
+          <select id="output">
+            <option value="new">Write a new file</option>
+            <option value="new_backup">Write a new file, keep a backup</option>
+            <option value="overwrite_backup">Overwrite, keep a backup</option>
+            <option value="overwrite">Overwrite, no backup</option>
+          </select>
+          <input type="text" id="suffix" placeholder=".synced" style="width: 110px">
+        </div>
+        <div class="bar row">
+          <label class="inline" for="audio_track">Audio track</label>
+          <input type="number" id="audio_track" min="0" step="1" placeholder="default" style="width: 92px">
+          <label class="inline" for="sub_track">Subtitle track</label>
+          <input type="number" id="sub_track" min="0" step="1" placeholder="default" style="width: 92px">
+          <label class="inline" for="fps">Frame rate</label>
+          <input type="number" id="fps" min="10" max="120" step="0.001" placeholder="from video" style="width: 110px">
+        </div>
+        <div class="switches">
+          <label><input type="checkbox" id="force"><span>Sync even when there is little to go on</span></label>
+          <label><input type="checkbox" id="strict"><span>Write nothing rather than an unsure guess</span></label>
+          <label><input type="checkbox" id="no_sidecar"><span>No unsure file beside the original</span></label>
+          <label><input type="checkbox" id="no_embedded"><span>Ignore subtitle tracks inside the video</span></label>
+          <label><input type="checkbox" id="no_cache"><span>Listen to the video every time</span></label>
+          <label><input type="checkbox" id="full_scan"><span>Listen to the whole video</span></label>
+          <label><input type="checkbox" id="dry_run"><span>Work it out and write nothing</span></label>
+        </div>
+        <div class="bar">
+          <button id="saveEngine" class="solid">Save engine settings</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Scanning</h2>
       <div class="body">
         <p class="hint">New files are picked up as they land. This is how often the whole library is walked again to catch anything the file events missed.</p>
@@ -272,6 +327,8 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { done: "Synced", lowconf: "Unsure", failed: "Failed", undone: "Put back" };
+const SWITCHES = ["force", "strict", "no_sidecar", "no_embedded", "no_cache", "full_scan", "dry_run"];
+const NUMBERS = ["penalty", "confidence", "audio_track", "sub_track", "fps"];
 
 let data = null;
 let excluded = [];
@@ -420,6 +477,24 @@ function drawTranslations() {
     </tr>`).join("") : `<tr><td colspan="4" class="empty">Nothing translated yet</td></tr>`;
 }
 
+function showSuffix() {
+  $("suffix").hidden = !$("output").value.startsWith("new");
+}
+
+function drawEngine() {
+  const engine = data.engine;
+  if (editing || !engine.mode) return;
+
+  $("mode").value = engine.mode;
+  $("suffix").value = engine.suffix || "";
+  $("output").value = engine.suffix
+    ? (engine.no_backup ? "new" : "new_backup")
+    : (engine.no_backup ? "overwrite" : "overwrite_backup");
+  NUMBERS.forEach(name => $(name).value = engine[name] || "");
+  SWITCHES.forEach(name => $(name).checked = !!engine[name]);
+  showSuffix();
+}
+
 function render(fresh) {
   data = fresh;
   if (!editing) excluded = fresh.excluded.slice();
@@ -434,6 +509,7 @@ function render(fresh) {
   drawFolders();
   drawRows();
   drawTranslations();
+  drawEngine();
 }
 
 const TABS = ["library", "translations", "settings"];
@@ -506,6 +582,24 @@ $("addPath").onclick = () => {
 };
 
 $("saveFolders").onclick = () => send("/api/excluded", { paths: excluded });
+
+$("engine").oninput = () => editing = true;
+$("engine").onchange = () => { editing = true; showSuffix(); };
+
+$("saveEngine").onclick = () => {
+  const output = $("output").value;
+  let suffix = $("suffix").value.trim() || ".synced";
+  if (!suffix.startsWith(".")) suffix = "." + suffix;
+
+  const engine = {
+    mode: $("mode").value,
+    suffix: output.startsWith("new") ? suffix : "",
+    no_backup: output === "new" || output === "overwrite"
+  };
+  NUMBERS.forEach(name => engine[name] = $(name).value.trim());
+  SWITCHES.forEach(name => engine[name] = $(name).checked);
+  send("/api/engine", { engine });
+};
 
 $("undo").onclick = () => {
   const ids = picked();

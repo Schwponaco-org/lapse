@@ -85,6 +85,7 @@ def state():
             "targets": translate.TARGETS,
             "waiting": waiting.qsize(),
         },
+        "engine": json.loads(setting(conn, "engine", "{}")),
         "interval": int(setting(conn, "scan_interval", config["interval"])),
         "excluded": json.loads(setting(conn, "excluded", "[]")),
         "folders": folders(),
@@ -174,6 +175,12 @@ def act(path, body):
                 config["halt"]()
         elif path == "/api/interval":
             save_setting(conn, "scan_interval", max(0, int(body.get("seconds", 0))))
+        elif path == "/api/engine":
+            saved = json.loads(setting(conn, "engine", "{}"))
+            for key, value in (body.get("engine") or {}).items():
+                if key in saved:
+                    saved[key] = value
+            save_setting(conn, "engine", json.dumps(saved))
         elif path == "/api/excluded":
             paths = [p.strip() for p in body.get("paths", []) if isinstance(p, str) and p.strip()]
             save_setting(conn, "excluded", json.dumps(sorted(set(paths))))
