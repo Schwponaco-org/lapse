@@ -184,8 +184,13 @@ static bool text_subtitle(AVCodecID id) {
            id == AV_CODEC_ID_SUBVIEWER || id == AV_CODEC_ID_MICRODVD;
 }
 
-static std::vector<std::pair<int, int>> read_subtitle_stream(AVFormatContext* fmt, int index) {
+static bool bitmap_subtitle(AVCodecID id) {
+    return id == AV_CODEC_ID_HDMV_PGS_SUBTITLE || id == AV_CODEC_ID_DVD_SUBTITLE;
+}
+
+static std::vector<std::pair<int, int>> read_subtitle_stream(AVFormatContext* fmt, int index, bool bitmap) {
     std::vector<std::pair<int, int>> spans;
+    std::vector<int> starts;
     AVPacket* packet = av_packet_alloc();
     if (!packet) return spans;
 
@@ -197,16 +202,30 @@ static std::vector<std::pair<int, int>> read_subtitle_stream(AVFormatContext* fm
     int offset = container_start_ms(fmt);
 
     while (av_read_frame(fmt, packet) >= 0) {
-        if (packet->stream_index == index && packet->pts != AV_NOPTS_VALUE && packet->duration > 0) {
+        if (packet->stream_index == index && packet->pts != AV_NOPTS_VALUE) {
             int start = (int)av_rescale_q(packet->pts, tb, millis) - offset;
-            int length = (int)av_rescale_q(packet->duration, tb, millis);
-            if (start >= 0 && length > 0 && length < 30000)
-                spans.push_back({start, start + length});
+            if (bitmap) {
+                if (start >= 0) starts.push_back(start);
+            } else if (packet->duration > 0) {
+                int length = (int)av_rescale_q(packet->duration, tb, millis);
+                if (start >= 0 && length > 0 && length < 30000)
+                    spans.push_back({start, start + length});
+            }
         }
         av_packet_unref(packet);
     }
 
     av_packet_free(&packet);
+
+    if (bitmap) {
+        std::sort(starts.begin(), starts.end());
+        for (size_t i = 0; i < starts.size(); i++) {
+            int end = (i + 1 < starts.size()) ? starts[i + 1] : starts[i] + 2000;
+            if (end - starts[i] > 10000) end = starts[i] + 10000;
+            if (end > starts[i]) spans.push_back({starts[i], end});
+        }
+    }
+
     std::sort(spans.begin(), spans.end());
     return spans;
 }
@@ -218,7 +237,7 @@ std::vector<std::pair<int, int>> embedded_spans(AVFormatContext* fmt, int wanted
     for (int i = 0; i < (int)fmt->nb_streams; ++i) {
         AVStream* stream = fmt->streams[i];
         if (stream->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE) continue;
-        if (!text_subtitle(stream->codecpar->codec_id)) continue;
+        if (!text_subtitle(stream->codecpar->codec_id) && !bitmap_subtitle(stream->codecpar->codec_id)) continue;
         if (wanted >= 0) {
             if (seen++ == wanted) candidates.push_back(i);
             continue;
@@ -235,7 +254,8 @@ std::vector<std::pair<int, int>> embedded_spans(AVFormatContext* fmt, int wanted
     });
 
     for (int index : candidates) {
-        std::vector<std::pair<int, int>> spans = read_subtitle_stream(fmt, index);
+        bool bitmap = bitmap_subtitle(fmt->streams[index]->codecpar->codec_id);
+        std::vector<std::pair<int, int>> spans = read_subtitle_stream(fmt, index, bitmap);
         if (spans.size() >= 50) {
             say() << "Using embedded subtitle track " << index << " with " << spans.size() << " cues\n";
             return spans;
