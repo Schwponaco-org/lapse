@@ -18,6 +18,7 @@ import os
 import queue
 import sqlite3
 import subprocess
+import subs
 import threading
 import translate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -136,6 +137,47 @@ def wanted_ids(body):
     return [int(value) for value in body.get("ids", [])]
 
 
+def job(conn, job_id):
+    return conn.execute(
+        "SELECT id, video_path, srt_path, offset_ms, confidence FROM sync_jobs WHERE id = ?",
+        (job_id,)
+    ).fetchone()
+
+
+def note_written(conn, row, path, offset):
+    conn.execute(
+        "INSERT OR REPLACE INTO sync_jobs"
+        " (video_path, srt_path, offset_ms, confidence, srt_mtime, attempts, status)"
+        " VALUES (?, ?, ?, ?, ?, 1, 'done')",
+        (row["video_path"], path, offset, row["confidence"], os.path.getmtime(path))
+    )
+
+
+def output_mode(body):
+    mode = body.get("output", "new")
+    if mode not in ("new", "new_backup", "overwrite_backup", "overwrite"):
+        raise RuntimeError("No such output mode: " + str(mode))
+    return mode
+
+
+def shift(conn, ids, ms, mode):
+    if not ms:
+        raise RuntimeError("Say how many milliseconds to move it by")
+
+    for job_id in ids:
+        row = job(conn, job_id)
+        if not row:
+            continue
+        written = subs.shift(row["srt_path"], ms, mode)
+        offset = (row["offset_ms"] or 0) + ms
+        if written == row["srt_path"]:
+            conn.execute("UPDATE sync_jobs SET offset_ms = ?, srt_mtime = ?, status = 'done' WHERE id = ?",
+                         (offset, os.path.getmtime(written), job_id))
+        else:
+            note_written(conn, row, written, offset)
+    conn.commit()
+
+
 def queue_translations(conn, ids, language):
     if not language:
         raise RuntimeError("Say which language to translate into")
@@ -168,7 +210,14 @@ def worker():
 def act(path, body):
     conn = db()
     try:
-        if path == "/api/pause":
+        if path == "/api/preview":
+            row = job(conn, int(body.get("id", 0)))
+            if not row:
+                raise RuntimeError("That file is not on record any more")
+            return {"path": row["srt_path"], "cues": subs.preview(row["srt_path"])}
+        elif path == "/api/shift":
+            shift(conn, wanted_ids(body), int(body.get("ms", 0)), output_mode(body))
+        elif path == "/api/pause":
             hold = bool(body.get("paused"))
             save_setting(conn, "paused", "1" if hold else "0")
             if hold:

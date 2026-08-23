@@ -135,6 +135,7 @@ From there you can:
 - **Leave folders out.** Everything you mounted is listed, one level down. Untick what you do not want touched and the scanner walks past it. Paths deeper than that can be typed in.
 - **Translate.** Select subtitles, give a language code and send them off. See `Translation` below.
 - **Light or dark.** The button in the corner follows whatever your system is set to until you press it, and then it stays on what you picked. The choice is kept in the browser, so each device has its own.
+- **Shift.** Move a subtitle by hand, in milliseconds, for when a sync came out close but not quite right. The first cues are shown before and after as you type, and you pick whether the result lands beside the original or over it. Nothing is decoded and the engine is not involved, so it is instant. `.srt`, `.vtt`, `.ass` and `.ssa`.
 - **Change the engine settings.** Mode, file output, confidence and every switch the CLI takes, under Settings. See `Engine settings` below.
 
 The library list filters by status, by name and by confidence, so `Confidence under 5` is a quick way to find the results that did not stand out much and are worth looking at.
