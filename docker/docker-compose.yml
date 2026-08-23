@@ -43,6 +43,11 @@ services:
       - TIMEOUT=1800
       - POLLING=0
       - CACHE_DAYS=30
+      - TRANSLATE_PROVIDER=deepl
+      - TRANSLATE_KEY=
+      - TRANSLATE_TO=
+      - TRANSLATE_FROM=
+      - TRANSLATE_URL=
       - OUTPUT_SUFFIX=
       - NO_BACKUP=0
       - NO_SIDECAR=0

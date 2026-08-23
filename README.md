@@ -133,6 +133,9 @@ From there you can:
 - **Sync again.** Forget what is on record for the files you picked and let them run through again, or do the whole library at once.
 - **Set the rescan interval** without editing the compose file.
 - **Leave folders out.** Everything you mounted is listed, one level down. Untick what you do not want touched and the scanner walks past it. Paths deeper than that can be typed in.
+- **Translate.** Select subtitles, give a language code and send them off. See `Translation` below.
+
+The library list filters by status, by name and by confidence, so `Confidence under 5` is a quick way to find the results that did not stand out much and are worth looking at.
 
 What you change here is kept in the database and wins over the environment variables it overlaps with, so `SCAN_INTERVAL` is the starting point rather than the last word.
 
@@ -182,6 +185,32 @@ Everything the CLI takes is available in the container. Switches are `0` or `1`,
 `DRY_RUN=1` is worth a first pass over a large library. The log shows what every file would get without anything being written or recorded, so a second run with it off starts from scratch.
 
 Cached audio scans are kept in a `cache` folder next to the database so they survive a restart, and anything unused for `CACHE_DAYS` is deleted. Set `LAPSE_CACHE` to put them somewhere else.
+
+### Translation
+
+A synced subtitle can be sent off for translation and written back beside the original as `name.<language>.srt`. Nothing is translated until you set a provider, and the engine itself is not involved.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `TRANSLATE_PROVIDER` | `deepl` | `deepl`, `google` or `libretranslate` |
+| `TRANSLATE_KEY` | unset | API key. Not needed for a LibreTranslate that does not ask for one |
+| `TRANSLATE_URL` | unset | Address of your own LibreTranslate, such as `http://libretranslate:5000` |
+| `TRANSLATE_TO` | unset | Languages every synced subtitle is translated into, comma separated. Leave empty to only translate what you pick in the interface |
+| `TRANSLATE_FROM` | unset | Source language. Left to the provider to work out when empty |
+| `TRANSLATE_BATCH` | `40` | Lines per request |
+
+```yaml
+    environment:
+      - TRANSLATE_PROVIDER=deepl
+      - TRANSLATE_KEY=your-key:fx
+      - TRANSLATE_TO=da
+```
+
+A DeepL key ending in `:fx` is a free one and is sent to the free endpoint on its own.
+
+`.srt`, `.vtt`, `.ass` and `.ssa` can be translated. Timings, cue numbers and script headers are left alone, and for `.ass` only the `Dialogue:` lines are sent. A file that already exists is never overwritten, and the translations the container wrote are not synced again on the next scan.
+
+If you already run [Lingarr](https://github.com/lingarr-translate/lingarr) or something like it, leave `TRANSLATE_TO` empty and keep using that. Nothing here runs unless a provider is set.
 
 ### Matching
 
