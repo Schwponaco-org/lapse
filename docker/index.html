@@ -6,178 +6,256 @@
 <title>lapse</title>
 <style>
   :root {
-    --bg: #14161a;
-    --panel: #1c1f26;
-    --line: #2b3039;
-    --text: #e6e8ec;
-    --dim: #8b929e;
-    --accent: #5b9dd9;
-    --good: #5fb87a;
-    --warn: #d9a441;
-    --bad: #d96b6b;
+    --bg: #f6f6f4;
+    --panel: #ffffff;
+    --line: #e3e2de;
+    --line-soft: #eeedea;
+    --text: #26241f;
+    --dim: #78746c;
+    --accent: #3c6e63;
+    --accent-soft: #eef3f1;
+    --good: #3f7d58;
+    --warn: #9a6b1f;
+    --bad: #a8443c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a;
+      --panel: #1e1f22;
+      --line: #2e3034;
+      --line-soft: #26282b;
+      --text: #e4e3df;
+      --dim: #918d86;
+      --accent: #7fb3a4;
+      --accent-soft: #232a29;
+      --good: #7fb18d;
+      --warn: #c9a05c;
+      --bad: #d18a83;
+    }
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
   header {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
     flex-wrap: wrap;
-    padding: 16px 20px;
+    padding: 14px 24px;
+    background: var(--panel);
     border-bottom: 1px solid var(--line);
-    background: var(--panel);
   }
-  h1 { font-size: 18px; margin: 0 auto 0 0; letter-spacing: 2px; }
-  main { padding: 20px; max-width: 1100px; margin: 0 auto; }
-  section {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 16px;
-    margin-bottom: 16px;
-  }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin: 0 0 12px; }
-  button {
-    background: var(--line);
-    color: var(--text);
+  .mark { font-size: 16px; font-weight: 600; letter-spacing: .14em; margin-right: auto; }
+  .state { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 13px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+  .dot.off { background: var(--warn); }
+  .dot.gone { background: var(--bad); }
+
+  nav { display: flex; gap: 4px; padding: 0 24px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  nav button {
+    background: none;
     border: 0;
-    border-radius: 6px;
-    padding: 7px 14px;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    color: var(--dim);
+    padding: 11px 2px 9px;
+    margin: 0 18px -1px 0;
     font: inherit;
     cursor: pointer;
   }
-  button:hover { background: #39414e; }
-  button.primary { background: var(--accent); color: #0d1116; }
-  button.primary:hover { background: #74b0e5; }
-  button:disabled { opacity: .45; cursor: default; }
-  input[type=number], input[type=text] {
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 7px 10px;
-    font: inherit;
-  }
-  .pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: var(--bg);
-    color: var(--dim);
+  nav button.on { color: var(--text); border-bottom-color: var(--accent); }
+
+  main { padding: 24px; max-width: 1180px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .card + .card { margin-top: 18px; }
+  .card h2 {
     font-size: 12px;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--dim);
+    font-weight: 600;
+    margin: 0;
+    padding: 15px 18px 0;
   }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
-  .dot.off { background: var(--warn); }
-  .counts { display: flex; gap: 20px; flex-wrap: wrap; }
-  .count b { display: block; font-size: 22px; font-weight: 600; }
-  .count span { color: var(--dim); font-size: 12px; }
-  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px; margin-bottom: 12px; }
-  .folders label { display: flex; gap: 8px; align-items: center; overflow: hidden; }
-  .folders span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .folders label.root span { color: var(--accent); }
+  .card .body { padding: 18px; }
+
+  button, select, input[type=text], input[type=number] {
+    font: inherit;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 7px 11px;
+  }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--dim); }
+  button.solid { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button.solid:hover { opacity: .88; }
+  button:disabled { opacity: .4; cursor: default; }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1px; background: var(--line); border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+  .tile { background: var(--panel); padding: 16px 18px; text-align: left; border: 0; border-radius: 0; cursor: pointer; }
+  .tile:hover { background: var(--line-soft); }
+  .tile.on { background: var(--accent-soft); }
+  .tile b { display: block; font-size: 24px; font-weight: 550; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .tile span { color: var(--dim); font-size: 12px; }
+
+  .bar { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+  .bar .grow { flex: 1; min-width: 160px; }
+  .sep { flex-basis: 100%; height: 0; }
+  label.inline { color: var(--dim); font-size: 13px; }
+
   table { width: 100%; border-collapse: collapse; }
-  th {
+  thead th {
     text-align: left;
     font-size: 11px;
+    letter-spacing: .07em;
     text-transform: uppercase;
-    letter-spacing: 1px;
     color: var(--dim);
-    padding: 0 8px 8px;
-    font-weight: 500;
+    font-weight: 600;
+    padding: 10px 10px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
   }
-  td { padding: 8px; border-top: 1px solid var(--line); vertical-align: top; }
-  td.name { word-break: break-all; }
-  td.name small { color: var(--dim); display: block; }
-  .status { font-size: 12px; }
-  .done { color: var(--good); }
-  .lowconf, .undone { color: var(--warn); }
-  .failed { color: var(--bad); }
+  thead th.sortable { cursor: pointer; user-select: none; }
+  thead th.sortable:hover { color: var(--text); }
+  tbody td { padding: 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: var(--line-soft); }
+  .file { font-weight: 500; word-break: break-word; }
+  .path { color: var(--dim); font-size: 12px; word-break: break-all; }
   .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .empty { color: var(--dim); padding: 20px 8px; }
-  @media (max-width: 640px) {
-    .hide-small { display: none; }
-  }
+  .tag { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 999px; border: 1px solid currentColor; }
+  .tag.done { color: var(--good); }
+  .tag.lowconf, .tag.undone { color: var(--warn); }
+  .tag.failed { color: var(--bad); }
+  .weak { color: var(--dim); }
+  .empty { padding: 34px 10px; text-align: center; color: var(--dim); }
+  .scroll { overflow-x: auto; }
+
+  .folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 4px; margin-bottom: 16px; }
+  .folders label { display: flex; gap: 9px; align-items: center; padding: 5px 7px; border-radius: 6px; }
+  .folders label:hover { background: var(--line-soft); }
+  .folders span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .folders label.root span { font-weight: 550; }
+  .hint { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
+  @media (max-width: 720px) { .drop { display: none; } main { padding: 16px; } header, nav { padding-left: 16px; padding-right: 16px; } }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>LAPSE</h1>
-  <span class="pill"><i class="dot" id="dot"></i><span id="status">connecting</span></span>
-  <span class="pill" id="queued">0 queued</span>
+  <span class="mark">LAPSE</span>
+  <span class="state"><i class="dot" id="dot"></i><span id="status">connecting</span></span>
+  <span class="state" id="queued"></span>
   <button id="pause">Pause</button>
-  <button id="scan" class="primary">Scan now</button>
+  <button id="scan" class="solid">Scan now</button>
 </header>
 
+<nav>
+  <button data-tab="library" class="on">Library</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+
 <main>
-  <section>
-    <h2>Library</h2>
-    <div class="counts" id="counts"></div>
-  </section>
+  <div id="library">
+    <div class="tiles" id="tiles"></div>
 
-  <section>
-    <h2>Scanning</h2>
-    <div class="row">
-      <label for="interval">Rescan every</label>
-      <input type="number" id="interval" min="0" step="60" style="width: 110px">
-      <span>seconds, 0 to only follow file events</span>
-      <button id="saveInterval">Save</button>
+    <div class="card" style="margin-top: 18px">
+      <div class="body">
+        <div class="bar">
+          <input type="text" id="search" class="grow" placeholder="Search by name or folder">
+          <label class="inline" for="below">Confidence under</label>
+          <input type="number" id="below" step="0.5" min="0" placeholder="any" style="width: 92px">
+          <span class="sep"></span>
+          <button id="undo">Undo selected</button>
+          <button id="resync">Sync selected again</button>
+          <button id="resyncAll">Sync everything again</button>
+          <span class="grow"></span>
+          <span class="state" id="shown"></span>
+        </div>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 34px"><input type="checkbox" id="all"></th>
+              <th class="sortable" data-sort="srt_path">Subtitle</th>
+              <th class="sortable drop" data-sort="video_path">Video</th>
+              <th class="sortable num" data-sort="offset_ms">Offset</th>
+              <th class="sortable num" data-sort="confidence">Confidence</th>
+              <th class="sortable drop" data-sort="created_at">Last run</th>
+              <th class="sortable" data-sort="status">Status</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
     </div>
-  </section>
+  </div>
 
-  <section>
-    <h2>Folders</h2>
-    <div class="folders" id="folders"></div>
-    <div class="row">
-      <input type="text" id="customPath" placeholder="/media/some/other/folder" style="flex: 1; min-width: 220px">
-      <button id="addPath">Skip this one too</button>
-      <button id="saveFolders" class="primary">Save folders</button>
+  <div id="settings" hidden>
+    <div class="card">
+      <h2>Scanning</h2>
+      <div class="body">
+        <p class="hint">New files are picked up as they land. This is how often the whole library is walked again to catch anything the file events missed.</p>
+        <div class="bar">
+          <label class="inline" for="interval">Rescan every</label>
+          <input type="number" id="interval" min="0" step="60" style="width: 120px">
+          <span class="inline">seconds, 0 to only follow file events</span>
+          <button id="saveInterval">Save</button>
+        </div>
+      </div>
     </div>
-  </section>
 
-  <section>
-    <h2>Subtitles</h2>
-    <div class="row" style="margin-bottom: 12px">
-      <select id="filter" style="background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font: inherit">
-        <option value="">Everything</option>
-        <option value="done">Synced</option>
-        <option value="lowconf">Unsure</option>
-        <option value="failed">Failed</option>
-        <option value="undone">Put back</option>
-      </select>
-      <button id="undo">Undo selected</button>
-      <button id="resync">Sync selected again</button>
-      <button id="resyncAll">Sync everything again</button>
+    <div class="card">
+      <h2>Folders</h2>
+      <div class="body">
+        <p class="hint">Everything you mounted, one level down. Untick a folder and the scanner walks past it. Deeper paths can be typed in below.</p>
+        <div class="folders" id="folders"></div>
+        <div class="bar">
+          <input type="text" id="customPath" class="grow" placeholder="/media/tv/Some Show/Season 3">
+          <button id="addPath">Skip this one too</button>
+          <button id="saveFolders" class="solid">Save folders</button>
+        </div>
+      </div>
     </div>
-    <table>
-      <thead>
-        <tr>
-          <th style="width: 28px"><input type="checkbox" id="all"></th>
-          <th>Subtitle</th>
-          <th class="num">Offset</th>
-          <th class="num hide-small">Confidence</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="jobs"></tbody>
-    </table>
-  </section>
+  </div>
 </main>
 
 <script>
-let state = null;
-let excluded = [];
-let touched = false;
-
 const $ = id => document.getElementById(id);
+const LABELS = { done: "Synced", lowconf: "Unsure", failed: "Failed", undone: "Put back" };
+
+let data = null;
+let excluded = [];
+let editing = false;
+let filter = "";
+let sort = { key: "created_at", down: true };
+
+function safe(text) {
+  return String(text).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function basename(path) {
+  return path.split("/").pop();
+}
+
+function when(stamp) {
+  if (!stamp) return "";
+  const then = new Date(stamp.replace(" ", "T") + "Z");
+  const mins = Math.round((Date.now() - then) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + " min ago";
+  if (mins < 1440) return Math.round(mins / 60) + " h ago";
+  return Math.round(mins / 1440) + " d ago";
+}
 
 async function send(path, body) {
   const answer = await fetch(path, {
@@ -185,13 +263,10 @@ async function send(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body || {})
   });
-  const data = await answer.json();
-  if (data.error) {
-    alert(data.error);
-    return;
-  }
-  touched = false;
-  render(data);
+  const got = await answer.json();
+  if (got.error) return alert(got.error);
+  editing = false;
+  render(got);
 }
 
 async function refresh() {
@@ -200,85 +275,158 @@ async function refresh() {
     render(await answer.json());
   } catch (e) {
     $("status").textContent = "no connection";
-    $("dot").className = "dot off";
+    $("dot").className = "dot gone";
   }
 }
 
-function selected() {
-  return [...document.querySelectorAll("#jobs input:checked")].map(box => Number(box.value));
+function picked() {
+  return [...document.querySelectorAll("#rows input:checked")].map(box => Number(box.value));
 }
 
-function render(data) {
-  state = data;
-  if (!touched) excluded = data.excluded.slice();
+function visible() {
+  const words = $("search").value.trim().toLowerCase();
+  const below = $("below").value === "" ? null : Number($("below").value);
 
-  $("status").textContent = data.paused ? "paused" : "running";
-  $("dot").className = data.paused ? "dot off" : "dot";
-  $("pause").textContent = data.paused ? "Resume" : "Pause";
-  $("queued").textContent = data.queued + " queued";
+  let rows = data.jobs.filter(job => {
+    if (filter && job.status !== filter) return false;
+    if (words && !(job.srt_path + " " + job.video_path).toLowerCase().includes(words)) return false;
+    if (below !== null && !(job.confidence !== null && job.confidence < below)) return false;
+    return true;
+  });
 
-  if (document.activeElement !== $("interval")) $("interval").value = data.interval;
+  rows.sort((a, b) => {
+    const one = a[sort.key], two = b[sort.key];
+    if (one === two) return 0;
+    if (one === null) return 1;
+    if (two === null) return -1;
+    return (one > two ? 1 : -1) * (sort.down ? -1 : 1);
+  });
+  return rows;
+}
 
-  const labels = { done: "Synced", lowconf: "Unsure", failed: "Failed", undone: "Put back" };
-  $("counts").innerHTML = Object.keys(labels).map(key =>
-    `<div class="count"><b>${data.counts[key] || 0}</b><span>${labels[key]}</span></div>`
-  ).join("") + `<div class="count"><b>${data.jobs.length}</b><span>Known pairs</span></div>`;
+function drawTiles() {
+  const counts = data.counts;
+  const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
+  const tiles = [["", "Everything", total]].concat(
+    Object.keys(LABELS).map(key => [key, LABELS[key], counts[key] || 0]));
 
-  $("folders").innerHTML = data.folders.concat(excluded.filter(p => !data.folders.includes(p)))
-    .map(path => {
-      const root = data.roots.includes(path);
-      const on = !excluded.some(prefix => path === prefix || path.startsWith(prefix + "/"));
-      return `<label class="${root ? "root" : ""}">
-        <input type="checkbox" data-path="${path}" ${on ? "checked" : ""}>
-        <span title="${path}">${path}</span>
-      </label>`;
-    }).join("");
+  $("tiles").innerHTML = tiles.map(([key, label, count]) =>
+    `<button class="tile ${filter === key ? "on" : ""}" data-filter="${key}">
+       <b>${count}</b><span>${label}</span>
+     </button>`).join("");
+}
 
-  const wanted = $("filter").value;
-  const rows = data.jobs.filter(job => !wanted || job.status === wanted);
-  $("jobs").innerHTML = rows.length ? rows.map(job => `
+function drawFolders() {
+  const known = data.folders.concat(excluded.filter(path => !data.folders.includes(path)));
+  $("folders").innerHTML = known.map(path => {
+    const root = data.roots.includes(path);
+    const on = !excluded.some(prefix => path === prefix || path.startsWith(prefix + "/"));
+    return `<label class="${root ? "root" : ""}">
+      <input type="checkbox" data-path="${safe(path)}" ${on ? "checked" : ""}>
+      <span title="${safe(path)}">${safe(root ? path : basename(path))}</span>
+    </label>`;
+  }).join("");
+}
+
+function drawRows() {
+  const rows = visible();
+  $("shown").textContent = rows.length + " of " + data.jobs.length;
+  $("all").checked = false;
+
+  if (!rows.length) {
+    $("rows").innerHTML = `<tr><td colspan="7" class="empty">Nothing matches</td></tr>`;
+    return;
+  }
+
+  $("rows").innerHTML = rows.map(job => `
     <tr>
       <td><input type="checkbox" value="${job.id}"></td>
-      <td class="name">${job.srt_path.split("/").pop()}<small>${job.srt_path}</small></td>
+      <td>
+        <div class="file">${safe(basename(job.srt_path))}</div>
+        <div class="path">${safe(job.srt_path)}</div>
+      </td>
+      <td class="drop weak">${safe(basename(job.video_path))}</td>
       <td class="num">${job.offset_ms === null ? "" : Math.round(job.offset_ms) + " ms"}</td>
-      <td class="num hide-small">${job.confidence === null ? "" : job.confidence.toFixed(1)}</td>
-      <td class="status ${job.status}">${labels[job.status] || job.status}</td>
-    </tr>`).join("") : `<tr><td colspan="5" class="empty">Nothing here yet</td></tr>`;
+      <td class="num">${job.confidence === null ? "" : job.confidence.toFixed(1)}</td>
+      <td class="drop weak">${when(job.created_at)}</td>
+      <td><span class="tag ${job.status}">${LABELS[job.status] || job.status}</span></td>
+    </tr>`).join("");
 }
 
-$("pause").onclick = () => send("/api/pause", { paused: !state.paused });
+function render(fresh) {
+  data = fresh;
+  if (!editing) excluded = fresh.excluded.slice();
+
+  $("status").textContent = fresh.paused ? "paused" : "running";
+  $("dot").className = fresh.paused ? "dot off" : "dot";
+  $("pause").textContent = fresh.paused ? "Resume" : "Pause";
+  $("queued").textContent = fresh.queued ? fresh.queued + " folders queued" : "";
+  if (document.activeElement !== $("interval")) $("interval").value = fresh.interval;
+
+  drawTiles();
+  drawFolders();
+  drawRows();
+}
+
+document.querySelectorAll("nav button").forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll("nav button").forEach(other => other.classList.toggle("on", other === tab));
+    $("library").hidden = tab.dataset.tab !== "library";
+    $("settings").hidden = tab.dataset.tab !== "settings";
+  };
+});
+
+document.querySelectorAll("thead th.sortable").forEach(head => {
+  head.onclick = () => {
+    const key = head.dataset.sort;
+    sort = { key, down: sort.key === key ? !sort.down : true };
+    drawRows();
+  };
+});
+
+$("tiles").onclick = e => {
+  const tile = e.target.closest(".tile");
+  if (!tile) return;
+  filter = tile.dataset.filter;
+  drawTiles();
+  drawRows();
+};
+
+$("search").oninput = drawRows;
+$("below").oninput = drawRows;
+$("all").onchange = e => document.querySelectorAll("#rows input").forEach(box => box.checked = e.target.checked);
+
+$("pause").onclick = () => send("/api/pause", { paused: !data.paused });
 $("scan").onclick = () => send("/api/scan");
 $("saveInterval").onclick = () => send("/api/interval", { seconds: Number($("interval").value) });
-$("filter").onchange = () => render(state);
-$("all").onchange = e => document.querySelectorAll("#jobs input").forEach(box => box.checked = e.target.checked);
 
 $("folders").onchange = e => {
   const path = e.target.dataset.path;
-  touched = true;
+  editing = true;
   excluded = excluded.filter(prefix => prefix !== path);
   if (!e.target.checked) excluded.push(path);
-  render(state);
+  drawFolders();
 };
 
 $("addPath").onclick = () => {
   const path = $("customPath").value.trim();
   if (!path) return;
-  touched = true;
+  editing = true;
   if (!excluded.includes(path)) excluded.push(path);
   $("customPath").value = "";
-  render(state);
+  drawFolders();
 };
 
 $("saveFolders").onclick = () => send("/api/excluded", { paths: excluded });
 
 $("undo").onclick = () => {
-  const ids = selected();
+  const ids = picked();
   if (ids.length && confirm("Put the original subtitle back for " + ids.length + " file(s)?"))
     send("/api/undo", { ids });
 };
 
 $("resync").onclick = () => {
-  const ids = selected();
+  const ids = picked();
   if (ids.length) send("/api/resync", { ids });
 };
 
@@ -288,7 +436,7 @@ $("resyncAll").onclick = () => {
 };
 
 refresh();
-setInterval(refresh, 4000);
+setInterval(refresh, 5000);
 </script>
 </body>
 </html>
