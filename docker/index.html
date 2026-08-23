@@ -6,6 +6,7 @@
 <title>lapse</title>
 <style>
   :root {
+    color-scheme: light;
     --bg: #f6f6f4;
     --panel: #ffffff;
     --line: #e3e2de;
@@ -18,20 +19,19 @@
     --warn: #9a6b1f;
     --bad: #a8443c;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #17181a;
-      --panel: #1e1f22;
-      --line: #2e3034;
-      --line-soft: #26282b;
-      --text: #e4e3df;
-      --dim: #918d86;
-      --accent: #7fb3a4;
-      --accent-soft: #232a29;
-      --good: #7fb18d;
-      --warn: #c9a05c;
-      --bad: #d18a83;
-    }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #17181a;
+    --panel: #1e1f22;
+    --line: #2e3034;
+    --line-soft: #26282b;
+    --text: #e4e3df;
+    --dim: #918d86;
+    --accent: #7fb3a4;
+    --accent-soft: #232a29;
+    --good: #7fb18d;
+    --warn: #c9a05c;
+    --bad: #d18a83;
   }
   * { box-sizing: border-box; }
   body {
@@ -145,8 +145,22 @@
   .folders span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .folders label.root span { font-weight: 550; }
   .hint { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
+  #theme { min-width: 74px; }
   @media (max-width: 720px) { .drop { display: none; } main { padding: 16px; } header, nav { padding-left: 16px; padding-right: 16px; } }
 </style>
+<script>
+const THEMES = ["auto", "light", "dark"];
+let theme = localStorage.getItem("theme") || "auto";
+
+function paintTheme() {
+  const dark = theme === "dark" ||
+    (theme === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+}
+
+paintTheme();
+matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
+</script>
 </head>
 <body>
 
@@ -154,6 +168,7 @@
   <span class="mark">LAPSE</span>
   <span class="state"><i class="dot" id="dot"></i><span id="status">connecting</span></span>
   <span class="state" id="queued"></span>
+  <button id="theme" title="Light, dark, or whatever the system is set to"></button>
   <button id="pause">Pause</button>
   <button id="scan" class="solid">Scan now</button>
 </header>
@@ -435,6 +450,19 @@ document.querySelectorAll("nav button").forEach(tab => {
 
 window.onhashchange = () => showTab(location.hash.slice(1));
 showTab(location.hash.slice(1));
+
+function drawTheme() {
+  $("theme").textContent = { auto: "Auto", light: "Light", dark: "Dark" }[theme];
+}
+
+$("theme").onclick = () => {
+  theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+  localStorage.setItem("theme", theme);
+  paintTheme();
+  drawTheme();
+};
+
+drawTheme();
 
 document.querySelectorAll("thead th.sortable").forEach(head => {
   head.onclick = () => {

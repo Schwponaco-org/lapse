@@ -134,6 +134,7 @@ From there you can:
 - **Set the rescan interval** without editing the compose file.
 - **Leave folders out.** Everything you mounted is listed, one level down. Untick what you do not want touched and the scanner walks past it. Paths deeper than that can be typed in.
 - **Translate.** Select subtitles, give a language code and send them off. See `Translation` below.
+- **Light or dark.** The button in the corner follows whatever your system is set to until you press it, and then it stays on what you picked. The choice is kept in the browser, so each device has its own.
 
 The library list filters by status, by name and by confidence, so `Confidence under 5` is a quick way to find the results that did not stand out much and are worth looking at.
 
