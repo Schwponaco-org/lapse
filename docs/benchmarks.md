@@ -6,7 +6,7 @@ one test with a subtitle file that belongs to a different film entirely.
 ## Read this before the tables
 
 ***Note: LAPSE has since received significant changes that improve both
-accuracy and speed, so its current results are likely better than the numbers
+accuracy and speed, so its current results are almost certainly better than the numbers
 below. ffsubsync is still under active development, so its numbers may have
 shifted too. alass sees little to no maintenance these days, so its numbers
 here should still be a reasonably accurate picture.***
@@ -100,6 +100,32 @@ a score and prints it, and will leave the file alone if
 the box a bad answer overwrites a subtitle exactly like a good one. LAPSE
 reports a verdict on every run and does not overwrite unless that verdict is
 `solid`.
+
+## Subtitle formats
+
+|                                   | lapse       | alass       | ffsubsync 0.5.1 |
+| --------------------------------- | :---------: | :---------: | :-------------: |
+| `.srt`                            |     yes     |     yes     |       yes       |
+| `.ass` / `.ssa`                   |     yes     |     yes     |       yes       |
+| `.vtt`                            |     yes     |     no      |       yes       |
+| `.sub` (MicroDVD)                 |     yes     |     no      |    read only    |
+| `.sup` (PGS)                      |     yes     |     no      |       no        |
+| `.idx` (VobSub)                   |     yes     |  reference only  |     no     |
+| `.smi`                            |     yes     |     no      |       no        |
+| `.ttml` / `.dfxp`                 |     yes     |     no      |       no        |
+| `.sbv`                            |     yes     |     no      |       no        |
+| Pull an embedded track out of the video and sync it | yes | no | no |
+
+alass reads `.srt`, `.ssa`/`.ass` and `.idx` and writes back in whatever
+format the file it corrected came in, so an `.ass` file stays `.ass`. `.idx`
+is timing only (it has no text of its own), so alass only reads it as a
+reference, the same way LAPSE does. ffsubsync also reads and writes `.ass`,
+`.ssa` and `.vtt` through pysubs2, and can read `.sub` (MicroDVD) the same
+way, but its writer has no MicroDVD branch, so asking it to save back out as
+`.sub` fails; that combination has to land as `.srt` or an SSA-family format
+instead. Neither tool pulls a subtitle track out of the video file itself, so
+a film whose only subtitle lives inside the mkv has to be extracted by hand
+first.
 
 ## Summary
 
