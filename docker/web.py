@@ -168,7 +168,10 @@ def act(path, body):
     conn = db()
     try:
         if path == "/api/pause":
-            save_setting(conn, "paused", "1" if body.get("paused") else "0")
+            hold = bool(body.get("paused"))
+            save_setting(conn, "paused", "1" if hold else "0")
+            if hold:
+                config["halt"]()
         elif path == "/api/interval":
             save_setting(conn, "scan_interval", max(0, int(body.get("seconds", 0))))
         elif path == "/api/excluded":
@@ -239,9 +242,9 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(answer)
 
 
-def start(port, jobs, roots, db_path, lapse, interval):
+def start(port, jobs, roots, db_path, lapse, interval, halt):
     config.update({"jobs": jobs, "roots": roots, "db_path": db_path,
-                   "lapse": lapse, "interval": interval})
+                   "lapse": lapse, "interval": interval, "halt": halt})
 
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     server.daemon_threads = True
