@@ -56,6 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavcodec59 libavformat59 libavutil57 libswresample4 \
     libfftw3-double3 \
     python3 python3-pip \
+    ffmpeg \
     gosu \
     && rm -rf /var/lib/apt/lists/*
 
