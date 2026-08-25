@@ -40,7 +40,6 @@ MAX_ATTEMPTS   = int(os.environ.get("MAX_ATTEMPTS", "3"))
 TIMEOUT        = int(os.environ.get("TIMEOUT", "1800"))
 POLLING        = os.environ.get("POLLING", "0") == "1"
 OUTPUT_SUFFIX  = os.environ.get("OUTPUT_SUFFIX", "").strip()
-DRY_RUN        = os.environ.get("DRY_RUN", "0") == "1"
 CACHE_DAYS     = int(os.environ.get("CACHE_DAYS", "30"))
 CACHE_DIR      = os.environ.get("LAPSE_CACHE") or os.path.join(os.path.dirname(DB_PATH) or ".", "cache")
 WEB            = os.environ.get("WEB", "1") == "1"
@@ -97,7 +96,7 @@ LANGUAGE_WORDS = {
 
 jobs = queue.Queue()
 running = True
-ENGINE_FLAGS = []
+ENGINE = {}
 EXCLUDED = []
 
 engine = None
@@ -121,13 +120,34 @@ def halt():
         threading.Timer(5, force, [child]).start()
 
 
+def engine_defaults():
+    options = {"mode": MODE, "penalty": PENALTY, "suffix": OUTPUT_SUFFIX}
+    for name, option in SWITCHES:
+        options[name.lower()] = os.environ.get(name, "0") == "1"
+    for name, option in VALUES:
+        options[name.lower()] = os.environ.get(name, "").strip()
+    return options
+
+
+def engine_options(conn):
+    options = engine_defaults()
+    options.update(json.loads(setting(conn, "engine", "{}")))
+    return options
+
+
+def save_engine(conn, options):
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('engine', ?)",
+                 (json.dumps(options),))
+    conn.commit()
+
+
 def engine_flags():
     flags = []
     for name, option in SWITCHES:
-        if os.environ.get(name, "0") == "1":
+        if ENGINE.get(name.lower()):
             flags.append(option)
     for name, option in VALUES:
-        value = os.environ.get(name, "").strip()
+        value = str(ENGINE.get(name.lower()) or "").strip()
         if value:
             flags += [option, value]
     return flags
@@ -161,10 +181,11 @@ def drop_leftovers(*paths):
 
 
 def output_for(srt_path):
-    if not OUTPUT_SUFFIX:
+    suffix = ENGINE.get("suffix") or ""
+    if not suffix:
         return None
     base, ext = os.path.splitext(srt_path)
-    return base + OUTPUT_SUFFIX + ext
+    return base + suffix + ext
 
 
 def engine_formats():
@@ -265,7 +286,8 @@ def normalize(name):
 def ours(base):
     if base.endswith(".lapse-unsure") or base.endswith(".lapse"):
         return True
-    return bool(OUTPUT_SUFFIX) and base.endswith(OUTPUT_SUFFIX)
+    suffix = ENGINE.get("suffix") or ""
+    return bool(suffix) and base.endswith(suffix)
 
 
 def subtitle_tokens(base):
@@ -430,10 +452,11 @@ def parse_output(output):
 
 
 def run_sync(video_path, srt_path):
-    command = [LAPSE, video_path, srt_path, MODE, "--json"]
-    if MODE == "split":
-        command.insert(4, PENALTY)
-    command += ENGINE_FLAGS
+    mode = ENGINE.get("mode") or MODE
+    command = [LAPSE, video_path, srt_path, mode, "--json"]
+    if mode == "split":
+        command.insert(4, str(ENGINE.get("penalty") or PENALTY))
+    command += engine_flags()
 
     output = output_for(srt_path)
     if output:
@@ -528,11 +551,11 @@ def process(conn, video_path, srt_path):
         return "stopped"
     except Exception as e:
         print("Failed:", srt_path, "->", e)
-        if not DRY_RUN:
+        if not ENGINE.get("dry_run"):
             save_result(conn, video_path, srt_path, None, {}, attempts, "failed")
         return "failed"
 
-    if DRY_RUN:
+    if ENGINE.get("dry_run"):
         return "dryrun"
 
     backup_path = srt_path + ".bak"
@@ -554,7 +577,7 @@ def process(conn, video_path, srt_path):
     if status == "done" and MIN_CONFIDENCE > 0 and confidence is not None \
             and confidence < MIN_CONFIDENCE:
         written_to = values.get("output")
-        if OUTPUT_SUFFIX and written_to and written_to != srt_path:
+        if ENGINE.get("suffix") and written_to and written_to != srt_path:
             os.remove(written_to)
             print("Confidence %.2f is under %.2f, threw the result away: %s" % (confidence, MIN_CONFIDENCE, written_to))
             status = "lowconf"
@@ -575,12 +598,13 @@ def process(conn, video_path, srt_path):
 
 
 def run_scan(conn, path, verbose=False):
-    global EXCLUDED
+    global EXCLUDED, ENGINE
 
     if not os.path.isdir(path):
         return
 
     EXCLUDED = json.loads(setting(conn, "excluded", "[]"))
+    ENGINE = engine_options(conn)
     if blocked(path):
         return
 
@@ -680,7 +704,7 @@ def stop(signum, frame):
 
 
 def main():
-    global ENGINE_FORMATS, SUBTITLE_EXTS, ENGINE_FLAGS
+    global ENGINE_FORMATS, SUBTITLE_EXTS, ENGINE
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -689,12 +713,16 @@ def main():
     os.environ["LAPSE_CACHE"] = CACHE_DIR
     prune_cache()
 
-    ENGINE_FLAGS = engine_flags()
-    if ENGINE_FLAGS:
-        print("Engine flags:", " ".join(ENGINE_FLAGS))
-    if OUTPUT_SUFFIX:
-        print("Writing results as name%s.ext beside the original" % OUTPUT_SUFFIX)
-    if DRY_RUN:
+    conn = init_db()
+    ENGINE = engine_options(conn)
+    save_engine(conn, ENGINE)
+
+    flags = engine_flags()
+    if flags:
+        print("Engine flags:", " ".join(flags))
+    if ENGINE["suffix"]:
+        print("Writing results as name%s.ext beside the original" % ENGINE["suffix"])
+    if ENGINE["dry_run"]:
         print("Dry run, nothing will be written or recorded")
 
     ENGINE_FORMATS = engine_formats()
@@ -702,7 +730,6 @@ def main():
     print("Engine reads:", " ".join(sorted(ENGINE_FORMATS)))
     print("Library:", ", ".join(MEDIA_ROOTS))
 
-    conn = init_db()
     observer = start_watching()
 
     server = None
