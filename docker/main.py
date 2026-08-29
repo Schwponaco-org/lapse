@@ -242,6 +242,12 @@ def init_db():
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS video_tracks (
+            video_path TEXT PRIMARY KEY,
+            tracks INTEGER
+        )
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS translations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             source_path TEXT NOT NULL,
@@ -525,7 +531,33 @@ def our_translation(conn, path):
     return conn.execute("SELECT 1 FROM translations WHERE output_path = ?", (path,)).fetchone() is not None
 
 
+def count_tracks(video_path):
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "s",
+             "-show_entries", "stream=index", "-of", "csv=p=0", video_path],
+            capture_output=True, text=True, timeout=60)
+    except Exception:
+        return 0
+    found = 0
+    for line in (result.stdout or "").splitlines():
+        if line.strip():
+            found = found + 1
+    return found
+
+
+def remember_tracks(conn, video_path):
+    row = conn.execute("SELECT tracks FROM video_tracks WHERE video_path = ?",
+                       (video_path,)).fetchone()
+    if row is not None:
+        return
+    conn.execute("INSERT OR REPLACE INTO video_tracks (video_path, tracks) VALUES (?, ?)",
+                 (video_path, count_tracks(video_path)))
+    conn.commit()
+
+
 def process(conn, video_path, srt_path):
+    remember_tracks(conn, video_path)
     ext = os.path.splitext(srt_path)[1].lower()
     if ext not in ENGINE_FORMATS:
         return "unsupported"
@@ -735,7 +767,8 @@ def main():
     server = None
     if WEB:
         try:
-            server = web.start(WEB_PORT, jobs, MEDIA_ROOTS, DB_PATH, LAPSE, SCAN_INTERVAL, halt)
+            server = web.start(WEB_PORT, jobs, MEDIA_ROOTS, DB_PATH, LAPSE, SCAN_INTERVAL,
+                               halt, ENGINE_FORMATS)
             print("Web interface on port", WEB_PORT)
         except OSError as e:
             print("Could not open the web interface:", e)
