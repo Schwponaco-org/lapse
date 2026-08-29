@@ -7,31 +7,35 @@
 <style>
   :root {
     color-scheme: light;
-    --bg: #f6f6f4;
+    --bg: #f5f7fa;
     --panel: #ffffff;
-    --line: #e3e2de;
-    --line-soft: #eeedea;
-    --text: #26241f;
-    --dim: #78746c;
-    --accent: #3c6e63;
-    --accent-soft: #eef3f1;
-    --good: #3f7d58;
-    --warn: #9a6b1f;
-    --bad: #a8443c;
+    --line: #dcdcdc;
+    --line-soft: #eff1f3;
+    --text: #515253;
+    --dim: #7f8285;
+    --accent: #5799ef;
+    --accent-soft: #e4eefb;
+    --bar: #3a3f51;
+    --barText: #dfe0e2;
+    --good: #27c24c;
+    --warn: #ffa500;
+    --bad: #f05050;
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --bg: #17181a;
-    --panel: #1e1f22;
-    --line: #2e3034;
-    --line-soft: #26282b;
-    --text: #e4e3df;
-    --dim: #918d86;
-    --accent: #7fb3a4;
-    --accent-soft: #232a29;
-    --good: #7fb18d;
-    --warn: #c9a05c;
-    --bad: #d18a83;
+    --bg: #1f2225;
+    --panel: #2a2d30;
+    --line: #3a3f44;
+    --line-soft: #303438;
+    --text: #cccccc;
+    --dim: #8c9296;
+    --accent: #5799ef;
+    --accent-soft: #2f3b4b;
+    --bar: #23272a;
+    --barText: #cccccc;
+    --good: #27c24c;
+    --warn: #ffa500;
+    --bad: #f05050;
   }
   * { box-sizing: border-box; }
   body {
@@ -44,67 +48,76 @@
   header {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
     flex-wrap: wrap;
-    padding: 14px 24px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--line);
+    padding: 9px 18px;
+    background: var(--bar);
+    color: var(--barText);
+    border-bottom: 1px solid #000;
   }
-  .mark { font-size: 16px; font-weight: 600; letter-spacing: .14em; margin-right: auto; }
-  .state { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 13px; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
-  .dot.off { background: var(--warn); }
-  .dot.gone { background: var(--bad); }
+  .mark { font-size: 15px; font-weight: 700; letter-spacing: .18em; margin-right: auto; }
+  .state { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 12px; }
+  header .state { color: #9aa0a6; }
 
-  nav { display: flex; gap: 4px; padding: 0 24px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  nav { display: flex; padding: 0 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
   nav button {
     background: none;
     border: 0;
-    border-bottom: 2px solid transparent;
+    border-bottom: 3px solid transparent;
     border-radius: 0;
     color: var(--dim);
-    padding: 11px 2px 9px;
-    margin: 0 18px -1px 0;
+    padding: 10px 0 7px;
+    margin: 0 20px -1px 0;
     font: inherit;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
     cursor: pointer;
   }
-  nav button.on { color: var(--text); border-bottom-color: var(--accent); }
+  nav button.on { color: var(--accent); border-bottom-color: var(--accent); }
 
-  main { padding: 24px; max-width: 1180px; margin: 0 auto; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
-  .card + .card { margin-top: 18px; }
+  main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 2px; }
+  .card + .card { margin-top: 14px; }
   .card h2 {
-    font-size: 12px;
+    font-size: 11px;
     letter-spacing: .09em;
     text-transform: uppercase;
     color: var(--dim);
-    font-weight: 600;
+    font-weight: 700;
     margin: 0;
-    padding: 15px 18px 0;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line-soft);
+    background: var(--line-soft);
   }
-  .card .body { padding: 18px; }
+  .card .body { padding: 14px; }
 
   button, select, input[type=text], input[type=number] {
     font: inherit;
+    font-size: 13px;
     color: var(--text);
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 7px;
-    padding: 7px 11px;
+    border-radius: 2px;
+    padding: 5px 9px;
   }
+  header button { background: #4a5062; border-color: #22252d; color: var(--barText); }
   button { cursor: pointer; }
   button:hover:not(:disabled) { border-color: var(--dim); }
-  button.solid { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button.solid { background: var(--accent); border-color: #4784d4; color: #fff; }
   button.solid:hover { opacity: .88; }
   button:disabled { opacity: .4; cursor: default; }
   input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1px; background: var(--line); border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
-  .tile { background: var(--panel); padding: 16px 18px; text-align: left; border: 0; border-radius: 0; cursor: pointer; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 1px; background: var(--line); overflow: hidden; border: 1px solid var(--line); border-radius: 2px; }
+  .tile { background: var(--panel); padding: 12px 14px; text-align: left; border: 0; border-radius: 0; cursor: pointer; }
   .tile:hover { background: var(--line-soft); }
-  .tile.on { background: var(--accent-soft); }
-  .tile b { display: block; font-size: 24px; font-weight: 550; line-height: 1.2; font-variant-numeric: tabular-nums; }
-  .tile span { color: var(--dim); font-size: 12px; }
+  .tile.on { background: var(--accent-soft); box-shadow: inset 0 -3px 0 var(--accent); }
+  .tile b { display: block; font-size: 22px; font-weight: 400; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .tile span { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+
+  .films { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--dim); }
+  .films label { display: flex; gap: 6px; align-items: center; }
 
   .bar { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
   .bar .grow { flex: 1; min-width: 160px; }
@@ -125,16 +138,17 @@
   }
   thead th.sortable { cursor: pointer; user-select: none; }
   thead th.sortable:hover { color: var(--text); }
-  tbody td { padding: 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  tbody td { padding: 7px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; font-size: 13px; }
+  tbody tr:nth-child(even) { background: var(--line-soft); }
   tbody tr:last-child td { border-bottom: 0; }
-  tbody tr:hover { background: var(--line-soft); }
-  .file { font-weight: 500; word-break: break-word; }
-  .path { color: var(--dim); font-size: 12px; word-break: break-all; }
+  tbody tr:hover { background: var(--accent-soft); }
+  .file { font-weight: 400; word-break: break-word; }
+  .path { color: var(--dim); font-size: 11px; word-break: break-all; }
   .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .tag { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 999px; border: 1px solid currentColor; }
-  .tag.done { color: var(--good); }
-  .tag.lowconf, .tag.undone { color: var(--warn); }
-  .tag.failed { color: var(--bad); }
+  .tag { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 2px; color: #fff; }
+  .tag.done { background: var(--good); }
+  .tag.lowconf, .tag.undone { background: var(--warn); }
+  .tag.failed { background: var(--bad); }
   .weak { color: var(--dim); }
   .empty { padding: 34px 10px; text-align: center; color: var(--dim); }
   .scroll { overflow-x: auto; }
@@ -147,7 +161,7 @@
   .hint { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
   #theme { min-width: 74px; }
 
-  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 18px; width: min(580px, 92vw); }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 2px; padding: 16px; width: min(580px, 92vw); }
   dialog::backdrop { background: rgba(0, 0, 0, .45); }
   dialog h3 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
   .preview { margin: 14px 0; }
@@ -176,7 +190,6 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
 
 <header>
   <span class="mark">LAPSE</span>
-  <span class="state"><i class="dot" id="dot"></i><span id="status">connecting</span></span>
   <span class="state" id="queued"></span>
   <button id="theme" title="Light, dark, or whatever the system is set to"></button>
   <button id="pause">Pause</button>
@@ -193,7 +206,12 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
   <div id="library">
     <div class="tiles" id="tiles"></div>
 
-    <div class="card" style="margin-top: 18px">
+    <div class="films">
+      <span id="filmline"></span>
+      <label><input type="checkbox" id="countEmbedded"> Count embedded tracks too</label>
+    </div>
+
+    <div class="card" style="margin-top: 14px">
       <div class="body">
         <div class="bar">
           <input type="text" id="search" class="grow" placeholder="Search by name or folder">
@@ -202,6 +220,8 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
           <span class="sep"></span>
           <button id="undo">Undo selected</button>
           <button id="shift">Shift selected</button>
+          <button id="convert">Convert selected</button>
+          <button id="toReference">Sync to reference</button>
           <button id="resync">Sync selected again</button>
           <button id="resyncAll">Sync everything again</button>
           <input type="text" id="language" placeholder="da" style="width: 70px">
@@ -353,6 +373,50 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
   </div>
 </dialog>
 
+<dialog id="convertBox">
+  <h3>Convert subtitles</h3>
+  <p class="hint" id="convertFile"></p>
+  <div class="bar row">
+    <label class="inline" for="format">Write as</label>
+    <select id="format">
+      <option value=".srt">.srt</option>
+      <option value=".vtt">.vtt</option>
+      <option value=".ass">.ass</option>
+      <option value=".ssa">.ssa</option>
+    </select>
+    <label class="inline"><input type="checkbox" id="drop"> Remove the original once it is written</label>
+  </div>
+  <div class="bar row">
+    <span class="grow"></span>
+    <button id="convertClose">Cancel</button>
+    <button id="convertGo" class="solid">Convert</button>
+  </div>
+</dialog>
+
+<dialog id="referenceBox">
+  <h3>Sync subtitles to reference</h3>
+  <p class="hint" id="referenceFile"></p>
+  <div class="bar row">
+    <label class="inline" for="reference">Already correct</label>
+    <input type="text" id="reference" class="grow" list="referenceList">
+    <datalist id="referenceList"></datalist>
+  </div>
+  <div class="bar row">
+    <label class="inline"><input type="checkbox" id="referenceAll"> Do every other track in the same folder</label>
+  </div>
+  <div class="bar row">
+    <select id="referenceOutput">
+      <option value="new">Write a new file</option>
+      <option value="new_backup">Write a new file, keep a backup</option>
+      <option value="overwrite_backup" selected>Overwrite, keep a backup</option>
+      <option value="overwrite">Overwrite, no backup</option>
+    </select>
+    <span class="grow"></span>
+    <button id="referenceClose">Cancel</button>
+    <button id="referenceGo" class="solid">Sync</button>
+  </div>
+</dialog>
+
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { done: "Synced", lowconf: "Unsure", failed: "Failed", undone: "Put back" };
@@ -418,9 +482,9 @@ async function refresh() {
   try {
     const answer = await fetch("/api/state");
     render(await answer.json());
+    document.title = "lapse";
   } catch (e) {
-    $("status").textContent = "no connection";
-    $("dot").className = "dot gone";
+    document.title = "lapse (no connection)";
   }
 }
 
@@ -547,18 +611,28 @@ function render(fresh) {
   data = fresh;
   if (!editing) excluded = fresh.excluded.slice();
 
-  $("status").textContent = fresh.paused ? "paused" : "running";
-  $("dot").className = fresh.paused ? "dot off" : "dot";
   $("pause").textContent = fresh.paused ? "Resume" : "Pause";
   $("queued").textContent = fresh.queued ? fresh.queued + " folders queued" : "";
   if (document.activeElement !== $("interval")) $("interval").value = fresh.interval;
 
   drawTiles();
+  drawFilms();
   drawFolders();
   drawRows();
   drawTranslations();
   drawEngine();
 }
+
+function drawFilms() {
+  const f = data.films;
+  let text = f.total + " films, " + f.full + " fully synced";
+  if (f.part > 0) text = text + ", " + f.part + " partly";
+  if (f.none > 0) text = text + ", " + f.none + " not touched";
+  $("filmline").textContent = text;
+  if (document.activeElement !== $("countEmbedded")) $("countEmbedded").checked = data.count_embedded;
+}
+
+$("countEmbedded").onchange = () => send("/api/embedded", { on: $("countEmbedded").checked });
 
 const TABS = ["library", "translations", "settings"];
 
@@ -692,6 +766,52 @@ $("shiftGo").onclick = () => {
     ids: chosen,
     ms: Number($("shiftMs").value) || 0,
     output: $("shiftOutput").value
+  });
+};
+
+$("convert").onclick = () => {
+  chosen = picked();
+  if (!chosen.length) return alert("Pick a subtitle first");
+  $("convertFile").textContent = chosen.length === 1 ? "One subtitle" : chosen.length + " subtitles";
+  $("convertBox").showModal();
+};
+
+$("convertClose").onclick = () => $("convertBox").close();
+
+$("convertGo").onclick = () => {
+  $("convertBox").close();
+  send("/api/convert", { ids: chosen, format: $("format").value, drop: $("drop").checked });
+};
+
+$("toReference").onclick = async () => {
+  chosen = picked();
+  if (!chosen.length) return alert("Pick a subtitle first");
+
+  const got = await ask("/api/neighbours", { ids: chosen });
+  if (!got) return;
+
+  let options = "";
+  for (let i = 0; i < got.paths.length; i++) {
+    options = options + `<option value="${safe(got.paths[i])}">`;
+  }
+  $("referenceList").innerHTML = options;
+  $("reference").value = got.paths[0] || "";
+  $("referenceAll").checked = false;
+  $("referenceFile").textContent = chosen.length === 1
+    ? "One subtitle lined up against the one you pick"
+    : chosen.length + " subtitles lined up against the one you pick";
+  $("referenceBox").showModal();
+};
+
+$("referenceClose").onclick = () => $("referenceBox").close();
+
+$("referenceGo").onclick = () => {
+  $("referenceBox").close();
+  send("/api/reference", {
+    ids: chosen,
+    reference: $("reference").value.trim(),
+    everything: $("referenceAll").checked,
+    output: $("referenceOutput").value
   });
 };
 

@@ -87,6 +87,8 @@ def state():
             "waiting": waiting.qsize(),
         },
         "engine": json.loads(setting(conn, "engine", "{}")),
+        "count_embedded": setting(conn, "count_embedded", "0") == "1",
+        "films": films(conn, setting(conn, "count_embedded", "0") == "1"),
         "interval": int(setting(conn, "scan_interval", config["interval"])),
         "excluded": json.loads(setting(conn, "excluded", "[]")),
         "folders": folders(),
@@ -178,6 +180,145 @@ def shift(conn, ids, ms, mode):
     conn.commit()
 
 
+def engine_json(text):
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except ValueError:
+                pass
+    return {}
+
+
+def inside_library(path):
+    for root in config["roots"]:
+        if path == root or path.startswith(root + os.sep):
+            return True
+    return False
+
+
+def neighbours(conn, ids):
+    found = []
+    for job_id in ids:
+        row = job(conn, job_id)
+        if not row:
+            continue
+        folder = os.path.dirname(row["srt_path"])
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            continue
+        for name in names:
+            if name.startswith("."):
+                continue
+            if os.path.splitext(name)[1].lower() in config["formats"]:
+                full = os.path.join(folder, name)
+                if full not in found:
+                    found.append(full)
+    found.sort()
+    return found
+
+
+def sync_one(conn, row, reference, mode):
+    target = row["srt_path"]
+    command = [config["lapse"], reference, target, "--json"]
+
+    if mode.startswith("new"):
+        base, ext = os.path.splitext(target)
+        command = command + ["--output", base + ".synced" + ext]
+    if mode == "new" or mode == "overwrite":
+        command.append("--no-backup")
+
+    result = subprocess.run(command, capture_output=True, text=True, timeout=600)
+    values = engine_json(result.stdout or "")
+    if not values:
+        raise RuntimeError((result.stderr or "").strip() or "lapse said nothing")
+
+    written = values.get("output") or target
+    if not values.get("written") or not os.path.exists(written):
+        conn.execute("UPDATE sync_jobs SET status = 'lowconf' WHERE id = ?", (row["id"],))
+        return
+
+    if values.get("verdict") == "solid":
+        status = "done"
+    else:
+        status = "lowconf"
+
+    if written == target:
+        conn.execute(
+            "UPDATE sync_jobs SET offset_ms = ?, confidence = ?, srt_mtime = ?, status = ? WHERE id = ?",
+            (values.get("offset_ms"), values.get("confidence"),
+             os.path.getmtime(written), status, row["id"])
+        )
+    else:
+        note_written(conn, row, written, values.get("offset_ms"))
+
+
+def reference_sync(conn, ids, reference, everything, mode):
+    if not reference:
+        raise RuntimeError("Say which subtitle is already correct")
+    if not inside_library(reference) or not os.path.isfile(reference):
+        raise RuntimeError("No such subtitle in the library: " + reference)
+
+    if everything:
+        folder = os.path.dirname(reference)
+        ids = []
+        for row in conn.execute("SELECT id, srt_path FROM sync_jobs"):
+            if os.path.dirname(row["srt_path"]) == folder:
+                ids.append(row["id"])
+
+    for job_id in ids:
+        row = job(conn, job_id)
+        if row and row["srt_path"] != reference:
+            sync_one(conn, row, reference, mode)
+    conn.commit()
+
+
+def convert(conn, ids, want, drop):
+    for job_id in ids:
+        row = job(conn, job_id)
+        if not row:
+            continue
+        written = subs.convert(row["srt_path"], want, drop)
+        note_written(conn, row, written, row["offset_ms"])
+        if drop:
+            conn.execute("DELETE FROM sync_jobs WHERE id = ?", (job_id,))
+    conn.commit()
+
+
+def films(conn, count_embedded):
+    videos = {}
+    for row in conn.execute("SELECT video_path, status FROM sync_jobs"):
+        if row["video_path"] not in videos:
+            videos[row["video_path"]] = []
+        videos[row["video_path"]].append(row["status"])
+
+    tracks = {}
+    for row in conn.execute("SELECT video_path, tracks FROM video_tracks"):
+        tracks[row["video_path"]] = row["tracks"]
+
+    full = 0
+    part = 0
+    none = 0
+    for video in videos:
+        wanted = len(videos[video])
+        if count_embedded:
+            wanted = wanted + tracks.get(video, 0)
+        ok = 0
+        for status in videos[video]:
+            if status == "done":
+                ok = ok + 1
+        if ok == 0:
+            none = none + 1
+        elif ok >= wanted:
+            full = full + 1
+        else:
+            part = part + 1
+
+    return {"total": len(videos), "full": full, "part": part, "none": none}
+
+
 def queue_translations(conn, ids, language):
     if not language:
         raise RuntimeError("Say which language to translate into")
@@ -217,6 +358,16 @@ def act(path, body):
             return {"path": row["srt_path"], "cues": subs.preview(row["srt_path"])}
         elif path == "/api/shift":
             shift(conn, wanted_ids(body), int(body.get("ms", 0)), output_mode(body))
+        elif path == "/api/neighbours":
+            return {"paths": neighbours(conn, wanted_ids(body))}
+        elif path == "/api/reference":
+            reference_sync(conn, wanted_ids(body), (body.get("reference") or "").strip(),
+                           bool(body.get("everything")), output_mode(body))
+        elif path == "/api/convert":
+            convert(conn, wanted_ids(body), (body.get("format") or "").lower(),
+                    bool(body.get("drop")))
+        elif path == "/api/embedded":
+            save_setting(conn, "count_embedded", "1" if body.get("on") else "0")
         elif path == "/api/pause":
             hold = bool(body.get("paused"))
             save_setting(conn, "paused", "1" if hold else "0")
@@ -298,9 +449,9 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(answer)
 
 
-def start(port, jobs, roots, db_path, lapse, interval, halt):
-    config.update({"jobs": jobs, "roots": roots, "db_path": db_path,
-                   "lapse": lapse, "interval": interval, "halt": halt})
+def start(port, jobs, roots, db_path, lapse, interval, halt, formats):
+    config.update({"jobs": jobs, "roots": roots, "db_path": db_path, "lapse": lapse,
+                   "interval": interval, "halt": halt, "formats": formats})
 
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     server.daemon_threads = True

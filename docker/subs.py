@@ -124,3 +124,134 @@ def save(path, lines, mode, suffix):
 def shift(path, ms, mode, suffix=".shifted"):
     ass = kind(path) in (".ass", ".ssa")
     return save(path, moved(read(path), ms, ass), mode, suffix)
+
+
+def text_cues(lines):
+    cues = []
+    for number, line in enumerate(lines):
+        if "-->" not in line:
+            continue
+        left, right = line.split("-->", 1)
+        start, end = to_ms(left), to_ms(right.strip())
+        if start is None or end is None:
+            continue
+        body = []
+        for after in lines[number + 1:]:
+            if not after.strip():
+                break
+            body.append(after.rstrip("\r\n"))
+        cues.append((start, end, body))
+    return cues
+
+
+def ass_cues(lines):
+    cues = []
+    for line in lines:
+        fields = dialogue(line)
+        if not fields:
+            continue
+        start, end = to_ms(fields[1]), to_ms(fields[2])
+        if start is None or end is None:
+            continue
+        text = re.sub(r"\{[^}]*\}", "", ",".join(fields[9:]).rstrip("\r\n"))
+        cues.append((start, end, re.split(r"\\[Nn]", text)))
+    return cues
+
+
+def cues_of(path):
+    lines = read(path)
+    if kind(path) in (".ass", ".ssa"):
+        cues = ass_cues(lines)
+    else:
+        cues = text_cues(lines)
+    if not cues:
+        raise RuntimeError("Found no cues in " + os.path.basename(path))
+    return cues
+
+
+def as_srt(cues):
+    out = []
+    number = 1
+    for start, end, body in cues:
+        out.append("%d\n" % number)
+        out.append("%s --> %s\n" % (from_ms(start, False), from_ms(end, False)))
+        for line in body:
+            out.append(line + "\n")
+        out.append("\n")
+        number = number + 1
+    return out
+
+
+def as_vtt(cues):
+    out = ["WEBVTT\n", "\n"]
+    for start, end, body in cues:
+        out.append("%s --> %s\n" % (from_ms(start, True), from_ms(end, True)))
+        for line in body:
+            out.append(line + "\n")
+        out.append("\n")
+    return out
+
+
+ASS_HEAD = """[Script Info]
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+SSA_HEAD = """[Script Info]
+ScriptType: v4.00
+
+[V4 Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, TertiaryColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, AlphaLevel, Encoding
+Style: Default,Arial,20,16777215,255,0,0,0,0,1,2,0,2,10,10,10,0,1
+
+[Events]
+Format: Marked, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+
+def as_ass(cues):
+    out = [ASS_HEAD]
+    for start, end, body in cues:
+        out.append("Dialogue: 0,%s,%s,Default,,0,0,0,,%s\n"
+                   % (from_ms_ass(start), from_ms_ass(end), "\\N".join(body)))
+    return out
+
+
+def as_ssa(cues):
+    out = [SSA_HEAD]
+    for start, end, body in cues:
+        out.append("Dialogue: Marked=0,%s,%s,Default,,0,0,0,,%s\n"
+                   % (from_ms_ass(start), from_ms_ass(end), "\\N".join(body)))
+    return out
+
+
+WRITERS = {".srt": as_srt, ".vtt": as_vtt, ".ass": as_ass, ".ssa": as_ssa}
+
+
+def convert(path, want, drop):
+    if want not in WRITERS:
+        raise RuntimeError("Cannot write that format: " + str(want))
+
+    target = os.path.splitext(path)[0] + want
+    if target == path:
+        raise RuntimeError(os.path.basename(path) + " is " + want + " already")
+
+    cues = cues_of(path)
+    if os.path.exists(target) and not os.path.exists(target + ".bak"):
+        shutil.copy2(target, target + ".bak")
+
+    with open(target + ".part", "w", encoding="utf-8") as file:
+        file.writelines(WRITERS[want](cues))
+    os.replace(target + ".part", target)
+
+    if drop:
+        os.remove(path)
+    return target

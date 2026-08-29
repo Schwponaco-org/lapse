@@ -136,6 +136,9 @@ From there you can:
 - **Translate.** Select subtitles, give a language code and send them off. See `Translation` below.
 - **Light or dark.** The button in the corner follows whatever your system is set to until you press it, and then it stays on what you picked. The choice is kept in the browser, so each device has its own.
 - **Shift.** Move a subtitle by hand, in milliseconds, for when a sync came out close but not quite right. The first cues are shown before and after as you type, and you pick whether the result lands beside the original or over it. Nothing is decoded and the engine is not involved, so it is instant. `.srt`, `.vtt`, `.ass` and `.ssa`.
+- **Sync subtitles to reference.** For items with several subtitle tracks where one is already correct. Lines every other track up against it, or just the one track you pick. Skips the audio entirely, so it is fast and usually more accurate than syncing each track on its own.
+- **Convert.** Write a subtitle out as `.srt`, `.vtt`, `.ass` or `.ssa`, leaving the original where it is unless you tick the box. An existing file at the new name is kept as `.bak` first.
+- **Film counts.** The line under the tiles says how many films are fully synced, partly synced or untouched. Subtitle tracks inside the video are left out of that sum by default, so a film with two external subtitles that are both synced counts as fully synced even when the container holds eight more. Tick `Count embedded tracks too` to have them count against it instead.
 - **Change the engine settings.** Mode, file output, confidence and every switch the CLI takes, under Settings. See `Engine settings` below.
 
 The library list filters by status, by name and by confidence, so `Confidence under 5` is a quick way to find the results that did not stand out much and are worth looking at.
