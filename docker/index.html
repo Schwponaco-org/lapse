@@ -147,6 +147,11 @@
   .hint { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
   #theme { min-width: 74px; }
 
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 18px; width: min(580px, 92vw); }
+  dialog::backdrop { background: rgba(0, 0, 0, .45); }
+  dialog h3 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+  .preview { margin: 14px 0; }
+
   .switches { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 4px; margin: 14px 0; }
   .switches label { display: flex; gap: 9px; align-items: center; padding: 5px 7px; border-radius: 6px; }
   .switches label:hover { background: var(--line-soft); }
@@ -196,6 +201,7 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
           <input type="number" id="below" step="0.5" min="0" placeholder="any" style="width: 92px">
           <span class="sep"></span>
           <button id="undo">Undo selected</button>
+          <button id="shift">Shift selected</button>
           <button id="resync">Sync selected again</button>
           <button id="resyncAll">Sync everything again</button>
           <input type="text" id="language" placeholder="da" style="width: 70px">
@@ -324,6 +330,29 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
   </div>
 </main>
 
+<dialog id="shiftBox">
+  <h3>Shift subtitles</h3>
+  <p class="hint" id="shiftFile"></p>
+  <div class="bar">
+    <button id="shiftBack">-100 ms</button>
+    <input type="number" id="shiftMs" step="50" value="0" style="width: 110px">
+    <button id="shiftOn">+100 ms</button>
+    <span class="grow"></span>
+    <select id="shiftOutput">
+      <option value="new">Write a new file</option>
+      <option value="new_backup">Write a new file, keep a backup</option>
+      <option value="overwrite_backup">Overwrite, keep a backup</option>
+      <option value="overwrite">Overwrite, no backup</option>
+    </select>
+  </div>
+  <table class="preview"><tbody id="shiftCues"></tbody></table>
+  <div class="bar">
+    <span class="grow"></span>
+    <button id="shiftClose">Cancel</button>
+    <button id="shiftGo" class="solid">Shift</button>
+  </div>
+</dialog>
+
 <script>
 const $ = id => document.getElementById(id);
 const LABELS = { done: "Synced", lowconf: "Unsure", failed: "Failed", undone: "Put back" };
@@ -332,6 +361,8 @@ const NUMBERS = ["penalty", "confidence", "audio_track", "sub_track", "fps"];
 
 let data = null;
 let excluded = [];
+let chosen = [];
+let cues = [];
 let editing = false;
 let filter = "";
 let sort = { key: "created_at", down: true };
@@ -354,16 +385,33 @@ function when(stamp) {
   return Math.round(mins / 1440) + " d ago";
 }
 
-async function send(path, body) {
+async function ask(path, body) {
   const answer = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body || {})
   });
   const got = await answer.json();
-  if (got.error) return alert(got.error);
+  if (got.error) {
+    alert(got.error);
+    return null;
+  }
+  return got;
+}
+
+async function send(path, body) {
+  const got = await ask(path, body);
+  if (!got) return;
   editing = false;
   render(got);
+}
+
+function clock(ms) {
+  const sign = ms < 0 ? "-" : "";
+  ms = Math.abs(Math.round(ms));
+  const parts = [Math.floor(ms / 3600000), Math.floor(ms / 60000) % 60, Math.floor(ms / 1000) % 60];
+  return sign + parts.map(part => String(part).padStart(2, "0")).join(":")
+    + "," + String(ms % 1000).padStart(3, "0");
 }
 
 async function refresh() {
@@ -599,6 +647,52 @@ $("saveEngine").onclick = () => {
   NUMBERS.forEach(name => engine[name] = $(name).value.trim());
   SWITCHES.forEach(name => engine[name] = $(name).checked);
   send("/api/engine", { engine });
+};
+
+function drawCues() {
+  const ms = Number($("shiftMs").value) || 0;
+  $("shiftCues").innerHTML = cues.map(cue => `
+    <tr>
+      <td class="weak num">${clock(cue.ms)}</td>
+      <td class="num">${clock(cue.ms + ms)}</td>
+      <td class="path">${safe(cue.text)}</td>
+    </tr>`).join("");
+}
+
+$("shift").onclick = async () => {
+  chosen = picked();
+  if (!chosen.length) return alert("Pick a subtitle first");
+
+  const got = await ask("/api/preview", { id: chosen[0] });
+  if (!got) return;
+
+  cues = got.cues;
+  $("shiftFile").textContent = chosen.length > 1
+    ? chosen.length + " files, showing " + basename(got.path)
+    : basename(got.path);
+  $("shiftMs").value = 0;
+  drawCues();
+  $("shiftBox").showModal();
+};
+
+$("shiftMs").oninput = drawCues;
+$("shiftBack").onclick = () => nudge(-100);
+$("shiftOn").onclick = () => nudge(100);
+
+function nudge(ms) {
+  $("shiftMs").value = (Number($("shiftMs").value) || 0) + ms;
+  drawCues();
+}
+
+$("shiftClose").onclick = () => $("shiftBox").close();
+
+$("shiftGo").onclick = () => {
+  $("shiftBox").close();
+  send("/api/shift", {
+    ids: chosen,
+    ms: Number($("shiftMs").value) || 0,
+    output: $("shiftOutput").value
+  });
 };
 
 $("undo").onclick = () => {
