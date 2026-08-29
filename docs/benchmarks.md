@@ -28,10 +28,10 @@ on a normal library, and that is the point: the interesting part is where
 they fail, not where they all succeed.
 
 **File types.** `2001: A Space Odyssey`, `Challengers`, `Come and See` and
-`Seven Samurai` are `.mkv`. The other 35 are `.mp4`. All subtitles are `.srt`.
-The container matters for timing, so ffsubsync is much faster on those four
-than on anything else and those four times should not be compared to the
-rest.
+`Seven Samurai` are `.mkv` and also had embedded subtitles. The other 35 are
+`.mp4`. All subtitles are `.srt`. The container matters for timing, so
+ffsubsync is much faster on those four than on anything else and those four
+times should not be compared to the rest.
 
 **Results will vary.** Different releases, different subtitle uploads and
 different hardware move all of this around. Treat the shape of the tables as
