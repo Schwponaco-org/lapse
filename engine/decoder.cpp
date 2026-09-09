@@ -264,6 +264,71 @@ std::vector<std::pair<int, int>> embedded_spans(AVFormatContext* fmt, int wanted
     return {};
 }
 
+static std::vector<int> shot_changes(const std::vector<int>& keys) {
+    if (keys.size() < 8) return {};
+
+    std::vector<int> gaps;
+    for (size_t i = 1; i < keys.size(); i++) gaps.push_back(keys[i] - keys[i - 1]);
+    std::sort(gaps.begin(), gaps.end());
+
+    int middle = gaps[gaps.size() / 2];
+    if (middle < 400) return {};
+
+    int even = 0;
+    for (int gap : gaps)
+        if (std::abs(gap - middle) <= 100) even++;
+    if (even * 2 > (int)gaps.size()) return {};
+
+    return keys;
+}
+
+std::vector<int> picture_cuts(const char* filename) {
+    AVFormatContext* fmt = nullptr;
+    if (avformat_open_input(&fmt, filename, nullptr, nullptr) != 0) return {};
+    if (avformat_find_stream_info(fmt, nullptr) < 0) {
+        avformat_close_input(&fmt);
+        return {};
+    }
+
+    int video = -1;
+    for (int i = 0; i < (int)fmt->nb_streams; i++)
+        if (fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) { video = i; break; }
+
+    if (video < 0) {
+        avformat_close_input(&fmt);
+        return {};
+    }
+
+    for (int i = 0; i < (int)fmt->nb_streams; i++)
+        fmt->streams[i]->discard = (i == video) ? AVDISCARD_NONKEY : AVDISCARD_ALL;
+
+    AVRational millis = {1, 1000};
+    AVRational tb = fmt->streams[video]->time_base;
+    int offset = container_start_ms(fmt);
+
+    std::vector<int> keys;
+    AVPacket* packet = av_packet_alloc();
+    while (packet && av_read_frame(fmt, packet) >= 0) {
+        if (packet->stream_index == video && (packet->flags & AV_PKT_FLAG_KEY)) {
+            int64_t pts = (packet->pts != AV_NOPTS_VALUE) ? packet->pts : packet->dts;
+            if (pts != AV_NOPTS_VALUE) {
+                int at = (int)av_rescale_q(pts, tb, millis) - offset;
+                if (at >= 0) keys.push_back(at);
+            }
+        }
+        av_packet_unref(packet);
+    }
+    av_packet_free(&packet);
+    avformat_close_input(&fmt);
+
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+
+    std::vector<int> cuts = shot_changes(keys);
+    say() << "Read " << keys.size() << " keyframes, " << cuts.size() << " of them look like picture cuts\n";
+    return cuts;
+}
+
 static std::string stamp(int ms) {
     if (ms < 0) ms = 0;
     char b[32];

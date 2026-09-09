@@ -91,6 +91,52 @@ void write_offsets(const std::string& in_path, const std::string& out_path, doub
         write_ttml_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
 }
 
+static int nearest_cut(const std::vector<int>& cuts, int at) {
+    auto after = std::lower_bound(cuts.begin(), cuts.end(), at);
+    int best = (after != cuts.end()) ? *after : -1;
+    if (after != cuts.begin()) {
+        int before = *(after - 1);
+        if (best < 0 || at - before <= best - at) best = before;
+    }
+    return best;
+}
+
+static int snap_cues(const std::vector<std::pair<int,int>>& cues, const std::vector<int>& cuts,
+                     double slope, int window, std::vector<int>& offsets, std::vector<int>& mapping) {
+    if (cues.empty() || cuts.empty() || window <= 0) return 0;
+
+    std::vector<int> per_cue(cues.size(), 0);
+    for (size_t i = 0; i < cues.size(); i++) {
+        int span = (i < mapping.size()) ? mapping[i] : -1;
+        if (span >= 0 && span < (int)offsets.size()) per_cue[i] = offsets[span];
+    }
+
+    int moved = 0;
+    for (size_t i = 0; i < cues.size(); i++) {
+        if (cues[i].second <= cues[i].first) continue;
+
+        int start = (int)(cues[i].first * (1.0 + slope)) + per_cue[i];
+        int end   = (int)(cues[i].second * (1.0 + slope)) + per_cue[i];
+
+        int cut = nearest_cut(cuts, start);
+        if (cut < 0) continue;
+
+        int by = cut - start;
+        if (by == 0 || std::abs(by) > window) continue;
+        if (start + by < 0 || start + by >= end) continue;
+
+        per_cue[i] += by;
+        moved++;
+    }
+
+    if (moved == 0) return 0;
+
+    offsets = per_cue;
+    mapping.resize(cues.size());
+    for (size_t i = 0; i < mapping.size(); i++) mapping[i] = (int)i;
+    return moved;
+}
+
 static bool number(const char* text, double& into) {
     char* stopped = nullptr;
     double got = std::strtod(text, &stopped);
@@ -179,6 +225,7 @@ static void save_spans(const std::filesystem::path& path, const std::vector<std:
 
 static double sure_sigma = 8.0;
 static const double SOME_SIGMA = 3.5;
+static const int SNAP_WINDOW_MS = 120;
 
 static const int AGREE_MS = 400;
 
@@ -284,6 +331,7 @@ struct Report {
     int cues = 0;
     int ignored = 0;
     int parts = 1;
+    int snapped = 0;
     bool written = false;
     std::string verdict = "nothing";
     std::string why;
@@ -309,6 +357,7 @@ static void report(const Report& r) {
         say() << "Done (" << r.mode << "): offset=" << r.offset << "ms";
         if (r.ratio != 1.0) say() << " ratio=" << r.ratio;
         if (r.parts > 1) say() << " parts=" << r.parts;
+        if (r.snapped) say() << " snapped=" << r.snapped;
         say() << " sigma=" << r.sigma << " agree=" << r.agreement << " confidence=" << r.confidence;
         say() << " [" << r.verdict << "]";
         if (!r.written) say() << " NOT WRITTEN (" << r.why << ")";
@@ -330,6 +379,7 @@ static void report(const Report& r) {
               << ",\"cues\":" << r.cues
               << ",\"ignored_cues\":" << r.ignored
               << ",\"parts\":" << r.parts
+              << ",\"snapped\":" << r.snapped
               << ",\"written\":" << (r.written ? "true" : "false");
     if (!r.why.empty()) std::cout << ",\"why\":\"" << escaped(r.why) << "\"";
     std::cout << ",\"output\":\"" << escaped(r.output) << "\"";
@@ -341,8 +391,9 @@ static void report(const Report& r) {
 }
 
 void usage() {
-    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N]\n";
+    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]]\n";
     std::cerr << "       --confidence N   how far the answer has to stand out before the original is overwritten (default " << sure_sigma << ")\n";
+    std::cerr << "       --snap [ms]      pull a cue start onto the picture cut it lands next to, within ms (default " << SNAP_WINDOW_MS << ")\n";
     std::cerr << "       lapse --version\n";
     std::cerr << "       lapse --formats\n";
     std::cerr << "       lapse --vad\n";
@@ -362,6 +413,7 @@ int run(int argc, const char *argv[]) {
     bool no_sidecar = false;
     int audio_track = -1;
     int sub_track = -1;
+    int snap_window = 0;
     double fps = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -422,6 +474,17 @@ int run(int argc, const char *argv[]) {
             use_cache = false;
         } else if (arg == "--no-sidecar") {
             no_sidecar = true;
+        } else if (arg == "--snap") {
+            snap_window = SNAP_WINDOW_MS;
+            double got;
+            if (i + 1 < argc && number(argv[i + 1], got)) {
+                if (got < 0 || got > 1000) {
+                    std::cerr << "--snap wants a window between 0 and 1000 ms\n";
+                    return -1;
+                }
+                snap_window = (int)got;
+                i++;
+            }
         } else if (arg == "--force") {
             force = true;
         } else {
@@ -628,6 +691,14 @@ int run(int argc, const char *argv[]) {
         return want;
     };
 
+    std::vector<int> cuts;
+    if (snap_window > 0) {
+        if (is_subtitle(ref_path))
+            say() << "Nothing to snap to, the reference is a subtitle file\n";
+        else
+            cuts = picture_cuts(ref_path.c_str());
+    }
+
     // solid overwrites, anything short of that goes next to the original
     auto settle = [&](Verdict verdict) {
         if (force) verdict = Verdict::Solid;
@@ -661,9 +732,14 @@ int run(int argc, const char *argv[]) {
 
         if (!settle(verdict)) { report(card); return 2; }
         card.written = true;
+
+        std::vector<int> offsets = offs;
+        std::vector<int> mapping = map;
+        card.snapped = snap_cues(timestamps, cuts, slope, snap_window, offsets, mapping);
+
         if (!dry_run) {
             if (make_backup) backup_file(input_path.c_str());
-            write_offsets(input_path, output_path, slope, offs, map);
+            write_offsets(input_path, output_path, slope, offsets, mapping);
         }
         report(card);
         return (verdict != Verdict::Solid && !force) ? 3 : 0;
@@ -675,9 +751,16 @@ int run(int argc, const char *argv[]) {
 
         if (!settle(verdict)) { report(card); return 2; }
         card.written = true;
+
+        std::vector<int> offsets(1, (int)std::lround(intercept * 1000.0));
+        std::vector<int> mapping(timestamps.size(), 0);
+        card.snapped = snap_cues(timestamps, cuts, slope, snap_window, offsets, mapping);
+
         if (!dry_run) {
             if (make_backup) backup_file(input_path.c_str());
-            if (input_path.ends_with(".srt"))
+            if (card.snapped)
+                write_offsets(input_path, output_path, slope, offsets, mapping);
+            else if (input_path.ends_with(".srt"))
                 write_srt_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
             else if (input_path.ends_with(".ass") || input_path.ends_with(".ssa"))
                 write_ass_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);

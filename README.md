@@ -185,6 +185,7 @@ Everything the CLI takes is available in the container. Switches are `0` or `1`,
 | `AUDIO_TRACK` | `--audio-track` | Which audio track to listen to |
 | `SUB_TRACK` | `--sub-track` | Which embedded subtitle track to use as reference |
 | `FPS` | `--fps` | Frame rate for frame based subtitles that do not carry one |
+| `SNAP` | `--snap` | Milliseconds a cue start may be moved to land on a picture cut. Empty leaves it off |
 
 All of it is in the web interface as well, under Settings, and what you save there is used from the next scan onwards. `OUTPUT_SUFFIX` and `NO_BACKUP` are the two halves of the file output picker there:
 
@@ -294,6 +295,7 @@ By default LAPSE overwrites the subtitle file it was given and leaves a `.bak` n
 --quiet             say nothing but errors
 --audio-track N     use the Nth audio track instead of the default one
 --sub-track N       use the Nth embedded subtitle track as the reference
+--snap [ms]         pull cue starts onto the picture cuts they land next to, default window 120 ms
 ```
 
 `--undo <subtitle>` puts the `.bak` back and removes it.
@@ -315,6 +317,21 @@ Together they cover the four ways a caller may want the output handled:
 
 The flags may appear anywhere on the command line. An existing `.bak` is never overwritten, so the first backup stays the untouched original no matter how many times you run LAPSE on a file.
 
+### Snapping to picture cuts
+
+A subtitler writing to picture puts a line up on the cut, not three frames after it. Moving the whole file by one number keeps every line the same distance from the cut it was written against, so a sync that is right to within a few frames still reads as slightly late all the way through.
+
+`--snap` takes that last step. Once the offset is settled, any cue start sitting within 120 milliseconds of a picture cut is moved onto it, and the end of that cue moves with it so the line stays on screen just as long:
+
+```bash
+./lapse video.mkv subtitles.srt --snap
+./lapse video.mkv subtitles.srt --snap 60
+```
+
+The cuts come from the keyframes the encoder already wrote into the file, which costs a read of the index and no decoding, so it adds hundredths of a second to a run. Encoders start a keyframe when the picture changes and then again on a timer when it does not, and a file where every keyframe sits on the same even spacing has had scene detection turned off. There is nothing in a file like that to line anything up against, so LAPSE leaves it alone and says so. It also does nothing when the reference is another subtitle file, and it never moves a cue far enough to outlast itself.
+
+`snapped` in the `--json` line says how many cue starts were moved. The flag is off unless you ask for it, and it changes nothing about how the offset itself is worked out.
+
 ### Verdicts
 
 Every run reports a verdict, and it decides what happens to your file:
@@ -334,7 +351,7 @@ LAPSE never simply refuses. If it cannot prove an answer it still writes one, it
 ```json
 {"mode":"auto/shifted","reference":"vad","offset_ms":22,"ratio":1,"confidence":0.455,
  "margin":0.12,"sigma":12.3,"agreement":0.75,"verdict":"solid","coverage":1,
- "cues":1578,"ignored_cues":1,"parts":1,"written":true,"output":"...","splits":[]}
+ "cues":1578,"ignored_cues":1,"parts":1,"snapped":0,"written":true,"output":"...","splits":[]}
 ```
 
 `mode` says what LAPSE decided the file needed. `ols`, `nosplit` and `split` mean you asked for that yourself. Everything under `auto` is what it worked out on its own:
@@ -349,7 +366,7 @@ LAPSE never simply refuses. If it cannot prove an answer it still writes one, it
 | `auto/joined` | two parts in one video | `splits` |
 | `auto/restart` | the subtitle starts over partway through | `splits` |
 
-`parts` is how many pieces the file ended up in and `splits` holds the cue index each new piece starts at, so `parts` is always `splits` plus one. `ratio` is `1` unless the file was stretched.
+`parts` is how many pieces the file ended up in and `splits` holds the cue index each new piece starts at, so `parts` is always `splits` plus one. `ratio` is `1` unless the file was stretched. `snapped` is how many cue starts `--snap` moved onto a picture cut, and is `0` when the flag was not used.
 
 ---
 
