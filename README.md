@@ -386,9 +386,17 @@ lapse/
 
 **Video:** All formats supported by FFmpeg (`.mp4`, `.mkv`, `.avi`, `.mov`, `.ts`, `.webm` and more)
 
-**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub` (MicroDVD and MPL2), `.mpl2`, `.sup` (PGS), `.sbv`, `.idx` (VobSub, point it at the `.idx` file), `.smi`, `.ttml`, `.dfxp`
+**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub` (MicroDVD, MPL2 and SubViewer 2), `.mpl2`, `.sup` (PGS), `.sbv`, `.idx` (VobSub, point it at the `.idx` file), `.smi`, `.ttml`, `.dfxp`
 
-MicroDVD and MPL2 both live in `.sub` and both put two numbers in brackets in front of the line. MicroDVD counts frames inside braces and needs to know the frame rate before any of it means anything, MPL2 counts tenths of a second inside square brackets and does not. LAPSE reads the file to tell them apart, so a `.sub` full of MPL2 syncs with no video and no `--fps`. MPL2 only holds tenths, so a result written back to one lands on the nearest tenth.
+Three formats share `.sub` and the name says nothing about which one you have, so LAPSE reads the file instead:
+
+| | Looks like | Needs a frame rate |
+|---|---|---|
+| MicroDVD | `{450}{487}text` | Yes, frames mean nothing without one |
+| MPL2 | `[180][195]text` | No, the numbers are tenths of a second |
+| SubViewer 2 | `00:03:00.00,00:03:01.50` on its own line | No |
+
+So a `.sub` holding MPL2 or SubViewer syncs with no video and no `--fps`, which MicroDVD cannot do. `.mpl2` is taken as a name for MPL2 as well. Each format is written back the way it came in, down to its own resolution, so a result in MPL2 lands on the nearest tenth of a second and one in SubViewer on the nearest hundredth. SubViewer's `[INFORMATION]` block and style line are left where they are.
 
 **Embedded tracks:** `lapse video.mkv` on its own pulls the default subtitle track out of the container and syncs it, see [CLI usage](#cli-usage) above. This covers text tracks, including `mov_text`. PGS and VobSub tracks are bitmap subtitles with no text to pull out, but when one is present LAPSE reads its timing and uses it as a fast, accurate sync reference instead of falling back to decoding the audio.
 
