@@ -386,7 +386,9 @@ lapse/
 
 **Video:** All formats supported by FFmpeg (`.mp4`, `.mkv`, `.avi`, `.mov`, `.ts`, `.webm` and more)
 
-**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub` (MicroDVD), `.sup` (PGS), `.sbv`, `.idx` (VobSub, point it at the `.idx` file), `.smi`, `.ttml`, `.dfxp`
+**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub` (MicroDVD and MPL2), `.mpl2`, `.sup` (PGS), `.sbv`, `.idx` (VobSub, point it at the `.idx` file), `.smi`, `.ttml`, `.dfxp`
+
+MicroDVD and MPL2 both live in `.sub` and both put two numbers in brackets in front of the line. MicroDVD counts frames inside braces and needs to know the frame rate before any of it means anything, MPL2 counts tenths of a second inside square brackets and does not. LAPSE reads the file to tell them apart, so a `.sub` full of MPL2 syncs with no video and no `--fps`. MPL2 only holds tenths, so a result written back to one lands on the nearest tenth.
 
 **Embedded tracks:** `lapse video.mkv` on its own pulls the default subtitle track out of the container and syncs it, see [CLI usage](#cli-usage) above. This covers text tracks, including `mov_text`. PGS and VobSub tracks are bitmap subtitles with no text to pull out, but when one is present LAPSE reads its timing and uses it as a fast, accurate sync reference instead of falling back to decoding the audio.
 

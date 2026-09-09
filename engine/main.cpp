@@ -35,13 +35,20 @@
 
 // The formats the parsers and the writers both handle. Callers can ask for the
 // list with --formats so they know what is safe to hand us
-const char* subtitle_formats[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp"};
+const char* subtitle_formats[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2", ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp"};
 
 bool is_subtitle(const std::string& path) {
     for (auto& ext : subtitle_formats)
         if (path.size() > strlen(ext) && path.substr(path.size() - strlen(ext)) == ext)
             return true;
     return false;
+}
+
+static bool is_microdvd(const std::string& path) {
+    if (!path.ends_with(".sub")) return false;
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) return false;
+    return !is_mpl2(load_text(path));
 }
 
 // Nobody said what rate the frames count in and there is no video to ask. Both
@@ -77,7 +84,7 @@ void write_offsets(const std::string& in_path, const std::string& out_path, doub
         write_ass_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
     else if (in_path.ends_with(".vtt"))
         write_vtt_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (in_path.ends_with(".sub"))
+    else if (in_path.ends_with(".sub") || in_path.ends_with(".mpl2"))
         write_sub_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
     else if (in_path.ends_with(".sup"))
         write_sup_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
@@ -545,11 +552,13 @@ int run(int argc, const char *argv[]) {
     // until we know the rate. Ask the video, it is the one the frames get
     // counted against, then whatever the subtitle says about itself. A rate we
     // made up would land every cue in the wrong place, so we stop instead
-    if (input_path.ends_with(".sub") || ref_path.ends_with(".sub")) {
+    bool frames_in = is_microdvd(input_path);
+    bool frames_ref = is_microdvd(ref_path);
+    if (frames_in || frames_ref) {
         if (fps <= 0 && !is_subtitle(ref_path)) fps = probe_fps(ref_path.c_str());
         set_sub_fps(fps);
 
-        std::string which = input_path.ends_with(".sub") ? input_path : ref_path;
+        std::string which = frames_in ? input_path : ref_path;
         double used = sub_fps(load_text(which));
         if (used <= 0 && is_subtitle(ref_path)) {
             used = fps_from_length(which, which == ref_path ? input_path : ref_path);
@@ -766,7 +775,7 @@ int run(int argc, const char *argv[]) {
                 write_ass_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
             else if (input_path.ends_with(".vtt"))
                 write_vtt_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (input_path.ends_with(".sub"))
+            else if (input_path.ends_with(".sub") || input_path.ends_with(".mpl2"))
                 write_sub_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
             else if (input_path.ends_with(".sup"))
                 write_sup_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
