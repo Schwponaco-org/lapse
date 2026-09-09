@@ -306,6 +306,8 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
           <input type="number" id="sub_track" min="0" step="1" placeholder="default" style="width: 92px">
           <label class="inline" for="fps">Frame rate</label>
           <input type="number" id="fps" min="10" max="120" step="0.001" placeholder="from video" style="width: 110px">
+          <label class="inline" for="snap">Snap to picture cuts</label>
+          <input type="number" id="snap" min="0" max="1000" step="10" placeholder="off" style="width: 92px">
         </div>
         <div class="switches">
           <label><input type="checkbox" id="force"><span>Sync even when there is little to go on</span></label>
@@ -421,7 +423,7 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
 const $ = id => document.getElementById(id);
 const LABELS = { done: "Synced", lowconf: "Unsure", failed: "Failed", undone: "Put back" };
 const SWITCHES = ["force", "strict", "no_sidecar", "no_embedded", "no_cache", "full_scan", "dry_run"];
-const NUMBERS = ["penalty", "confidence", "audio_track", "sub_track", "fps"];
+const NUMBERS = ["penalty", "confidence", "audio_track", "sub_track", "fps", "snap"];
 
 let data = null;
 let excluded = [];

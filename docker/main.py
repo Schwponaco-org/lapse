@@ -63,6 +63,7 @@ VALUES = [
     ("AUDIO_TRACK", "--audio-track"),
     ("SUB_TRACK", "--sub-track"),
     ("FPS", "--fps"),
+    ("SNAP", "--snap"),
 ]
 
 VIDEO_EXTS = {
