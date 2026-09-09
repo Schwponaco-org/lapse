@@ -105,14 +105,25 @@ bool is_junk_cue(const std::string& text) {
     return !any_real;
 }
 
-static std::vector<std::string> srt_cue_text(const std::string& path) {
+static bool srt_time_line(const std::string& line) {
+    return line.find("-->") != std::string::npos;
+}
+
+static bool subviewer_time_line(const std::string& line) {
+    size_t comma;
+    return subviewer_times(line, comma);
+}
+
+// The text sits under the times rather than after them, so the lines get
+// gathered up until the next one starts or the block runs out
+static std::vector<std::string> block_cue_text(const std::string& text, bool (*is_time)(const std::string&)) {
     std::vector<std::string> out;
-    std::istringstream file(load_text(path));
+    std::istringstream file(text);
     std::string line, blob;
     bool inside = false;
 
     while (getline(file, line)) {
-        if (line.find("-->") != std::string::npos) {
+        if (is_time(line)) {
             if (inside) out.push_back(blob);
             blob.clear();
             inside = true;
@@ -130,6 +141,10 @@ static std::vector<std::string> srt_cue_text(const std::string& path) {
     }
     if (inside) out.push_back(blob);
     return out;
+}
+
+static std::vector<std::string> srt_cue_text(const std::string& path) {
+    return block_cue_text(load_text(path), srt_time_line);
 }
 
 static std::vector<std::string> sbv_cue_text(const std::string& path) {
@@ -195,14 +210,19 @@ static std::vector<std::string> ass_cue_text(const std::string& path) {
 
 // the text is everything behind the two frame numbers, with | for a line break
 static std::vector<std::string> sub_cue_text(const std::string& path) {
+    std::string text = load_text(path);
+    if (is_subviewer(text)) return block_cue_text(text, subviewer_time_line);
+
+    bool tenths = is_mpl2(text);
     std::vector<std::string> out;
-    std::istringstream file(load_text(path));
+    std::istringstream file(text);
     std::string line;
 
     while (getline(file, line)) {
         long long a, b;
         size_t text_from;
-        if (!sub_frames(line, a, b, text_from)) continue;
+        bool timed = tenths ? mpl2_times(line, a, b, text_from) : sub_frames(line, a, b, text_from);
+        if (!timed) continue;
 
         std::string body = line.substr(text_from);
         for (size_t i = 0; i < body.size(); i++)
@@ -245,10 +265,11 @@ static std::vector<std::string> ttml_cue_text(const std::string& path) {
 }
 
 std::vector<std::string> read_cue_text(const std::string& path) {
-    if (path.ends_with(".ass") || path.ends_with(".ssa")) return ass_cue_text(path);
-    if (path.ends_with(".sub")) return sub_cue_text(path);
-    if (path.ends_with(".sbv")) return sbv_cue_text(path);
-    if (path.ends_with(".ttml") || path.ends_with(".dfxp")) return ttml_cue_text(path);
+    std::string kind = subtitle_kind(path);
+    if (kind == ".ass" || kind == ".ssa") return ass_cue_text(path);
+    if (kind == ".sub" || kind == ".mpl2") return sub_cue_text(path);
+    if (kind == ".sbv") return sbv_cue_text(path);
+    if (kind == ".ttml" || kind == ".dfxp") return ttml_cue_text(path);
     return srt_cue_text(path);
 }
 

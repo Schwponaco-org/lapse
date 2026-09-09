@@ -402,6 +402,8 @@ So a `.sub` holding MPL2 or SubViewer syncs with no video and no `--fps`, which 
 
 Run `lapse --formats` to print the subtitle extensions your binary can read, one per line
 
+A file named `.txt`, or with no extension at all, is opened and read before it is turned away. Subtitles come out of archives named that often enough to be worth the look, and SubRip, WebVTT, SubStation, MicroDVD, MPL2 and SubViewer all give themselves away in the first few lines. It is written back out in whatever it turned out to be. Anything carrying an extension we do not know is left alone, and so is anything over 4MB, so pointing LAPSE at a video is still an error rather than a long wait. The container only picks up the extensions above, so a library full of `.txt` files is not suddenly in scope.
+
 ---
 
 Licensed under the GNU General Public License v3.0 -- see [LICENSE](LICENSE) for details
