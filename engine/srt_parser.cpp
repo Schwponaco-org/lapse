@@ -166,7 +166,7 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
         return read_ass(path.c_str());
     if (path.ends_with(".vtt"))
         return read_vtt(path.c_str());
-    if (path.ends_with(".sub"))
+    if (path.ends_with(".sub") || path.ends_with(".mpl2"))
         return read_sub(path.c_str());
     if (path.ends_with(".sup"))
         return read_sup(path.c_str());
@@ -294,9 +294,89 @@ std::vector<std::pair<int,int>> read_vtt(const char* filename) {
     return read_srt(filename);
 }
 
+bool mpl2_times(const std::string& line, long long& a, long long& b, size_t& text_from) {
+    if (line.empty() || line[0] != '[') return false;
+    size_t one = line.find(']');
+    if (one == std::string::npos || one + 1 >= line.size() || line[one + 1] != '[') return false;
+    size_t two = line.find(']', one + 2);
+    if (two == std::string::npos) return false;
+
+    std::string from = line.substr(1, one - 1);
+    std::string to = line.substr(one + 2, two - one - 2);
+    if (from.empty() || to.empty()) return false;
+    if (from.find_first_not_of("0123456789") != std::string::npos) return false;
+    if (to.find_first_not_of("0123456789") != std::string::npos) return false;
+
+    a = atoll(from.c_str());
+    b = atoll(to.c_str());
+    text_from = two + 1;
+    return true;
+}
+
+// Both formats live in .sub and both are two numbers in brackets in front of
+// the line. MicroDVD counts frames inside braces, MPL2 counts tenths of a
+// second inside square brackets, and nothing else tells them apart
+bool is_mpl2(const std::string& text) {
+    std::istringstream ss(text);
+    std::string line;
+    int looked = 0;
+    int found = 0;
+
+    while (looked < 200 && getline(ss, line)) {
+        strip_bom(line);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (trim(line).empty()) continue;
+        looked++;
+
+        long long a, b;
+        size_t text_from;
+        if (mpl2_times(line, a, b, text_from)) found++;
+        else if (sub_frames(line, a, b, text_from)) return false;
+    }
+    return found > 0;
+}
+
+int tenths_to_ms(long long tenths) {
+    if (tenths < 0) return -1;
+    long long ms = tenths * 100;
+    if (ms > MAX_TIME_MS) return -1;
+    return (int)ms;
+}
+
+static std::vector<std::pair<int,int>> read_mpl2(const std::string& text) {
+    std::vector<std::pair<int,int>> timestamps;
+    std::istringstream read_file(text);
+    std::string line {};
+    bool first = true;
+
+    while (getline(read_file, line)) {
+        if (first) { strip_bom(line); first = false; }
+
+        long long a, b;
+        size_t text_from;
+        if (!mpl2_times(line, a, b, text_from)) continue;
+
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+
+        int start_ms = tenths_to_ms(a);
+        int end_ms   = tenths_to_ms(b);
+
+        if (start_ms < 0 || end_ms < 0)
+            timestamps.push_back({0, 0});
+        else
+            timestamps.push_back({start_ms, end_ms});
+    }
+    return timestamps;
+}
+
 std::vector<std::pair<int,int>> read_sub(const char* filename) {
     std::vector<std::pair<int,int>> timestamps;
     std::string text = load_text(filename);
+    if (is_mpl2(text)) return read_mpl2(text);
+
     double fps = sub_fps(text);
     std::istringstream read_file(text);
     std::string line {};

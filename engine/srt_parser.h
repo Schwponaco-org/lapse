@@ -31,6 +31,9 @@ bool ass_field(const std::string& line, const std::vector<size_t>& commas, int i
 std::pair<int,int> ass_time_columns(const std::string& format_line);
 
 bool sub_frames(const std::string& line, long long& a, long long& b, size_t& text_from);
+bool mpl2_times(const std::string& line, long long& a, long long& b, size_t& text_from);
+bool is_mpl2(const std::string& text);
+int tenths_to_ms(long long tenths);
 double sub_fps(const std::string& text);
 void set_sub_fps(double fps);
 int frames_to_ms(long long frame, double fps);

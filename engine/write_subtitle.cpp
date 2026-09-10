@@ -85,6 +85,11 @@ static std::string ms_to_frames(int ms, double fps) {
     return std::to_string((long long)(ms * fps / 1000.0 + 0.5));
 }
 
+static std::string ms_to_tenths(int ms) {
+    if (ms < 0) ms = 0;
+    return std::to_string((ms + 50) / 100);
+}
+
 // srt and vtt are the same file with a different character in front of the
 // milliseconds, so they go through here together. We write to a temp file and
 // move it into place at the end if something throws halfway the subtitle the user already had is still whole
@@ -226,7 +231,8 @@ static void write_dialogue(const char* input_path, const char* output_path, cons
 // has to stay where it is
 static void write_frames(const char* input_path, const char* output_path, const Shift& shift) {
     std::string text = load_file(input_path);
-    double fps = sub_fps(text);
+    bool tenths = is_mpl2(text);
+    double fps = tenths ? 0 : sub_fps(text);
     bool ends_clean = !text.empty() && text.back() == '\n';
     std::istringstream ss(text);
 
@@ -243,7 +249,16 @@ static void write_frames(const char* input_path, const char* output_path, const 
 
         long long a, b;
         size_t text_from;
-        if (sub_frames(line, a, b, text_from)) {
+        if (tenths) {
+            if (mpl2_times(line, a, b, text_from)) {
+                int start_ms = tenths_to_ms(a);
+                int end_ms   = tenths_to_ms(b);
+                if (start_ms >= 0 && end_ms >= 0)
+                    line = "[" + ms_to_tenths(shift.apply(start_ms, cue)) + "][" +
+                           ms_to_tenths(shift.apply(end_ms, cue)) + "]" + line.substr(text_from);
+                cue++;
+            }
+        } else if (sub_frames(line, a, b, text_from)) {
             int start_ms = frames_to_ms(a, fps);
             int end_ms   = frames_to_ms(b, fps);
             bool rate_line = (cue == 0 && a <= 1 && b <= 1);
