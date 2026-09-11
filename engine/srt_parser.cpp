@@ -372,9 +372,74 @@ static std::vector<std::pair<int,int>> read_mpl2(const std::string& text) {
     return timestamps;
 }
 
+// SubViewer puts both times on a line of their own, separated by a comma and
+// nothing else. Everything the format has to say about itself sits in square
+// brackets above that and is left alone
+bool subviewer_times(const std::string& line, size_t& comma) {
+    std::string only = trim(line);
+    if (only.empty() || only.find_first_not_of("0123456789:.,") != std::string::npos) return false;
+
+    comma = line.find(',');
+    if (comma == std::string::npos) return false;
+    if (parse_timestamp(line.substr(0, comma), 0) < 0) return false;
+    if (parse_timestamp(line, comma + 1) < 0) return false;
+    return true;
+}
+
+bool is_subviewer(const std::string& text) {
+    std::istringstream ss(text);
+    std::string line;
+    int looked = 0;
+
+    while (looked < 200 && getline(ss, line)) {
+        strip_bom(line);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (trim(line).empty()) continue;
+        looked++;
+
+        size_t comma;
+        if (subviewer_times(line, comma)) return true;
+
+        long long a, b;
+        size_t text_from;
+        if (sub_frames(line, a, b, text_from)) return false;
+        if (mpl2_times(line, a, b, text_from)) return false;
+    }
+    return false;
+}
+
+static std::vector<std::pair<int,int>> read_subviewer(const std::string& text) {
+    std::vector<std::pair<int,int>> timestamps;
+    std::istringstream read_file(text);
+    std::string line {};
+    bool first = true;
+
+    while (getline(read_file, line)) {
+        if (first) { strip_bom(line); first = false; }
+
+        size_t comma;
+        if (!subviewer_times(line, comma)) continue;
+
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+
+        int start_ms = parse_timestamp(line.substr(0, comma), 0);
+        int end_ms   = parse_timestamp(line, comma + 1);
+
+        if (start_ms < 0 || end_ms < 0)
+            timestamps.push_back({0, 0});
+        else
+            timestamps.push_back({start_ms, end_ms});
+    }
+    return timestamps;
+}
+
 std::vector<std::pair<int,int>> read_sub(const char* filename) {
     std::vector<std::pair<int,int>> timestamps;
     std::string text = load_text(filename);
+    if (is_subviewer(text)) return read_subviewer(text);
     if (is_mpl2(text)) return read_mpl2(text);
 
     double fps = sub_fps(text);

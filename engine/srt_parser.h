@@ -34,6 +34,8 @@ bool sub_frames(const std::string& line, long long& a, long long& b, size_t& tex
 bool mpl2_times(const std::string& line, long long& a, long long& b, size_t& text_from);
 bool is_mpl2(const std::string& text);
 int tenths_to_ms(long long tenths);
+bool subviewer_times(const std::string& line, size_t& comma);
+bool is_subviewer(const std::string& text);
 double sub_fps(const std::string& text);
 void set_sub_fps(double fps);
 int frames_to_ms(long long frame, double fps);

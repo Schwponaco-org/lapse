@@ -90,6 +90,16 @@ static std::string ms_to_tenths(int ms) {
     return std::to_string((ms + 50) / 100);
 }
 
+static std::string ms_to_centis(int ms) {
+    if (ms < 0) ms = 0;
+    int h  = ms / 3600000; ms %= 3600000;
+    int m  = ms / 60000;   ms %= 60000;
+    int sc = ms / 1000;    ms %= 1000;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%02d", h, m, sc, ms / 10);
+    return buf;
+}
+
 // srt and vtt are the same file with a different character in front of the
 // milliseconds, so they go through here together. We write to a temp file and
 // move it into place at the end if something throws halfway the subtitle the user already had is still whole
@@ -226,13 +236,14 @@ static void write_dialogue(const char* input_path, const char* output_path, cons
     save_file(output_path, out);
 }
 
-// MicroDVD lines get counted in frames, so the times go back out through the
-// rate the file was read at. The {1}{1} line at the top is the rate itself and
-// has to stay where it is
-static void write_frames(const char* input_path, const char* output_path, const Shift& shift) {
+// Three formats share .sub. MicroDVD lines get counted in frames, so the times
+// go back out through the rate the file was read at, and the {1}{1} line at the
+// top is the rate itself and has to stay where it is
+static void write_sub_lines(const char* input_path, const char* output_path, const Shift& shift) {
     std::string text = load_file(input_path);
-    bool tenths = is_mpl2(text);
-    double fps = tenths ? 0 : sub_fps(text);
+    bool subviewer = is_subviewer(text);
+    bool tenths = !subviewer && is_mpl2(text);
+    double fps = (subviewer || tenths) ? 0 : sub_fps(text);
     bool ends_clean = !text.empty() && text.back() == '\n';
     std::istringstream ss(text);
 
@@ -249,7 +260,16 @@ static void write_frames(const char* input_path, const char* output_path, const 
 
         long long a, b;
         size_t text_from;
-        if (tenths) {
+        size_t comma;
+        if (subviewer) {
+            if (subviewer_times(line, comma)) {
+                int start_ms = parse_timestamp(line.substr(0, comma), 0);
+                int end_ms   = parse_timestamp(line, comma + 1);
+                if (start_ms >= 0 && end_ms >= 0)
+                    line = ms_to_centis(shift.apply(start_ms, cue)) + "," + ms_to_centis(shift.apply(end_ms, cue));
+                cue++;
+            }
+        } else if (tenths) {
             if (mpl2_times(line, a, b, text_from)) {
                 int start_ms = tenths_to_ms(a);
                 int end_ms   = tenths_to_ms(b);
@@ -475,7 +495,7 @@ void write_ass_OLS(const char* input_path, const char* output_path, double slope
 }
 
 void write_sub_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    write_frames(input_path, output_path, one_line(slope, intercept_s));
+    write_sub_lines(input_path, output_path, one_line(slope, intercept_s));
 }
 
 void write_sup_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
@@ -511,7 +531,7 @@ void write_ass_split(const char* input_path, const char* output_path, double slo
 }
 
 void write_sub_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    write_frames(input_path, output_path, per_cue(slope, offsets, mapping));
+    write_sub_lines(input_path, output_path, per_cue(slope, offsets, mapping));
 }
 
 void write_sup_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {

@@ -48,7 +48,8 @@ static bool is_microdvd(const std::string& path) {
     if (!path.ends_with(".sub")) return false;
     std::error_code ec;
     if (!std::filesystem::exists(path, ec)) return false;
-    return !is_mpl2(load_text(path));
+    std::string text = load_text(path);
+    return !is_mpl2(text) && !is_subviewer(text);
 }
 
 // Nobody said what rate the frames count in and there is no video to ask. Both
