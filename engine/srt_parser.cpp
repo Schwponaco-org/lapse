@@ -159,24 +159,80 @@ int frames_to_ms(long long frame, double fps) {
     return (int)ms;
 }
 
+// What the first few hundred lines give away. Only the shapes nothing else
+// shares, since the point is a file that was named wrong and getting it wrong
+// twice would be worse than not trying
+static std::string looks_like(const std::string& text) {
+    std::istringstream ss(text);
+    std::string line;
+    int looked = 0;
+
+    while (looked < 400 && getline(ss, line)) {
+        strip_bom(line);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        std::string only = trim(line);
+        if (only.empty()) continue;
+        looked++;
+
+        if (only.rfind("WEBVTT", 0) == 0) return ".vtt";
+        if (only.rfind("Dialogue:", 0) == 0 || only.rfind("[Script Info]", 0) == 0) return ".ass";
+        if (line.find("-->") != std::string::npos && parse_timestamp(line, 0) >= 0) return ".srt";
+
+        long long a, b;
+        size_t text_from, comma;
+        if (sub_frames(line, a, b, text_from)) return ".sub";
+        if (mpl2_times(line, a, b, text_from)) return ".sub";
+        if (subviewer_times(line, comma)) return ".sub";
+    }
+    return "";
+}
+
+// A subtitle that came out of an archive as plain .txt is common enough to be
+// worth opening. Anything already carrying a name we know is taken at its word,
+// and anything carrying a different one is left alone
+static bool worth_reading(const std::string& path) {
+    std::string ext = std::filesystem::path(path).extension().string();
+    for (char& c : ext) c = (char)tolower((unsigned char)c);
+    if (!ext.empty() && ext != ".txt") return false;
+
+    std::error_code ec;
+    uintmax_t bytes = std::filesystem::file_size(path, ec);
+    return !ec && bytes > 0 && bytes < 4u * 1024 * 1024;
+}
+
+std::string subtitle_kind(const std::string& path) {
+    static const char* known[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2",
+                                  ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp"};
+    for (auto ext : known)
+        if (path.ends_with(ext)) return ext;
+
+    if (!worth_reading(path)) return "";
+    try {
+        return looks_like(load_text(path));
+    } catch (const std::exception&) {
+        return "";
+    }
+}
+
 std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
-    if (path.ends_with(".srt"))
+    std::string kind = subtitle_kind(path);
+    if (kind == ".srt")
         return read_srt(path.c_str());
-    if (path.ends_with(".ass") || path.ends_with(".ssa"))
+    if (kind == ".ass" || kind == ".ssa")
         return read_ass(path.c_str());
-    if (path.ends_with(".vtt"))
+    if (kind == ".vtt")
         return read_vtt(path.c_str());
-    if (path.ends_with(".sub") || path.ends_with(".mpl2"))
+    if (kind == ".sub" || kind == ".mpl2")
         return read_sub(path.c_str());
-    if (path.ends_with(".sup"))
+    if (kind == ".sup")
         return read_sup(path.c_str());
-    if (path.ends_with(".sbv"))
+    if (kind == ".sbv")
         return read_sbv(path.c_str());
-    if (path.ends_with(".idx"))
+    if (kind == ".idx")
         return read_idx(path.c_str());
-    if (path.ends_with(".smi"))
+    if (kind == ".smi")
         return read_smi(path.c_str());
-    if (path.ends_with(".ttml") || path.ends_with(".dfxp"))
+    if (kind == ".ttml" || kind == ".dfxp")
         return read_ttml(path.c_str());
     throw std::runtime_error("Unsupported subtitle format: " + path);
 }

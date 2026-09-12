@@ -38,14 +38,11 @@
 const char* subtitle_formats[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2", ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp"};
 
 bool is_subtitle(const std::string& path) {
-    for (auto& ext : subtitle_formats)
-        if (path.size() > strlen(ext) && path.substr(path.size() - strlen(ext)) == ext)
-            return true;
-    return false;
+    return !subtitle_kind(path).empty();
 }
 
 static bool is_microdvd(const std::string& path) {
-    if (!path.ends_with(".sub")) return false;
+    if (subtitle_kind(path) != ".sub") return false;
     std::error_code ec;
     if (!std::filesystem::exists(path, ec)) return false;
     std::string text = load_text(path);
@@ -79,23 +76,24 @@ static double fps_from_length(const std::string& sub_path, const std::string& ot
 
 // The format follows the file we read, the destination is wherever the caller asked us to put it
 void write_offsets(const std::string& in_path, const std::string& out_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    if (in_path.ends_with(".srt"))
+    std::string kind = subtitle_kind(in_path);
+    if (kind == ".srt")
         write_srt_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (in_path.ends_with(".ass") || in_path.ends_with(".ssa"))
+    else if (kind == ".ass" || kind == ".ssa")
         write_ass_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (in_path.ends_with(".vtt"))
+    else if (kind == ".vtt")
         write_vtt_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (in_path.ends_with(".sub") || in_path.ends_with(".mpl2"))
+    else if (kind == ".sub" || kind == ".mpl2")
         write_sub_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (in_path.ends_with(".sup"))
+    else if (kind == ".sup")
         write_sup_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (in_path.ends_with(".sbv"))
+    else if (kind == ".sbv")
         write_sbv_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (in_path.ends_with(".idx"))
+    else if (kind == ".idx")
         write_idx_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (in_path.ends_with(".smi"))
+    else if (kind == ".smi")
         write_smi_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (in_path.ends_with(".ttml") || in_path.ends_with(".dfxp"))
+    else if (kind == ".ttml" || kind == ".dfxp")
         write_ttml_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
 }
 
@@ -766,27 +764,28 @@ int run(int argc, const char *argv[]) {
         std::vector<int> mapping(timestamps.size(), 0);
         card.snapped = snap_cues(timestamps, cuts, slope, snap_window, offsets, mapping);
 
+        std::string kind = subtitle_kind(input_path);
         if (!dry_run) {
             if (make_backup) backup_file(input_path.c_str());
             if (card.snapped)
                 write_offsets(input_path, output_path, slope, offsets, mapping);
-            else if (input_path.ends_with(".srt"))
+            else if (kind == ".srt")
                 write_srt_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (input_path.ends_with(".ass") || input_path.ends_with(".ssa"))
+            else if (kind == ".ass" || kind == ".ssa")
                 write_ass_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (input_path.ends_with(".vtt"))
+            else if (kind == ".vtt")
                 write_vtt_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (input_path.ends_with(".sub") || input_path.ends_with(".mpl2"))
+            else if (kind == ".sub" || kind == ".mpl2")
                 write_sub_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (input_path.ends_with(".sup"))
+            else if (kind == ".sup")
                 write_sup_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (input_path.ends_with(".sbv"))
+            else if (kind == ".sbv")
                 write_sbv_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (input_path.ends_with(".idx"))
+            else if (kind == ".idx")
                 write_idx_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (input_path.ends_with(".smi"))
+            else if (kind == ".smi")
                 write_smi_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (input_path.ends_with(".ttml") || input_path.ends_with(".dfxp"))
+            else if (kind == ".ttml" || kind == ".dfxp")
                 write_ttml_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
         }
         report(card);

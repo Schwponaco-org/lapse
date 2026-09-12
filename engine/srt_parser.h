@@ -20,6 +20,8 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
+#include <filesystem>
+#include <cctype>
 #include "charset.h"
 
 int parse_timestamp(const std::string& line, size_t from);
@@ -40,6 +42,7 @@ double sub_fps(const std::string& text);
 void set_sub_fps(double fps);
 int frames_to_ms(long long frame, double fps);
 
+std::string subtitle_kind(const std::string& path);
 std::vector<std::pair<int,int>> read_subtitle(const std::string& path);
 std::vector<std::pair<int, int>> read_srt(const char* filename);
 std::vector<std::pair<int, int>> read_ass(const char* filename);
