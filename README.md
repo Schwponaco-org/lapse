@@ -186,6 +186,7 @@ Everything the CLI takes is available in the container. Switches are `0` or `1`,
 | `SUB_TRACK` | `--sub-track` | Which embedded subtitle track to use as reference |
 | `FPS` | `--fps` | Frame rate for frame based subtitles that do not carry one |
 | `SNAP` | `--snap` | Milliseconds a cue start may be moved to land on a picture cut. Empty leaves it off |
+| `ENCODING` | `--encoding` | Write every result as `utf8`, `utf8-bom`, `utf16le`, `utf16be` or `latin1`. Empty keeps whatever the file came in as |
 
 All of it is in the web interface as well, under Settings, and what you save there is used from the next scan onwards. `OUTPUT_SUFFIX` and `NO_BACKUP` are the two halves of the file output picker there:
 
@@ -296,7 +297,12 @@ By default LAPSE overwrites the subtitle file it was given and leaves a `.bak` n
 --audio-track N     use the Nth audio track instead of the default one
 --sub-track N       use the Nth embedded subtitle track as the reference
 --snap [ms]         pull cue starts onto the picture cuts they land next to, default window 120 ms
+--encoding NAME     write the result as utf8, utf8-bom, utf16le, utf16be or latin1
 ```
+
+Without `--encoding` a subtitle goes back out in whatever it came in as, which is what you want almost every time. Give it a name and the output is written that way instead, which is the quick way to get a library of mixed UTF-16 and codepage files down to one encoding. `utf16` is taken as `utf16le`, and `iso-8859-1` and `cp1252` are taken as `latin1`.
+
+The engine only knows an ASCII compatible codepage as "not Unicode", it does not work out which one, so converting one to UTF-8 reads it as ISO-8859-1. That is right for the Western European files it is usually asked about and wrong for Cyrillic or CJK, which come out as valid UTF-8 holding the wrong letters. Characters with no ISO-8859-1 equivalent become `?` on the way out. `.sup` is left alone either way, there is no text in it to re-encode.
 
 `--undo <subtitle>` puts the `.bak` back and removes it.
 

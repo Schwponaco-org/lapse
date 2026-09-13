@@ -16,19 +16,18 @@
 #pragma once
 #include <string>
 
-// what the file was when we picked it up so we can put it back the same way.
-// legacy is any ascii compatible codepage - cp1251, gbk, big5, sjis. we never
-// need to know which: we only touch the digits in a timestamp and those are
-// ascii everywhere, the rest of the line goes back out untouched
 enum class Charset {
     Legacy,
     Utf8Bom,
     Utf16Le,
     Utf16LeBom,
     Utf16Be,
-    Utf16BeBom
+    Utf16BeBom,
+    Latin1
 };
 
 Charset sniff(const std::string& raw);
+bool charset_from_name(const std::string& name, Charset* out);
+std::string make_utf8(const std::string& text);
 std::string decode(const std::string& raw, Charset how);
 std::string encode(const std::string& utf8, Charset how);

@@ -308,6 +308,15 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
           <input type="number" id="fps" min="10" max="120" step="0.001" placeholder="from video" style="width: 110px">
           <label class="inline" for="snap">Snap to picture cuts</label>
           <input type="number" id="snap" min="0" max="1000" step="10" placeholder="off" style="width: 92px">
+          <label class="inline" for="encoding">Encoding</label>
+          <select id="encoding">
+            <option value="">Same as the input</option>
+            <option value="utf8">UTF-8</option>
+            <option value="utf8-bom">UTF-8 with BOM</option>
+            <option value="utf16le">UTF-16 LE</option>
+            <option value="utf16be">UTF-16 BE</option>
+            <option value="latin1">ISO-8859-1</option>
+          </select>
         </div>
         <div class="switches">
           <label><input type="checkbox" id="force"><span>Sync even when there is little to go on</span></label>
@@ -606,6 +615,7 @@ function drawEngine() {
     : (engine.no_backup ? "overwrite" : "overwrite_backup");
   NUMBERS.forEach(name => $(name).value = engine[name] || "");
   SWITCHES.forEach(name => $(name).checked = !!engine[name]);
+  $("encoding").value = engine.encoding || "";
   showSuffix();
 }
 
@@ -722,6 +732,7 @@ $("saveEngine").onclick = () => {
   };
   NUMBERS.forEach(name => engine[name] = $(name).value.trim());
   SWITCHES.forEach(name => engine[name] = $(name).checked);
+  engine.encoding = $("encoding").value;
   send("/api/engine", { engine });
 };
 

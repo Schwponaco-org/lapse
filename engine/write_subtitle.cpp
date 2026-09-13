@@ -40,8 +40,14 @@ struct Shift {
     }
 };
 
-// goes back out the way it came in - utf-16 used to come back as utf-8
 static Charset came_as = Charset::Legacy;
+static Charset asked_for = Charset::Legacy;
+static bool was_asked = false;
+
+void force_output_charset(Charset how) {
+    asked_for = how;
+    was_asked = true;
+}
 
 static std::string load_file(const char* path) {
     return load_text(path, &came_as);
@@ -53,7 +59,11 @@ static void save_file(const char* output_path, const std::string& text) {
     std::ofstream out(temp_path, std::ios::binary);
     if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
 
-    std::string bytes = encode(text, came_as);
+    std::string wanted = text;
+    if (was_asked && came_as == Charset::Legacy && asked_for != Charset::Latin1)
+        wanted = make_utf8(wanted);
+
+    std::string bytes = encode(wanted, was_asked ? asked_for : came_as);
     out.write(bytes.data(), bytes.size());
     out.close();
     std::filesystem::rename(temp_path, output_path);
