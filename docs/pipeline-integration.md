@@ -76,6 +76,10 @@ using its default choice.
 
 `--undo <subtitle>` puts the `.bak` back and removes it.
 
+Add `--encoding utf8`, `utf8-bom`, `utf16le`, `utf16be` or `latin1` to write
+the result in that encoding instead of the one the file already had. Leave
+it out and lapse keeps whatever the input used.
+
 | Result | Flags |
 |---|---|
 | Overwrite, keep a backup | *neither flag* (default) |
