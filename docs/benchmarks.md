@@ -81,6 +81,7 @@ same table.
 | Correct framerate drift                      | yes                 | yes            | yes                  |
 | Split the file into segments                 | yes                 | yes            | yes                  |
 | Read an embedded subtitle track as reference | yes, automatic      | no             | yes, with a flag     |
+| Choose the output encoding                   | yes, keeps the input's unless told otherwise | no, always UTF-8 | yes, but UTF-8 unless told otherwise |
 | **Decide per file whether to split**         | **yes**             | yes            | no, off unless asked |
 | **Pick the split penalty itself**            | **yes**             | no             | no, supplied by hand |
 | **Report a confidence verdict**              | **yes, always**     | no             | a score in the log   |
@@ -100,6 +101,13 @@ a score and prints it, and will leave the file alone if
 the box a bad answer overwrites a subtitle exactly like a good one. LAPSE
 reports a verdict on every run and does not overwrite unless that verdict is
 `solid`.
+
+Encoding works the same way, one tool leaves it alone by default, one
+converts it by default. alass always writes UTF-8, whatever the input was,
+and has no flag to change that. ffsubsync also writes UTF-8 by default, but
+`--output-encoding same` keeps the input's encoding, or any other codec name
+can be given directly. LAPSE keeps the input's encoding unless `--encoding`
+asks for a specific one.
 
 ## Subtitle formats
 
