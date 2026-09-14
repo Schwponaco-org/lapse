@@ -15,6 +15,7 @@
 
 #include "charset.h"
 #include <vector>
+#include <cctype>
 
 static bool has(const std::string& raw, size_t n, const unsigned char* bytes) {
     if (raw.size() < n) return false;
@@ -137,6 +138,87 @@ static std::string utf8_to_utf16(const std::string& text, bool little) {
     return out;
 }
 
+static std::string utf8_to_latin1(const std::string& text) {
+    std::string out;
+    for (size_t i = 0; i < text.size();) {
+        unsigned char c = text[i];
+        unsigned cp = c;
+        int extra = 0;
+
+        if (c >= 0xF0) { cp = c & 0x07; extra = 3; }
+        else if (c >= 0xE0) { cp = c & 0x0F; extra = 2; }
+        else if (c >= 0xC0) { cp = c & 0x1F; extra = 1; }
+
+        if (extra && i + extra < text.size()) {
+            bool good = true;
+            unsigned built = cp;
+            for (int k = 1; k <= extra; k++) {
+                unsigned char n = text[i + k];
+                if ((n & 0xC0) != 0x80) { good = false; break; }
+                built = (built << 6) | (n & 0x3F);
+            }
+            if (good) {
+                out += built < 0x100 ? (char)built : '?';
+                i += extra + 1;
+                continue;
+            }
+        }
+
+        out += (char)c;
+        i++;
+    }
+    return out;
+}
+
+static std::string latin1_to_utf8(const std::string& raw) {
+    std::string out;
+    for (size_t i = 0; i < raw.size(); i++)
+        push_utf8(out, (unsigned char)raw[i]);
+    return out;
+}
+
+static bool is_utf8(const std::string& text) {
+    for (size_t i = 0; i < text.size();) {
+        unsigned char c = text[i];
+        if (c < 0x80) { i++; continue; }
+
+        int extra;
+        if (c >= 0xF0) extra = 3;
+        else if (c >= 0xE0) extra = 2;
+        else if (c >= 0xC0) extra = 1;
+        else return false;
+
+        if (i + extra >= text.size()) return false;
+        for (int k = 1; k <= extra; k++)
+            if (((unsigned char)text[i + k] & 0xC0) != 0x80) return false;
+
+        i += extra + 1;
+    }
+    return true;
+}
+
+std::string make_utf8(const std::string& text) {
+    return is_utf8(text) ? text : latin1_to_utf8(text);
+}
+
+bool charset_from_name(const std::string& name, Charset* out) {
+    std::string want;
+    for (size_t i = 0; i < name.size(); i++) {
+        char c = name[i];
+        if (c == '-' || c == '_' || c == ' ') continue;
+        want += (char)tolower((unsigned char)c);
+    }
+
+    if (want == "utf8")                            *out = Charset::Legacy;
+    else if (want == "utf8bom")                    *out = Charset::Utf8Bom;
+    else if (want == "utf16" || want == "utf16le") *out = Charset::Utf16LeBom;
+    else if (want == "utf16be")                    *out = Charset::Utf16BeBom;
+    else if (want == "latin1" || want == "iso88591" || want == "cp1252") *out = Charset::Latin1;
+    else return false;
+
+    return true;
+}
+
 std::string decode(const std::string& raw, Charset how) {
     switch (how) {
         case Charset::Utf8Bom:    return raw.substr(3);
@@ -144,6 +226,7 @@ std::string decode(const std::string& raw, Charset how) {
         case Charset::Utf16BeBom: return utf16_to_utf8(raw, 2, false);
         case Charset::Utf16Le:    return utf16_to_utf8(raw, 0, true);
         case Charset::Utf16Be:    return utf16_to_utf8(raw, 0, false);
+        case Charset::Latin1:     return latin1_to_utf8(raw);
         default:                  return raw;
     }
 }
@@ -155,6 +238,7 @@ std::string encode(const std::string& utf8, Charset how) {
         case Charset::Utf16BeBom: return std::string("\xFE\xFF") + utf8_to_utf16(utf8, false);
         case Charset::Utf16Le:    return utf8_to_utf16(utf8, true);
         case Charset::Utf16Be:    return utf8_to_utf16(utf8, false);
+        case Charset::Latin1:     return utf8_to_latin1(utf8);
         default:                  return utf8;
     }
 }

@@ -22,8 +22,10 @@
 #include <algorithm>
 #include <stdexcept>
 #include <filesystem>
+#include "charset.h"
 
 void backup_file(const char* path);
+void force_output_charset(Charset how);
 void write_srt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_ass_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_vtt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);

@@ -397,8 +397,9 @@ static void report(const Report& r) {
 }
 
 void usage() {
-    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]]\n";
+    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME]\n";
     std::cerr << "       --confidence N   how far the answer has to stand out before the original is overwritten (default " << sure_sigma << ")\n";
+    std::cerr << "       --encoding NAME  write the result as utf8, utf8-bom, utf16le, utf16be or latin1 instead of whatever came in\n";
     std::cerr << "       --snap [ms]      pull a cue start onto the picture cut it lands next to, within ms (default " << SNAP_WINDOW_MS << ")\n";
     std::cerr << "       lapse --version\n";
     std::cerr << "       lapse --formats\n";
@@ -441,6 +442,13 @@ int run(int argc, const char *argv[]) {
             double got;
             if (i + 1 >= argc || !number(argv[++i], got)) { usage(); return -1; }
             sub_track = (int)got;
+        } else if (arg == "--encoding") {
+            Charset how;
+            if (i + 1 >= argc || !charset_from_name(argv[++i], &how)) {
+                std::cerr << "--encoding wants utf8, utf8-bom, utf16le, utf16be or latin1\n";
+                return -1;
+            }
+            force_output_charset(how);
         } else if (arg == "--fps") {
             double got;
             if (i + 1 >= argc || !number(argv[++i], got) || got < 10 || got > 120) { usage(); return -1; }
