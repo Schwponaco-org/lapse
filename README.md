@@ -302,7 +302,7 @@ By default LAPSE overwrites the subtitle file it was given and leaves a `.bak` n
 
 Without `--encoding` a subtitle goes back out in whatever it came in as, which is what you want almost every time. Give it a name and the output is written that way instead, which is the quick way to get a library of mixed UTF-16 and codepage files down to one encoding. `utf16` is taken as `utf16le`, and `iso-8859-1` and `cp1252` are taken as `latin1`.
 
-The engine only knows an ASCII compatible codepage as "not Unicode", it does not work out which one, so converting one to UTF-8 reads it as ISO-8859-1. That is right for the Western European files it is usually asked about and wrong for Cyrillic or CJK, which come out as valid UTF-8 holding the wrong letters. Characters with no ISO-8859-1 equivalent become `?` on the way out. `.sup` is left alone either way, there is no text in it to re-encode.
+The engine cannot tell one ASCII compatible codepage from another, so converting one to UTF-8 always reads it as ISO-8859-1. This works fine for Western European subtitles. Cyrillic and CJK files come out as valid UTF-8 with the wrong letters in them. A character with no ISO-8859-1 equivalent becomes `?`. `.sup` has no text in it, so `--encoding` does nothing to it.
 
 `--undo <subtitle>` puts the `.bak` back and removes it.
 
