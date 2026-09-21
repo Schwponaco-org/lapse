@@ -6,7 +6,7 @@ Automatically fixes subtitle sync in your media library. Detects how far off you
 
 A Jellyfin plugin is available at [rs-jensen/lapse-jellyfin-plugin](https://github.com/rs-jensen/lapse-jellyfin-plugin) for direct integration with your media server.
 
-The `lapse` binary is a C++ engine built on FFmpeg, libfvad and FFTW3, and it syncs one file at a time. The Docker image wraps that engine with a Python watcher that scans your library, matches subtitles to video and keeps a SQLite record so nothing gets processed twice. Run the binary by hand for a single file, or run the container to keep a whole library synced on its own.
+The `lapse` binary is a C++ engine built on FFmpeg, libfvad and FFTW3. It syncs one file at a time by default, or a whole stack of them in one process with `--batch`. The Docker image wraps that engine with a Python watcher that scans your library, matches subtitles to video and keeps a SQLite record so nothing gets processed twice. Run the binary by hand for a single file, or run the container to keep a whole library synced on its own.
 
 ---
 
@@ -322,6 +322,18 @@ Together they cover the four ways a caller may want the output handled:
 ```
 
 The flags may appear anywhere on the command line. An existing `.bak` is never overwritten, so the first backup stays the untouched original no matter how many times you run LAPSE on a file.
+
+### Batch mode
+
+Starting the binary loads onnxruntime and the Silero model from disk, which is fine for a single file and wasteful for a whole library. `--batch` reads jobs from stdin instead, one line per file with the same arguments you would otherwise put on the command line, and keeps that model loaded for as long as stdin stays open:
+
+```bash
+echo 'video1.mkv subs1.srt' >> jobs.txt
+echo 'video2.mkv subs2.srt ols' >> jobs.txt
+./lapse --batch < jobs.txt
+```
+
+Each line gets exactly one line of JSON back on stdout, in the order the jobs came in, whether or not that job worked. `--json` is implied and does not need to be added to the lines. Paths with spaces in them need double quotes.
 
 ### Snapping to picture cuts
 

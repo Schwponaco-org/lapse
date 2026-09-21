@@ -138,6 +138,33 @@ lapse decided on its own:
 | `auto/joined` | two parts in one video |
 | `auto/restart` | the subtitle starts over partway through |
 
+## Syncing many files at once
+
+Calling the CLI once per file works fine for a hook that fires on one file
+at a time, but a tool that already knows about a whole batch of files pays
+for loading onnxruntime and the Silero model on every single call, which is
+most of the startup cost. `--batch` avoids that by taking jobs on stdin
+instead of argv and keeping the model loaded between them:
+
+```bash
+lapse --batch
+```
+
+Each line on stdin is one job, written the same way it would be on the
+command line, reference and subtitle first, then mode and flags:
+
+```
+video1.mkv subtitles1.srt
+video2.mkv subtitles2.srt ols
+"a path with spaces.mkv" subtitles3.srt --confidence 10
+```
+
+One line of JSON comes back on stdout per job, in the same order, `--json`
+is on for the whole run whether or not a line asks for it. A job that fails
+outright still gets a line back, `{"error":true}`, so a caller reading
+stdin and stdout in lockstep never has to guess which line belongs to which
+job.
+
 ## Flags that answer a question and exit
 
 ```

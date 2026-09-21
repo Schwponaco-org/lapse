@@ -19,6 +19,7 @@
 #include <cstring>
 #include <cmath>
 #include <fstream>
+#include <sstream>
 #include <filesystem>
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -405,6 +406,7 @@ void usage() {
     std::cerr << "       lapse --formats\n";
     std::cerr << "       lapse --vad\n";
     std::cerr << "       lapse --undo <subtitle>\n";
+    std::cerr << "       lapse --batch   read one job per line from stdin, same arguments as above, one json reply per line\n";
 }
 
 int run(int argc, const char *argv[]) {
@@ -1010,12 +1012,55 @@ int run(int argc, const char *argv[]) {
     return 0;
 }
 
+static std::vector<std::string> split_job(const std::string& line) {
+    std::vector<std::string> tokens;
+    std::string cur;
+    bool quoted = false;
+    for (char c : line) {
+        if (c == '"') { quoted = !quoted; continue; }
+        if ((c == ' ' || c == '\t' || c == '\r') && !quoted) {
+            if (!cur.empty()) { tokens.push_back(cur); cur.clear(); }
+            continue;
+        }
+        cur += c;
+    }
+    if (!cur.empty()) tokens.push_back(cur);
+    return tokens;
+}
+
+static int run_batch() {
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        std::vector<std::string> tokens = split_job(line);
+        if (tokens.empty()) continue;
+        tokens.push_back("--json");
+
+        std::vector<const char*> argv;
+        argv.push_back("lapse");
+        for (auto& t : tokens) argv.push_back(t.c_str());
+
+        std::ostringstream captured;
+        std::streambuf* old = std::cout.rdbuf(captured.rdbuf());
+        try {
+            run((int)argv.size(), argv.data());
+        } catch (const std::exception& e) {
+            std::cerr << e.what() << '\n';
+        }
+        std::cout.rdbuf(old);
+
+        std::cout << (captured.str().empty() ? "{\"error\":true}\n" : captured.str());
+        std::cout.flush();
+    }
+    return 0;
+}
+
 int main(int argc, const char *argv[]) {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif
     try {
-        int result = run(argc, argv);
+        bool batch = argc > 1 && std::string(argv[1]) == "--batch";
+        int result = batch ? run_batch() : run(argc, argv);
         silero_close();
         return result;
     } catch (const std::exception& e) {
