@@ -4,7 +4,13 @@
 
 Automatically fixes subtitle sync in your media library. Detects how far off your subtitles are and corrects them, including linear drift caused by framerate mismatches between the video and the subtitle file.
 
-Try it in the browser at [schwponaco.org/lapse](https://schwponaco.org/lapse/) first, nothing to install and nothing is uploaded.
+## Try it in the browser
+
+Sync against a video, an audio file or a reference subtitle without installing anything. The audio decoding and the speech detection both run on your machine, in the same tab, so nothing is uploaded.
+
+### 👉 [schwponaco.org/lapse](https://schwponaco.org/lapse/)
+
+Split mode, syncing several languages against one reference in a row, and most of the settings the CLI takes are all there. For a whole library or a script, use the binary or Docker image below instead.
 
 A Jellyfin plugin is available at [Schwponaco-org/lapse-jellyfin-plugin](https://github.com/Schwponaco-org/lapse-jellyfin-plugin) for direct integration with your media server.
 
