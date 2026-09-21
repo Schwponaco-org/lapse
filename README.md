@@ -10,7 +10,7 @@ The `lapse` binary is a C++ engine built on FFmpeg, libfvad and FFTW3. It syncs 
 
 This is the same engine compiled to WebAssembly, not a separate implementation. It runs in the tab, so a video never leaves the machine it is on.
 
-### 👉 [schwponaco.org/lapse](https://schwponaco.org/lapse/)
+### [schwponaco.org/lapse](https://schwponaco.org/lapse/)
 
 Good for a file or two. A library still wants the binary or the Docker image above, since neither of those forgets what it already synced.
 
