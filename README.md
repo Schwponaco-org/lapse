@@ -4,17 +4,17 @@
 
 Automatically fixes subtitle sync in your media library. Detects how far off your subtitles are and corrects them, including linear drift caused by framerate mismatches between the video and the subtitle file.
 
+The `lapse` binary is a C++ engine built on FFmpeg, libfvad and FFTW3. It syncs one file at a time by default, or a whole stack of them in one process with `--batch`. The Docker image wraps that engine with a Python watcher that scans your library, matches subtitles to video and keeps a SQLite record so nothing gets processed twice. Run the binary by hand for a single file, or run the container to keep a whole library synced on its own.
+
 ## Try it in the browser
 
-Sync against a video, an audio file or a reference subtitle without installing anything. The audio decoding and the speech detection both run on your machine, in the same tab, so nothing is uploaded.
+This is the same engine compiled to WebAssembly, not a separate implementation. It runs in the tab, so a video never leaves the machine it is on.
 
-### 👉 [schwponaco.org/lapse](https://schwponaco.org/lapse/)
+### [schwponaco.org/lapse](https://schwponaco.org/lapse/)
 
-Split mode, syncing several languages against one reference in a row, and most of the settings the CLI takes are all there. For a whole library or a script, use the binary or Docker image below instead.
+Good for a file or two. A library still wants the binary or the Docker image above, since neither of those forgets what it already synced.
 
 A Jellyfin plugin is available at [Schwponaco-org/lapse-jellyfin-plugin](https://github.com/Schwponaco-org/lapse-jellyfin-plugin) for direct integration with your media server.
-
-The `lapse` binary is a C++ engine built on FFmpeg, libfvad and FFTW3. It syncs one file at a time by default, or a whole stack of them in one process with `--batch`. The Docker image wraps that engine with a Python watcher that scans your library, matches subtitles to video and keeps a SQLite record so nothing gets processed twice. Run the binary by hand for a single file, or run the container to keep a whole library synced on its own.
 
 ---
 
