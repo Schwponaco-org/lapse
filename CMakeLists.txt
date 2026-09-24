@@ -18,7 +18,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(lapse
-    VERSION 2.2.2
+    VERSION 2.2.3
     DESCRIPTION "Language-agnostic subtitle synchronization engine"
     LANGUAGES C CXX)
 
