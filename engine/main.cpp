@@ -230,7 +230,8 @@ static void save_spans(const std::filesystem::path& path, const std::vector<std:
 }
 
 
-static double sure_sigma = 8.0;
+static const double SURE_SIGMA = 8.0;
+static double sure_sigma = SURE_SIGMA;
 static const double SOME_SIGMA = 3.5;
 static const int SNAP_WINDOW_MS = 120;
 
@@ -415,7 +416,20 @@ void usage() {
     std::cerr << "       lapse --batch   read one job per line from stdin, same arguments as above, one json reply per line\n";
 }
 
+struct Media {
+    AVFormatContext* file = nullptr;
+    AVCodecContext* audio = nullptr;
+    ~Media() {
+        avcodec_free_context(&audio);
+        avformat_close_input(&file);
+    }
+};
+
 int run(int argc, const char *argv[]) {
+    sure_sigma = SURE_SIGMA;
+    keep_output_charset();
+    set_sub_fps(0);
+
     std::vector<std::string> args;
     std::string output_path;
     bool make_backup = true;
@@ -609,8 +623,9 @@ int run(int argc, const char *argv[]) {
     }
 
     // kept around so a thin answer can send us back for the whole film later
-    AVFormatContext* AVC = nullptr;
-    AVCodecContext* OAD = nullptr;
+    Media media;
+    AVFormatContext*& AVC = media.file;
+    AVCodecContext*& OAD = media.audio;
     int audio_stream_index = -1;
     std::filesystem::path cache;
 
