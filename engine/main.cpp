@@ -952,7 +952,7 @@ int run(int argc, const char *argv[]) {
             card.confidence = confidence;
             card.margin = margin;
             card.sigma = sigma;
-            card.agreement = (double)flat / slices.size();
+            card.agreement = slices.empty() ? 0.0 : (double)flat / slices.size();
             Verdict verdict = judge(sigma, margin, flat);
 
             std::vector<int> offsets(spans.size(), offset);
