@@ -175,6 +175,7 @@ static std::filesystem::path cache_path(const std::string& video, int audio_trac
     if (ec) return {};
 
     std::string key = video + "|" + std::to_string((long long)size) + "|" + std::to_string((long long)written.time_since_epoch().count()) + "|" + std::to_string(audio_track);
+    key += silero_open() ? "|silero" : "|fvad";
     unsigned long long hash = 1469598103934665603ULL;
     for (char c : key) {
         hash ^= (unsigned char)c;
@@ -210,6 +211,9 @@ static bool load_spans(const std::filesystem::path& path, std::vector<std::pair<
         weights.clear();
         return false;
     }
+
+    std::error_code ec;
+    std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now(), ec);
     return true;
 }
 
