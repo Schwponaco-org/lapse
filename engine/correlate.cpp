@@ -132,7 +132,7 @@ std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_pr
         if (shift < -0.5) shift = -0.5;
 
         double offset_ms = (best_lag + shift) * 10.0;
-        double sharpness = (second_val > 0) ? best_val / second_val : 0.0;
+        double sharpness = (second_val > 0) ? best_val / second_val : (best_val > 0 ? 10.0 : 0.0);
 
         say() << "t_" << chunk_number << " offset: " << offset_ms << "ms\n";
         say() << "Sharpness_" << chunk_number << ": " << sharpness << '\n';
