@@ -236,7 +236,7 @@ static void save_spans(const std::filesystem::path& path, const std::vector<std:
 
 static const double SURE_SIGMA = 8.0;
 static double sure_sigma = SURE_SIGMA;
-static const double SOME_SIGMA = 3.5;
+static const double SOME_SIGMA = 6.0;
 static const int SNAP_WINDOW_MS = 120;
 
 static const int AGREE_MS = 400;
