@@ -560,7 +560,7 @@ def finish(conn, video_path, srt_path, attempts, values):
     if not values.get("written"):
         print("Nothing lined up, left it alone:", srt_path)
         status = "lowconf"
-    elif verdict == "unsure":
+    elif verdict != "solid":
         # the engine wrote its guess beside the original rather than over it
         print("Not sure about this one, left the original and put the guess in",
               values.get("output"))
