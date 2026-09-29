@@ -266,6 +266,7 @@ static std::vector<std::string> ttml_cue_text(const std::string& path) {
 
 std::vector<std::string> read_cue_text(const std::string& path) {
     std::string kind = subtitle_kind(path);
+    if (kind == ".sup" || kind == ".idx") return {};
     if (kind == ".ass" || kind == ".ssa") return ass_cue_text(path);
     if (kind == ".sub" || kind == ".mpl2") return sub_cue_text(path);
     if (kind == ".sbv") return sbv_cue_text(path);

@@ -409,9 +409,16 @@ std::vector<Chunk> chunk_offsets(const std::vector<std::pair<int, int>>& read_sr
 
 std::vector<int> backward_jumps(const std::vector<std::pair<int, int>>& read_srt) {
     std::vector<int> cuts;
-    for (size_t i = 1; i < read_srt.size(); i++)
-        if (read_srt[i].first < read_srt[i - 1].first - CONCAT_BACK_MS)
-            cuts.push_back((int)i);
+    int n = (int)read_srt.size();
+    int part = std::max(30, n / 10);
+    int from = 0;
+
+    for (int i = 1; i + part <= n; i++) {
+        if (read_srt[i].first >= read_srt[i - 1].first - CONCAT_BACK_MS) continue;
+        if (i - from < part || read_srt[i + part - 1].first >= read_srt[i - 1].first) continue;
+        cuts.push_back(i);
+        from = i;
+    }
     return cuts;
 }
 

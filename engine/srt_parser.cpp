@@ -627,10 +627,61 @@ int idx_time_ms(const std::string& v) {
     return h * 3600000 + m * 60000 + s * 1000 + ms;
 }
 
+int spu_stop_ms(const unsigned char* spu, size_t n) {
+    if (n < 4) return -1;
+    size_t total = std::min(n, (size_t)((spu[0] << 8) | spu[1]));
+    size_t at = (spu[2] << 8) | spu[3];
+
+    while (at + 4 <= total) {
+        int date = (spu[at] << 8) | spu[at + 1];
+        size_t next = (spu[at + 2] << 8) | spu[at + 3];
+        for (size_t p = at + 4; p < total && spu[p] != 0xff; ) {
+            unsigned char cmd = spu[p++];
+            if (cmd == 0x02) return date * 1024 / 90;
+            if (cmd == 0x03 || cmd == 0x04) p += 2;
+            else if (cmd == 0x05) p += 6;
+            else if (cmd == 0x06) p += 4;
+            else if (cmd > 0x06) break;
+        }
+        if (next <= at) break;
+        at = next;
+    }
+    return -1;
+}
+
+static std::string spu_at(const std::string& sub, size_t at) {
+    std::string spu;
+    size_t want = 0;
+    char stream = 0;
+
+    while (at + 14 <= sub.size() && (!want || spu.size() < want)) {
+        if (sub.compare(at, 3, "\0\0\1", 3) != 0) break;
+        unsigned char code = sub[at + 3];
+        if (code == 0xba) {
+            at += 14 + (sub[at + 13] & 7);
+            continue;
+        }
+        size_t len = ((unsigned char)sub[at + 4] << 8) | (unsigned char)sub[at + 5];
+        size_t body = at + 9 + (unsigned char)sub[at + 8];
+        size_t end = std::min(at + 6 + len, sub.size());
+
+        if (code == 0xbd && body < end && (!stream || sub[body] == stream)) {
+            stream = sub[body];
+            spu.append(sub, body + 1, end - body - 1);
+            if (!want && spu.size() >= 2) want = ((unsigned char)spu[0] << 8) | (unsigned char)spu[1];
+        }
+        at += 6 + len;
+    }
+    return spu;
+}
+
 std::vector<std::pair<int,int>> read_idx(const char* filename) {
-    std::vector<int> starts;
+    std::vector<int> starts, shown;
     std::string line {};
     std::istringstream read_file(load_text(filename));
+
+    std::ifstream bin(std::filesystem::path(filename).replace_extension(".sub"), std::ios::binary);
+    std::string sub((std::istreambuf_iterator<char>(bin)), {});
 
     while (getline(read_file, line)) {
         size_t vf, vl;
@@ -642,12 +693,17 @@ std::vector<std::pair<int,int>> read_idx(const char* filename) {
         }
 
         starts.push_back(idx_time_ms(line.substr(vf, vl)));
+
+        size_t pos = line.find("filepos:");
+        std::string spu = (pos == std::string::npos || sub.empty()) ? "" : spu_at(sub, strtoull(line.c_str() + pos + 8, nullptr, 16));
+        shown.push_back(spu_stop_ms((const unsigned char*)spu.data(), spu.size()));
     }
 
     std::vector<std::pair<int,int>> timestamps;
     for (int i = 0; i < (int)starts.size(); i++) {
         if (starts[i] < 0) { timestamps.push_back({0, 0}); continue; }
         int end = (i + 1 < (int)starts.size() && starts[i + 1] > starts[i]) ? starts[i + 1] : starts[i] + 2000;
+        if (shown[i] > 0) end = starts[i] + shown[i];
         if (end - starts[i] > MAX_CUE_MS) end = starts[i] + MAX_CUE_MS;
         timestamps.push_back({starts[i], end});
     }

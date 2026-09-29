@@ -48,6 +48,7 @@ static int ref_bins = 0;
 static std::vector<std::pair<int,int>> ref;
 static std::vector<float> ref_w;
 static std::vector<int> starts;
+static const void* base_key = nullptr;
 
 static double *in_buf = nullptr, *out_buf = nullptr;
 static fftw_complex *rb = nullptr, *ro = nullptr, *sb = nullptr, *so = nullptr, *mix = nullptr;
@@ -123,6 +124,7 @@ void align_drop() {
 
 void align_setup(const std::vector<std::pair<int,int>>& spans, const std::vector<float>& weights) {
     align_drop();
+    base_key = nullptr;
     if (spans.size() < 4) return;
 
     ref = spans;
@@ -376,7 +378,6 @@ static double sigmas(double got, double mean, double sd) {
     return z < 0 ? 0 : z;
 }
 
-static const void* base_key = nullptr;
 static size_t base_len = 0;
 static int base_edge = 0;
 static double bunch_mean = 0, bunch_sd = 1, over_mean = 0, over_sd = 1;

@@ -26,6 +26,7 @@
 
 void backup_file(const char* path);
 void force_output_charset(Charset how);
+void keep_output_charset();
 void write_srt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_ass_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_vtt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);

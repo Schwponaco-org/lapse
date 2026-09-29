@@ -54,6 +54,7 @@ bool sbv_time_line(const std::string& line);
 std::vector<std::pair<int,int>> read_idx(const char* filename);
 bool idx_time_line(const std::string& line, size_t& val_from, size_t& val_len);
 int idx_time_ms(const std::string& v);
+int spu_stop_ms(const unsigned char* spu, size_t n);
 std::vector<std::pair<int,int>> read_smi(const char* filename);
 size_t ifind(const std::string& text, const std::string& needle, size_t from);
 bool sync_start(const std::string& text, size_t from, size_t to, size_t& val_from, size_t& val_len);

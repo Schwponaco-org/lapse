@@ -49,6 +49,8 @@ void force_output_charset(Charset how) {
     was_asked = true;
 }
 
+void keep_output_charset() { was_asked = false; }
+
 static std::string load_file(const char* path) {
     return load_text(path, &came_as);
 }
