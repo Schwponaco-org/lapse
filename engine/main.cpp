@@ -309,12 +309,12 @@ static int clusters_of(std::vector<Chunk> chunks) {
 
 
 static bool second_part(const std::vector<Chunk>& chunks, int offset) {
-    std::vector<double> far;
+    std::vector<double> away;
     for (auto& c : chunks)
-        if (std::abs(c.offset - offset) > REFINE_WINDOW_MS) far.push_back(c.offset);
-    std::sort(far.begin(), far.end());
-    for (size_t i = 1; i < far.size(); i++)
-        if (far[i] - far[i - 1] <= AGREE_MS) return true;
+        if (std::abs(c.offset - offset) > REFINE_WINDOW_MS) away.push_back(c.offset);
+    std::sort(away.begin(), away.end());
+    for (size_t i = 1; i < away.size(); i++)
+        if (away[i] - away[i - 1] <= AGREE_MS) return true;
     return false;
 }
 
