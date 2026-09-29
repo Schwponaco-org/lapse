@@ -62,6 +62,8 @@ bool smi_blank(const std::string& body);
 std::vector<std::pair<int,int>> read_ttml(const char* filename);
 bool ttml_attr(const std::string& text, size_t from, size_t to, const char* name, size_t& val_from, size_t& val_len);
 int ttml_time_ms(const std::string& v);
+void ttml_rates(const std::string& text);
+size_t ttml_p(const std::string& text, size_t from);
 std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const std::vector<std::pair<int, int>>& timestamps, bool merge = true, bool sort_by_time = true);
 const float SPEECH_THRESHOLD = 0.25f;
 const int MIN_CUES = 10;
