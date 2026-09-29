@@ -15,6 +15,7 @@
 
 #include "write_subtitle.h"
 #include "srt_parser.h"
+#include <cmath>
 
 
 void backup_file(const char* path) {
@@ -31,12 +32,21 @@ struct Shift {
     std::vector<int> mapping;
 
     int apply(int ms, int cue) const {
-        double stretched = ms * (1.0 + slope) + intercept_s * 1000.0;
-        if (mapping.empty()) return (int)stretched;
-        if (cue < 0 || cue >= (int)mapping.size()) return (int)stretched;
+        int stretched = (int)std::lround(ms * (1.0 + slope) + intercept_s * 1000.0);
+        if (mapping.empty()) return stretched;
+        if (cue < 0 || cue >= (int)mapping.size()) return stretched;
         int span = mapping[cue];
-        if (span < 0 || span >= (int)offsets.size()) return (int)stretched;
-        return (int)stretched + offsets[span];
+        if (span < 0 || span >= (int)offsets.size()) return stretched;
+        return stretched + offsets[span];
+    }
+
+    std::pair<int,int> both(int start, int end, int cue) const {
+        int a = apply(start, cue), b = apply(end, cue);
+        if (a < 0) {
+            b -= a;
+            a = 0;
+        }
+        return {a, b};
     }
 };
 
@@ -83,6 +93,7 @@ static std::string ms_to_ts(int ms, char ms_sep) {
 
 static std::string ms_to_ass_ts(int ms) {
     if (ms < 0) ms = 0;
+    ms = (ms + 5) / 10 * 10;
     int h  = ms / 3600000; ms %= 3600000;
     int m  = ms / 60000;   ms %= 60000;
     int sc = ms / 1000;    ms %= 1000;
@@ -104,6 +115,7 @@ static std::string ms_to_tenths(int ms) {
 
 static std::string ms_to_centis(int ms) {
     if (ms < 0) ms = 0;
+    ms = (ms + 5) / 10 * 10;
     int h  = ms / 3600000; ms %= 3600000;
     int m  = ms / 60000;   ms %= 60000;
     int sc = ms / 1000;    ms %= 1000;
@@ -144,7 +156,8 @@ static void write_cues(const char* input_path, const char* output_path, char ms_
                     size_t space = line.find_first_of(" \t", after);
                     if (space != std::string::npos) tail = line.substr(space);
                 }
-                line = ms_to_ts(shift.apply(start_ms, cue), ms_sep) + " --> " + ms_to_ts(shift.apply(end_ms, cue), ms_sep) + tail;
+                auto [a, b] = shift.both(start_ms, end_ms, cue);
+                line = ms_to_ts(a, ms_sep) + " --> " + ms_to_ts(b, ms_sep) + tail;
             }
             cue++;       // counted even when it did not parse, the reader did the same
         } else if (ms_sep == '.' && cue > 0) {
@@ -187,8 +200,10 @@ static void write_sbv(const char* input_path, const char* output_path, const Shi
             int start_ms = parse_timestamp(left, 0);
             int end_ms   = parse_timestamp(right, 0);
 
-            if (start_ms >= 0 && end_ms >= 0)
-                line = ms_to_ts(shift.apply(start_ms, cue), '.') + "," + ms_to_ts(shift.apply(end_ms, cue), '.');
+            if (start_ms >= 0 && end_ms >= 0) {
+                auto [a, b] = shift.both(start_ms, end_ms, cue);
+                line = ms_to_ts(a, '.') + "," + ms_to_ts(b, '.');
+            }
             cue++;
         }
 
@@ -231,8 +246,9 @@ static void write_dialogue(const char* input_path, const char* output_path, cons
                 int end_ms   = parse_timestamp(line.substr(ef, el), 0);
 
                 if (start_ms >= 0 && end_ms >= 0) {
-                    std::string new_start = ms_to_ass_ts(shift.apply(start_ms, cue));
-                    std::string new_end   = ms_to_ass_ts(shift.apply(end_ms, cue));
+                    auto [a, b] = shift.both(start_ms, end_ms, cue);
+                    std::string new_start = ms_to_ass_ts(a);
+                    std::string new_end   = ms_to_ass_ts(b);
 
                     // Put the later field back first so the earlier one keeps
                     // the position we just looked up
@@ -284,17 +300,18 @@ static void write_sub_lines(const char* input_path, const char* output_path, con
             if (subviewer_times(line, comma)) {
                 int start_ms = parse_timestamp(line.substr(0, comma), 0);
                 int end_ms   = parse_timestamp(line, comma + 1);
+                auto [a, b] = shift.both(start_ms, end_ms, cue);
                 if (start_ms >= 0 && end_ms >= 0)
-                    line = ms_to_centis(shift.apply(start_ms, cue)) + "," + ms_to_centis(shift.apply(end_ms, cue));
+                    line = ms_to_centis(a) + "," + ms_to_centis(b);
                 cue++;
             }
         } else if (tenths) {
             if (mpl2_times(line, a, b, text_from)) {
                 int start_ms = tenths_to_ms(a);
                 int end_ms   = tenths_to_ms(b);
+                auto [a, b] = shift.both(start_ms, end_ms, cue);
                 if (start_ms >= 0 && end_ms >= 0)
-                    line = "[" + ms_to_tenths(shift.apply(start_ms, cue)) + "][" +
-                           ms_to_tenths(shift.apply(end_ms, cue)) + "]" + line.substr(text_from);
+                    line = "[" + ms_to_tenths(a) + "][" + ms_to_tenths(b) + "]" + line.substr(text_from);
                 cue++;
             }
         } else if (sub_frames(line, a, b, text_from)) {
@@ -307,9 +324,10 @@ static void write_sub_lines(const char* input_path, const char* output_path, con
                 char rate[32];
                 snprintf(rate, sizeof(rate), "%.3f", fps);
                 line = "{1}{1}" + std::string(rate);
-            } else if (start_ms >= 0 && end_ms >= 0)
-                line = "{" + ms_to_frames(shift.apply(start_ms, cue), fps) + "}{" +
-                       ms_to_frames(shift.apply(end_ms, cue), fps) + "}" + line.substr(text_from);
+            } else if (start_ms >= 0 && end_ms >= 0) {
+                auto [a, b] = shift.both(start_ms, end_ms, cue);
+                line = "{" + ms_to_frames(a, fps) + "}{" + ms_to_frames(b, fps) + "}" + line.substr(text_from);
+            }
             cue++;
         }
 
@@ -464,13 +482,14 @@ static void write_ttml(const char* input_path, const char* output_path, const Sh
             int end_ms = has_end ? ttml_time_ms(text.substr(ef, el)) : 0;
 
             if (start_ms >= 0 && (!has_end || end_ms >= 0)) {
+                auto [a, b] = shift.both(start_ms, has_end ? end_ms : start_ms, cue);
                 out += text.substr(written, bf - written);
-                out += ms_to_ts(shift.apply(start_ms, cue), '.');
+                out += ms_to_ts(a, '.');
                 written = bf + bl;
 
                 if (has_end) {
                     out += text.substr(written, ef - written);
-                    out += ms_to_ts(shift.apply(end_ms, cue), '.');
+                    out += ms_to_ts(b, '.');
                     written = ef + el;
                 }
             }
