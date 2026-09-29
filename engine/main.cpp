@@ -263,6 +263,12 @@ static bool worth_splitting(const std::vector<int>& offsets, int base) {
     return high - low >= 120;
 }
 
+static std::vector<std::pair<int,int>> stretch(const std::vector<std::pair<int,int>>& spans, double ratio) {
+    std::vector<std::pair<int,int>> out;
+    for (auto& s : spans) out.push_back({(int)(s.first * ratio), (int)(s.second * ratio)});
+    return out;
+}
+
 static int agree_count(const std::vector<Chunk>& chunks, const std::vector<double>& expected) {
     int agreed = 0;
     for (size_t i = 0; i < chunks.size() && i < expected.size(); i++)
@@ -808,7 +814,7 @@ int run(int argc, const char *argv[]) {
         double slope = ratio - 1.0;
         double intercept = offset / 1000.0;
 
-        if (confidence < 0.5) {
+        if (sigma < SOME_SIGMA) {
             say() << "No framerate fit well, measuring the drift instead\n";
             std::vector<int> input_activity = activity(spans);
             auto [s, i] = fft_crosscorrelate(reference_activity, input_activity);
@@ -820,9 +826,10 @@ int run(int argc, const char *argv[]) {
         card.confidence = confidence;
         card.margin = 1.0;
         card.sigma = sigma;
-        std::vector<double> want = expected_at((int)(intercept * 1000.0), 1.0 + slope);
-        card.agreement = agreement_of(slices, want);
-        return save_ols(slope, intercept, judge(sigma, 1.0, agree_count(slices, want)));
+        std::vector<Chunk> after = chunk_offsets(stretch(spans, 1.0 + slope), ref_spans, ref_weights, 8, ref_coverage);
+        std::vector<double> want(after.size(), intercept * 1000.0);
+        card.agreement = agreement_of(after, want);
+        return save_ols(slope, intercept, judge(sigma, 1.0, agree_count(after, want)));
 
     } else if (mode == "nosplit") {
         auto [offset, confidence, margin, sigma] = best_offset(spans, ref_spans, ref_weights, ref_coverage);
@@ -949,8 +956,7 @@ int run(int argc, const char *argv[]) {
         if (choice == "shifted") return shifted();
 
         if (choice == "drifting") {
-            std::vector<std::pair<int,int>> scaled;
-            for (auto& s : spans) scaled.push_back({(int)(s.first * ratio), (int)(s.second * ratio)});
+            std::vector<std::pair<int,int>> scaled = stretch(spans, ratio);
 
             auto [shift, conf2, margin2, sigma2] = best_offset(scaled, ref_spans, ref_weights, ref_coverage);
 
