@@ -16,6 +16,7 @@
 import json
 import os
 import re
+import subs
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -156,18 +157,26 @@ def remember(conn, source, output, language, status, detail):
     conn.commit()
 
 
+def ours(conn, path):
+    return conn.execute("SELECT 1 FROM translations WHERE output_path = ? AND status = 'done'",
+                        (path,)).fetchone() is not None
+
+
 def work(conn, path, language):
+    output = named(path, language)
+    if ours(conn, output) and os.path.exists(output):
+        return True
     try:
-        output, detail = run(path, language)
+        detail = run(path, output, language)
         remember(conn, path, output, language, "done", detail)
         return True
     except Exception as e:
-        remember(conn, path, named(path, language), language, "failed", str(e)[:400])
+        remember(conn, path, output, language, "failed", str(e)[:400])
         print("Could not translate", path, "to", language, "->", e)
         return False
 
 
-def run(path, language):
+def run(path, output, language):
     if not ready():
         raise RuntimeError("No translation key or address is set")
 
@@ -175,12 +184,10 @@ def run(path, language):
     if ext not in READABLE:
         raise RuntimeError("Cannot translate that format")
 
-    output = named(path, language)
     if os.path.exists(output):
-        return output, "already there"
+        raise RuntimeError("There is already a %s that did not come from here" % os.path.basename(output))
 
-    with open(path, "r", encoding="utf-8", errors="replace") as file:
-        lines = file.readlines()
+    lines = subs.read(path)
 
     wanted = pull_lines(lines, ext in (".ass", ".ssa"))
     if not wanted:
@@ -194,4 +201,4 @@ def run(path, language):
         file.writelines(put_lines(lines, wanted, got))
     os.replace(temporary, output)
 
-    return output, "%d lines" % len(wanted)
+    return "%d lines" % len(wanted)

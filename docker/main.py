@@ -535,10 +535,6 @@ def save_result(conn, video_path, srt_path, backup_path, values, attempts, statu
     conn.commit()
 
 
-def our_translation(conn, path):
-    return conn.execute("SELECT 1 FROM translations WHERE output_path = ?", (path,)).fetchone() is not None
-
-
 def count_tracks(video_path):
     try:
         result = subprocess.run(
@@ -633,7 +629,7 @@ def run_scan(conn, path, verbose=False):
         if ext not in ENGINE_FORMATS:
             unsupported += 1
             continue
-        if our_translation(conn, subtitle):
+        if translate.ours(conn, subtitle):
             continue
         if '"' in video + subtitle or "\n" in video + subtitle:
             print("Cannot hand the engine a path with a double quote or a line break in it:", subtitle)

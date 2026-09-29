@@ -331,7 +331,10 @@ def queue_translations(conn, ids, language):
     rows = conn.execute("SELECT srt_path FROM sync_jobs WHERE id IN (%s)" % marks, ids).fetchall()
     for row in rows:
         source = row["srt_path"]
-        translate.remember(conn, source, translate.named(source, language), language, "waiting", "")
+        output = translate.named(source, language)
+        if translate.ours(conn, output) and os.path.exists(output):
+            continue
+        translate.remember(conn, source, output, language, "waiting", "")
         waiting.put((source, language))
     return len(rows)
 
