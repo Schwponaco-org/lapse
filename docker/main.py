@@ -105,10 +105,6 @@ engine = None
 engine_lock = threading.Lock()
 
 
-class Stopped(Exception):
-    pass
-
-
 def force(child):
     if child.poll() is None:
         child.kill()
@@ -458,37 +454,62 @@ def job_line(video_path, srt_path):
     if output:
         parts += ["--output", output]
 
-    return " ".join('"%s"' % p if " " in p else p for p in parts)
+    return " ".join('"%s"' % p if re.search(r"\s", p) else p for p in parts)
 
 
-def run_batch(pairs):
+def failed(conn, video_path, srt_path, attempts):
+    print("Failed:", srt_path)
+    if not ENGINE.get("dry_run"):
+        save_result(conn, video_path, srt_path, None, {}, attempts, "failed")
+
+
+def run_batch(conn, batch):
     global engine
+    todo = list(batch)
 
-    stdin = "".join(job_line(video, srt) + "\n" for video, srt in pairs)
-
-    try:
+    while todo:
         with engine_lock:
             engine = subprocess.Popen([LAPSE, "--batch"], stdin=subprocess.PIPE,
-                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                      stdout=subprocess.PIPE, text=True)
         child = engine
         try:
-            out, err = child.communicate(stdin, timeout=TIMEOUT * len(pairs))
-        except subprocess.TimeoutExpired:
-            child.kill()
-            child.communicate()
-            raise
-    finally:
-        with engine_lock:
-            engine = None
-        for video, srt in pairs:
-            drop_leftovers(srt, output_for(srt))
+            while todo:
+                video, subtitle, attempts = todo[0]
+                clock = threading.Timer(TIMEOUT, force, [child])
+                clock.start()
+                try:
+                    child.stdin.write(job_line(video, subtitle) + "\n")
+                    child.stdin.flush()
+                    line = child.stdout.readline()
+                except OSError:
+                    line = ""
+                clock.cancel()
+                drop_leftovers(subtitle, output_for(subtitle))
+                if not line:
+                    break
 
-    if child.returncode < 0:
-        raise Stopped()
-    if err.strip():
-        print(err.strip())
+                todo.pop(0)
+                try:
+                    values = json.loads(line)
+                except ValueError:
+                    values = {}
+                if not values or values.get("error"):
+                    failed(conn, video, subtitle, attempts)
+                else:
+                    finish(conn, video, subtitle, attempts, values)
+        finally:
+            with engine_lock:
+                engine = None
+            force(child)
+            child.wait()
 
-    return [line for line in out.splitlines() if line.strip().startswith("{")]
+        if todo and (not running or paused(conn)):
+            print("Stopped part way through, it will start over next time")
+            return
+        if todo:
+            video, subtitle, attempts = todo.pop(0)
+            print("The engine died or ran out of time on", subtitle)
+            failed(conn, video, subtitle, attempts)
 
 
 def save_result(conn, video_path, srt_path, backup_path, values, attempts, status):
@@ -614,6 +635,9 @@ def run_scan(conn, path, verbose=False):
             continue
         if our_translation(conn, subtitle):
             continue
+        if '"' in video + subtitle or "\n" in video + subtitle:
+            print("Cannot hand the engine a path with a double quote or a line break in it:", subtitle)
+            continue
 
         row = previous_job(conn, video, subtitle)
         if not needs_work(row, file_mtime(subtitle)):
@@ -636,26 +660,7 @@ def run_scan(conn, path, verbose=False):
     for video, subtitle, attempts in batch:
         print(" ", subtitle)
 
-    try:
-        lines = run_batch([(video, subtitle) for video, subtitle, attempts in batch])
-    except Stopped:
-        print("Stopped part way through, it will start over next time")
-        return
-    except Exception as e:
-        print("Batch failed:", e)
-        if not ENGINE.get("dry_run"):
-            for video, subtitle, attempts in batch:
-                save_result(conn, video, subtitle, None, {}, attempts, "failed")
-        return
-
-    for i, (video, subtitle, attempts) in enumerate(batch):
-        values = json.loads(lines[i]) if i < len(lines) else {}
-        if not values or values.get("error"):
-            print("Failed:", subtitle)
-            if not ENGINE.get("dry_run"):
-                save_result(conn, video, subtitle, None, {}, attempts, "failed")
-            continue
-        finish(conn, video, subtitle, attempts, values)
+    run_batch(conn, batch)
 
 
 class MediaHandler(FileSystemEventHandler):
