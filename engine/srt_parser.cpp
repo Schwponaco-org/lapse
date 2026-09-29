@@ -191,10 +191,6 @@ static std::string looks_like(const std::string& text) {
 // worth opening. Anything already carrying a name we know is taken at its word,
 // and anything carrying a different one is left alone
 static bool worth_reading(const std::string& path) {
-    std::string ext = std::filesystem::path(path).extension().string();
-    for (char& c : ext) c = (char)tolower((unsigned char)c);
-    if (!ext.empty() && ext != ".txt") return false;
-
     std::error_code ec;
     uintmax_t bytes = std::filesystem::file_size(path, ec);
     return !ec && bytes > 0 && bytes < 4u * 1024 * 1024;
@@ -203,10 +199,13 @@ static bool worth_reading(const std::string& path) {
 std::string subtitle_kind(const std::string& path) {
     static const char* known[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2",
                                   ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp"};
-    for (auto ext : known)
-        if (path.ends_with(ext)) return ext;
+    std::string ext = std::filesystem::path(path).extension().string();
+    for (char& c : ext) c = (char)tolower((unsigned char)c);
+    if (ext == ".sami") return ".smi";
+    for (auto one : known)
+        if (ext == one) return ext;
 
-    if (!worth_reading(path)) return "";
+    if ((!ext.empty() && ext != ".txt") || !worth_reading(path)) return "";
     try {
         return looks_like(load_text(path));
     } catch (const std::exception&) {
