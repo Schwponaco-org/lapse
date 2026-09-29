@@ -168,7 +168,7 @@ What you change here is kept in the database and wins over the environment varia
 | `MODE` | `nosplit` | `nosplit`, `ols` or `split` |
 | `PENALTY` | `6` | Split penalty, only used in split mode |
 | `SCAN_INTERVAL` | `900` | Seconds between full rescans. `0` turns them off |
-| `MIN_CONFIDENCE` | `0` | Put the original back when a result scores below this. `0` keeps everything |
+| `MIN_CONFIDENCE` | `0` | Put the original back when a result stands out less than this, on the same scale as `CONFIDENCE`. `0` keeps everything |
 | `MAX_ATTEMPTS` | `3` | How many times a failing pair is retried before it is left alone |
 | `TIMEOUT` | `1800` | Seconds a single sync may take |
 | `POLLING` | `0` | Set to `1` on network shares where file events do not arrive |

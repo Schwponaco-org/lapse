@@ -248,7 +248,7 @@ def sync_one(conn, row, reference, mode):
     if written == target:
         conn.execute(
             "UPDATE sync_jobs SET offset_ms = ?, confidence = ?, srt_mtime = ?, status = ? WHERE id = ?",
-            (values.get("offset_ms"), values.get("confidence"),
+            (values.get("offset_ms"), values.get("sigma"),
              os.path.getmtime(written), status, row["id"])
         )
     else:

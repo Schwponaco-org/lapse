@@ -526,7 +526,7 @@ def save_result(conn, video_path, srt_path, backup_path, values, attempts, statu
             values.get("ratio", 1.0) - 1.0 if values.get("ratio") is not None else None,
             values.get("offset_ms"),
             values.get("offset_ms"),
-            values.get("confidence"),
+            values.get("sigma"),
             file_mtime(srt_path),
             attempts,
             status,
@@ -587,7 +587,7 @@ def finish(conn, video_path, srt_path, attempts, values):
               values.get("output"))
         status = "lowconf"
 
-    confidence = values.get("confidence")
+    confidence = values.get("sigma")
     if status == "done" and MIN_CONFIDENCE > 0 and confidence is not None \
             and confidence < MIN_CONFIDENCE:
         written_to = values.get("output")
