@@ -658,13 +658,13 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
     int hi = base_offset + window_ms;
 
     std::vector<double> t_prev = score_curve(read_srt[0], reference_spans, reference_weights, lo, hi, step_ms);
-    std::vector<std::vector<int>> all_to;
+    std::vector<std::vector<uint16_t>> all_to;
 
     for (int n = 1; n < (int)read_srt.size(); n++) {
         if (n % 64 == 0) progress("Looking for cuts", n, (int)read_srt.size());
         std::vector<double> scores = score_curve(read_srt[n], reference_spans, reference_weights, lo, hi, step_ms);
         std::vector<double> t_new(scores.size(), 0);
-        std::vector<int> to(scores.size(), 0);
+        std::vector<uint16_t> to(scores.size(), 0);
 
 
         int gap = (read_srt[n].first - read_srt[n-1].second) / step_ms;
