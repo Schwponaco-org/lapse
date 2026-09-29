@@ -782,9 +782,6 @@ std::vector<float> speech_profile(AVFormatContext* fmt, AVCodecContext* dec_ctx,
         }
     }
 
-    int frames = (int)(duration_ms / 10) + 1;
-    std::vector<float> profile(frames, 0.0f);
-
     int pieces = (int)(((int64_t)duration_ms + PIECE_MS - 1) / PIECE_MS);
     if (pieces < 1) pieces = 1;
 
@@ -794,7 +791,8 @@ std::vector<float> speech_profile(AVFormatContext* fmt, AVCodecContext* dec_ctx,
     if (hands > pieces) hands = pieces;
 
     auto ends_at = [&](int j) {
-        return (j == pieces - 1) ? (int64_t)duration_ms + 1000 : (j + 1) * PIECE_MS;
+        if (j < pieces - 1) return (j + 1) * PIECE_MS;
+        return duration_ms > 0 ? (int64_t)duration_ms + 1000 : (int64_t)MAX_TIME_MS;
     };
 
     std::vector<std::vector<float>> parts(pieces);
@@ -829,6 +827,8 @@ std::vector<float> speech_profile(AVFormatContext* fmt, AVCodecContext* dec_ctx,
         }
     }
 
+    int frames = duration_ms > 0 ? (int)(duration_ms / 10) + 1 : (int)parts[0].size();
+    std::vector<float> profile(frames, 0.0f);
     for (int j = 0; j < pieces; ++j) {
         size_t at = (size_t)(j * PIECE_MS / 10);
         for (size_t i = 0; i < parts[j].size(); ++i) {
