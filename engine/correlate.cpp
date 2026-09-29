@@ -17,6 +17,7 @@
 #include "align.h"
 #include "log.h"
 #include <cstdlib>
+#include <cstdint>
 
 // slope og intercept for y = slope*x + intercept
 std::pair<double, double> linear_regression(const std::vector<double>& x, const std::vector<double>& y, const std::vector<double>& w) {
