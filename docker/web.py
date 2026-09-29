@@ -146,12 +146,12 @@ def job(conn, job_id):
     ).fetchone()
 
 
-def note_written(conn, row, path, offset):
+def note_written(conn, row, path, offset, status="done"):
     conn.execute(
         "INSERT OR REPLACE INTO sync_jobs"
         " (video_path, srt_path, offset_ms, confidence, srt_mtime, attempts, status)"
-        " VALUES (?, ?, ?, ?, ?, 1, 'done')",
-        (row["video_path"], path, offset, row["confidence"], os.path.getmtime(path))
+        " VALUES (?, ?, ?, ?, ?, 1, ?)",
+        (row["video_path"], path, offset, row["confidence"], os.path.getmtime(path), status)
     )
 
 
@@ -251,13 +251,16 @@ def sync_one(conn, row, reference, mode):
             (values.get("offset_ms"), values.get("sigma"),
              os.path.getmtime(written), status, row["id"])
         )
+    elif mode.startswith("new"):
+        note_written(conn, row, written, values.get("offset_ms"), status)
     else:
-        note_written(conn, row, written, values.get("offset_ms"))
+        conn.execute("UPDATE sync_jobs SET status = 'lowconf' WHERE id = ?", (row["id"],))
 
 
 def reference_sync(conn, ids, reference, everything, mode):
     if not reference:
         raise RuntimeError("Say which subtitle is already correct")
+    reference = os.path.normpath(reference)
     if not inside_library(reference) or not os.path.isfile(reference):
         raise RuntimeError("No such subtitle in the library: " + reference)
 
