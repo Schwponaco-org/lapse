@@ -46,6 +46,7 @@ AVFormatContext* open_file(const char* filename) {
     }
     if (avformat_find_stream_info(pFormatContext, NULL) < 0) {
         std::cerr << "ERROR could not get stream info" << '\n';
+        avformat_close_input(&pFormatContext);
         return nullptr;
     }
 
@@ -158,6 +159,7 @@ AVCodecContext* open_audio_decoder(const AVFormatContext* pFormatContext, int au
     int ret = avcodec_open2(dec_ctx, NULL, NULL);
     if (ret < 0) {
         std::cerr << "Cannot open audio decoder" << '\n';
+        avcodec_free_context(&dec_ctx);
         return nullptr;
     }
     return dec_ctx;
