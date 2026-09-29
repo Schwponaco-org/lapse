@@ -318,9 +318,15 @@ static bool second_part(const std::vector<Chunk>& chunks, int offset) {
     return false;
 }
 
-static std::string beside(const std::string& path) {
+static size_t extension_at(const std::string& path) {
     size_t dot = path.find_last_of('.');
-    if (dot == std::string::npos) return path + ".lapse-unsure";
+    size_t slash = path.find_last_of("/\\");
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) return path.size();
+    return dot;
+}
+
+static std::string beside(const std::string& path) {
+    size_t dot = extension_at(path);
     return path.substr(0, dot) + ".lapse-unsure" + path.substr(dot);
 }
 
@@ -544,7 +550,7 @@ int run(int argc, const char *argv[]) {
             std::cerr << "No subtitles inside " << args[0] << " to take out\n";
             return 1;
         }
-        std::string put = args[0].substr(0, args[0].find_last_of('.')) + ".lapse.srt";
+        std::string put = args[0].substr(0, extension_at(args[0])) + ".lapse.srt";
         std::ofstream file(put, std::ios::binary);
         if (!file) {
             std::cerr << "Cannot write " << put << '\n';
