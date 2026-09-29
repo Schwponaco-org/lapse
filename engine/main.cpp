@@ -308,6 +308,16 @@ static int clusters_of(std::vector<Chunk> chunks) {
 }
 
 
+static bool second_part(const std::vector<Chunk>& chunks, int offset) {
+    std::vector<double> far;
+    for (auto& c : chunks)
+        if (std::abs(c.offset - offset) > REFINE_WINDOW_MS) far.push_back(c.offset);
+    std::sort(far.begin(), far.end());
+    for (size_t i = 1; i < far.size(); i++)
+        if (far[i] - far[i - 1] <= AGREE_MS) return true;
+    return false;
+}
+
 static std::string beside(const std::string& path) {
     size_t dot = path.find_last_of('.');
     if (dot == std::string::npos) return path + ".lapse-unsure";
@@ -905,7 +915,7 @@ int run(int argc, const char *argv[]) {
         std::string choice;
         double ratio = 1.0;
 
-        if (flat >= MIN_AGREEING) {
+        if (flat >= MIN_AGREEING && !second_part(slices, offset)) {
             choice = "shifted";
         } else if (sloped >= MIN_AGREEING + 1 && std::abs(drift) > 1e-5) {
             choice = "drifting";
