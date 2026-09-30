@@ -191,10 +191,6 @@ static std::string looks_like(const std::string& text) {
 // worth opening. Anything already carrying a name we know is taken at its word,
 // and anything carrying a different one is left alone
 static bool worth_reading(const std::string& path) {
-    std::string ext = std::filesystem::path(path).extension().string();
-    for (char& c : ext) c = (char)tolower((unsigned char)c);
-    if (!ext.empty() && ext != ".txt") return false;
-
     std::error_code ec;
     uintmax_t bytes = std::filesystem::file_size(path, ec);
     return !ec && bytes > 0 && bytes < 4u * 1024 * 1024;
@@ -203,10 +199,13 @@ static bool worth_reading(const std::string& path) {
 std::string subtitle_kind(const std::string& path) {
     static const char* known[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2",
                                   ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp"};
-    for (auto ext : known)
-        if (path.ends_with(ext)) return ext;
+    std::string ext = std::filesystem::path(path).extension().string();
+    for (char& c : ext) c = (char)tolower((unsigned char)c);
+    if (ext == ".sami") return ".smi";
+    for (auto one : known)
+        if (ext == one) return ext;
 
-    if (!worth_reading(path)) return "";
+    if ((!ext.empty() && ext != ".txt") || !worth_reading(path)) return "";
     try {
         return looks_like(load_text(path));
     } catch (const std::exception&) {
@@ -801,31 +800,68 @@ bool ttml_attr(const std::string& text, size_t from, size_t to, const char* name
     return true;
 }
 
+static double tick_rate = 1, frame_rate = 30;
+
+void ttml_rates(const std::string& text) {
+    size_t from, len;
+    tick_rate = ttml_attr(text, 0, text.size(), "ttp:tickRate", from, len) ? atof(text.substr(from, len).c_str()) : 1;
+    frame_rate = ttml_attr(text, 0, text.size(), "ttp:frameRate", from, len) ? atof(text.substr(from, len).c_str()) : 30;
+
+    double a = 1, b = 1;
+    if (ttml_attr(text, 0, text.size(), "ttp:frameRateMultiplier", from, len))
+        sscanf(text.substr(from, len).c_str(), "%lf %lf", &a, &b);
+    if (a > 0 && b > 0) frame_rate = frame_rate * a / b;
+
+    if (tick_rate <= 0) tick_rate = 1;
+    if (frame_rate <= 0) frame_rate = 30;
+}
+
 int ttml_time_ms(const std::string& v) {
     if (v.empty()) return -1;
+
+    int h, m, s;
+    double f;
+    if (std::count(v.begin(), v.end(), ':') == 3) {
+        if (sscanf(v.c_str(), "%d:%d:%d:%lf", &h, &m, &s, &f) != 4) return -1;
+        return (int)((h * 3600 + m * 60 + s) * 1000 + f * 1000 / frame_rate + 0.5);
+    }
     if (v.find(':') != std::string::npos) return parse_timestamp(v, 0);
 
     char* stop = nullptr;
     double num = strtod(v.c_str(), &stop);
     if (stop == v.c_str()) return -1;
-    if (*stop == 's' && *(stop + 1) == '\0') return (int)(num * 1000 + 0.5);
-    if (stop[0] == 'm' && stop[1] == 's' && stop[2] == '\0') return (int)(num + 0.5);
-    return -1;
+
+    std::string unit = stop;
+    double ms = -1;
+    if (unit == "h") ms = num * 3600000;
+    else if (unit == "m") ms = num * 60000;
+    else if (unit == "s") ms = num * 1000;
+    else if (unit == "ms") ms = num;
+    else if (unit == "f") ms = num * 1000 / frame_rate;
+    else if (unit == "t") ms = num * 1000 / tick_rate;
+
+    if (ms < 0 || ms > MAX_TIME_MS) return -1;
+    return (int)(ms + 0.5);
+}
+
+size_t ttml_p(const std::string& text, size_t from) {
+    for (size_t at = text.find('<', from); at != std::string::npos; at = text.find('<', at + 1)) {
+        size_t end = text.find_first_of(" \t\r\n/>", at + 1);
+        std::string name = text.substr(at + 1, end == std::string::npos ? end : end - at - 1);
+        if (name == "p" || name.ends_with(":p")) return at;
+    }
+    return std::string::npos;
 }
 
 std::vector<std::pair<int,int>> read_ttml(const char* filename) {
     std::vector<std::pair<int,int>> timestamps;
     std::string text = load_text(filename);
     size_t pos = 0;
+    ttml_rates(text);
 
     while (true) {
-        size_t open = text.find("<p", pos);
+        size_t open = ttml_p(text, pos);
         if (open == std::string::npos) break;
-        char after = (open + 2 < text.size()) ? text[open + 2] : ' ';
-        if (after != ' ' && after != '\t' && after != '\n' && after != '\r' && after != '>') {
-            pos = open + 2;
-            continue;
-        }
         size_t tag_end = text.find('>', open);
         if (tag_end == std::string::npos) break;
         pos = tag_end + 1;

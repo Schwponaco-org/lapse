@@ -147,6 +147,13 @@ static void write_cues(const char* input_path, const char* output_path, char ms_
                 line = ms_to_ts(shift.apply(start_ms, cue), ms_sep) + " --> " + ms_to_ts(shift.apply(end_ms, cue), ms_sep) + tail;
             }
             cue++;       // counted even when it did not parse, the reader did the same
+        } else if (ms_sep == '.' && cue > 0) {
+            for (size_t at = line.find('<'); at != std::string::npos; at = line.find('<', at + 1)) {
+                size_t close = line.find('>', at);
+                if (close == std::string::npos) break;
+                int ms = parse_timestamp(line.substr(at + 1, close - at - 1), 0);
+                if (ms >= 0) line.replace(at + 1, close - at - 1, ms_to_ts(shift.apply(ms, cue - 1), '.'));
+            }
         }
 
         out += line;
@@ -439,15 +446,11 @@ static void write_ttml(const char* input_path, const char* output_path, const Sh
     size_t pos = 0;
     size_t written = 0;
     int cue = 0;
+    ttml_rates(text);
 
     while (true) {
-        size_t open = text.find("<p", pos);
+        size_t open = ttml_p(text, pos);
         if (open == std::string::npos) break;
-        char after = (open + 2 < text.size()) ? text[open + 2] : ' ';
-        if (after != ' ' && after != '\t' && after != '\n' && after != '\r' && after != '>') {
-            pos = open + 2;
-            continue;
-        }
         size_t tag_end = text.find('>', open);
         if (tag_end == std::string::npos) break;
         pos = tag_end + 1;

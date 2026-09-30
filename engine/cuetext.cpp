@@ -238,19 +238,15 @@ static std::vector<std::string> ttml_cue_text(const std::string& path) {
     size_t pos = 0;
 
     while (true) {
-        size_t open = text.find("<p", pos);
+        size_t open = ttml_p(text, pos);
         if (open == std::string::npos) break;
-        char after = (open + 2 < text.size()) ? text[open + 2] : ' ';
-        if (after != ' ' && after != '\t' && after != '\n' && after != '\r' && after != '>') {
-            pos = open + 2;
-            continue;
-        }
         size_t tag_end = text.find('>', open);
         if (tag_end == std::string::npos) break;
 
-        size_t close = text.find("</p>", tag_end);
+        std::string closing = "</" + text.substr(open + 1, text.find_first_of(" \t\r\n/>", open) - open - 1) + ">";
+        size_t close = text.find(closing, tag_end);
         std::string body = (close == std::string::npos) ? "" : text.substr(tag_end + 1, close - tag_end - 1);
-        pos = (close == std::string::npos) ? tag_end + 1 : close + 4;
+        pos = (close == std::string::npos) ? tag_end + 1 : close + closing.size();
 
         std::string flat;
         bool in_tag = false;
