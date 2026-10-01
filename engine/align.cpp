@@ -54,8 +54,6 @@ static double *in_buf = nullptr, *out_buf = nullptr;
 static fftw_complex *rb = nullptr, *ro = nullptr, *sb = nullptr, *so = nullptr, *mix = nullptr;
 static fftw_plan fwd = nullptr, back = nullptr;
 static double rb_norm = 1, ro_norm = 1;
-static std::vector<double> last_curve;
-static double last_mid = 0, last_spread = 1;
 
 static int pow2(int n) {
     int p = 256;
@@ -211,10 +209,6 @@ static void peaks_from(const std::vector<double>& curve, int lag, int want, std:
     std::sort(away.begin(), away.end());
     double spread = 1.4826 * away[away.size() / 2];
     if (spread < 1e-12) spread = 1e-12;
-
-    last_curve = curve;
-    last_mid = mid;
-    last_spread = spread;
 
     std::vector<char> taken(curve.size(), 0);
     int guard = 2500 / G;

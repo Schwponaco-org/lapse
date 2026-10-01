@@ -17,6 +17,7 @@
 #include "align.h"
 #include "log.h"
 #include <cstdlib>
+#include <cstdint>
 
 // slope og intercept for y = slope*x + intercept
 std::pair<double, double> linear_regression(const std::vector<double>& x, const std::vector<double>& y, const std::vector<double>& w) {
@@ -132,7 +133,7 @@ std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_pr
         if (shift < -0.5) shift = -0.5;
 
         double offset_ms = (best_lag + shift) * 10.0;
-        double sharpness = (second_val > 0) ? best_val / second_val : 0.0;
+        double sharpness = (second_val > 0) ? best_val / second_val : (best_val > 0 ? 10.0 : 0.0);
 
         say() << "t_" << chunk_number << " offset: " << offset_ms << "ms\n";
         say() << "Sharpness_" << chunk_number << ": " << sharpness << '\n';
@@ -162,38 +163,6 @@ std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_pr
     say() << "Intercept: " << intercept << '\n';
 
     return {slope, intercept};
-}
-
-
-/*
-Needs to takeVAD spans
-input spans from read_srt
-One offset in ms
-weight function pr span par
-*/
-
-double score_calculator(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, int x) {
-    double score = 0;
-    int n = 0;
-    int k = 0;
-
-    while (k < (int)reference_spans.size() && n < (int)read_srt.size()) {
-        int overlap = std::max(0, std::min(reference_spans[k].second, read_srt[n].second + x) - std::max(reference_spans[k].first, read_srt[n].first + x));
-        int min_length = std::min(reference_spans[k].second - reference_spans[k].first, read_srt[n].second - read_srt[n].first);
-        int max_length = std::max(reference_spans[k].second - reference_spans[k].first, read_srt[n].second - read_srt[n].first);
-
-        if (min_length > 0) {
-            double iscore = (double)overlap / min_length;
-            double w = (double)min_length / max_length;
-            score += iscore * w;
-        }
-
-        if (reference_spans[k].second < read_srt[n].second + x)
-            k += 1;
-        else
-            n +=1;
-    }
-    return score;
 }
 
 
@@ -456,6 +425,8 @@ std::vector<int> offsets_for_cuts(const std::vector<std::pair<int, int>>& read_s
     return offsets;
 }
 
+static double span_score(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, int x);
+
 std::vector<int> concat_offsets(const std::vector<std::pair<int, int>>& read_srt,
                                 const std::vector<std::pair<int, int>>& reference_spans,
                                 const std::vector<float>& reference_weights,
@@ -482,10 +453,14 @@ std::vector<int> concat_offsets(const std::vector<std::pair<int, int>>& read_srt
         double best = -1;
         int cut = from;
 
+        std::vector<double> at_lo(n + 1, 0.0), at_hi(n + 1, 0.0);
+        for (int k = 0; k < n; k++) {
+            at_lo[k + 1] = at_lo[k] + span_score(read_srt[k], reference_spans, reference_weights, lo);
+            at_hi[k + 1] = at_hi[k] + span_score(read_srt[k], reference_spans, reference_weights, hi);
+        }
+
         for (int j = from; j <= n; j++) {
-            std::vector<std::pair<int, int>> left(read_srt.begin() + from, read_srt.begin() + j);
-            std::vector<std::pair<int, int>> right(read_srt.begin() + j, read_srt.end());
-            double sc = score_calculator(left, reference_spans, lo) + score_calculator(right, reference_spans, hi);
+            double sc = at_lo[j] - at_lo[from] + at_hi[n] - at_hi[j];
             if (sc > best) { best = sc; cut = j; }
         }
         if (cut > from && cut < n) cuts.push_back(cut);
@@ -684,13 +659,13 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
     int hi = base_offset + window_ms;
 
     std::vector<double> t_prev = score_curve(read_srt[0], reference_spans, reference_weights, lo, hi, step_ms);
-    std::vector<std::vector<int>> all_to;
+    std::vector<std::vector<uint16_t>> all_to;
 
     for (int n = 1; n < (int)read_srt.size(); n++) {
         if (n % 64 == 0) progress("Looking for cuts", n, (int)read_srt.size());
         std::vector<double> scores = score_curve(read_srt[n], reference_spans, reference_weights, lo, hi, step_ms);
         std::vector<double> t_new(scores.size(), 0);
-        std::vector<int> to(scores.size(), 0);
+        std::vector<uint16_t> to(scores.size(), 0);
 
 
         int gap = (read_srt[n].first - read_srt[n-1].second) / step_ms;

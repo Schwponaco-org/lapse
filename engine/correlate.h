@@ -74,7 +74,6 @@ struct Chunk {
 
 std::pair<double, double> linear_regression(const std::vector<double>& x, const std::vector<double>& y, const std::vector<double>& w);
 std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_profile, const std::vector<int>& srt_profile);
-double score_calculator(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, int x);
 Lock best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights = {}, double coverage = 1.0, int max_offset = MAX_OFFSET_MS);
 std::tuple<double, int, double, double> best_framerate(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights = {}, double coverage = 1.0);
 std::vector<Chunk> chunk_offsets(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights, int count, double coverage = 1.0, int max_offset = MAX_OFFSET_MS);
