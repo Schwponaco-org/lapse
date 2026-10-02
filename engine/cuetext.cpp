@@ -293,6 +293,19 @@ static std::vector<std::string> stl_cue_text(const std::string& path) {
     return out;
 }
 
+static std::vector<std::string> scc_cue_text(const std::string& path) {
+    std::vector<std::string> out;
+    std::string pending;
+    for (auto& l : scc_lines(load_text(path))) {
+        if (l.load) pending += l.text + "\n";
+        if (l.show) {
+            out.push_back(pending + l.text);
+            pending.clear();
+        }
+    }
+    return out;
+}
+
 std::vector<std::string> read_cue_text(const std::string& path) {
     std::string kind = subtitle_kind(path);
     if (kind == ".sup" || kind == ".idx") return {};
@@ -301,6 +314,7 @@ std::vector<std::string> read_cue_text(const std::string& path) {
     if (kind == ".sbv") return sbv_cue_text(path);
     if (kind == ".ttml" || kind == ".dfxp") return ttml_cue_text(path);
     if (kind == ".stl") return stl_cue_text(path);
+    if (kind == ".scc") return scc_cue_text(path);
     return srt_cue_text(path);
 }
 

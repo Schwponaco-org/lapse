@@ -57,6 +57,16 @@ int stl_fps(const std::string& data);
 int stl_ms(const unsigned char* tc, int fps);
 int stl_zero(const std::string& data, int fps);
 std::vector<std::pair<int,int>> read_stl(const char* filename);
+
+struct SccLine {
+    size_t at = 0, len = 0;
+    int ms = 0;
+    char sep = ':';
+    bool show = false, hide = false, load = false;
+    std::string text;
+};
+std::vector<SccLine> scc_lines(const std::string& text);
+std::vector<std::pair<int,int>> read_scc(const char* filename);
 std::vector<std::pair<int,int>> read_idx(const char* filename);
 bool idx_time_line(const std::string& line, size_t& val_from, size_t& val_len);
 int idx_time_ms(const std::string& v);
