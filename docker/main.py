@@ -65,6 +65,7 @@ VALUES = [
     ("FPS", "--fps"),
     ("SNAP", "--snap"),
     ("ENCODING", "--encoding"),
+    ("WHISPER", "--whisper"),
 ]
 
 VIDEO_EXTS = {

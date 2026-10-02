@@ -317,6 +317,8 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
             <option value="utf16be">UTF-16 BE</option>
             <option value="latin1">ISO-8859-1</option>
           </select>
+          <label class="inline" for="whisper">Whisper model</label>
+          <input type="text" id="whisper" placeholder="off" style="width: 220px">
         </div>
         <div class="switches">
           <label><input type="checkbox" id="force"><span>Sync even when there is little to go on</span></label>
@@ -616,6 +618,7 @@ function drawEngine() {
   NUMBERS.forEach(name => $(name).value = engine[name] || "");
   SWITCHES.forEach(name => $(name).checked = !!engine[name]);
   $("encoding").value = engine.encoding || "";
+  $("whisper").value = engine.whisper || "";
   showSuffix();
 }
 
@@ -733,6 +736,7 @@ $("saveEngine").onclick = () => {
   NUMBERS.forEach(name => engine[name] = $(name).value.trim());
   SWITCHES.forEach(name => engine[name] = $(name).checked);
   engine.encoding = $("encoding").value;
+  engine.whisper = $("whisper").value.trim();
   send("/api/engine", { engine });
 };
 

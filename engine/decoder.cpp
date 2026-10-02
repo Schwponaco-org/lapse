@@ -750,6 +750,23 @@ static std::vector<int16_t> decode_range(const std::string& path, int stream_ind
     return pcm;
 }
 
+bool audio_to_wav(const char* path, int stream_index, const std::string& wav) {
+    std::vector<int16_t> pcm = decode_range(path, stream_index, 1, -1, -1, -1, 0, MAX_TIME_MS);
+    std::ofstream out(wav, std::ios::binary);
+    if (pcm.empty() || !out) return false;
+
+    auto put = [&](uint32_t v, int bytes) {
+        for (int i = 0; i < bytes; i++) out.put((char)(v >> (8 * i)));
+    };
+    uint32_t data = (uint32_t)(pcm.size() * 2);
+    out.write("RIFF", 4); put(36 + data, 4);
+    out.write("WAVEfmt ", 8); put(16, 4); put(1, 2); put(1, 2);
+    put(RATE, 4); put(RATE * 2, 4); put(2, 2); put(16, 2);
+    out.write("data", 4); put(data, 4);
+    out.write((const char*)pcm.data(), data);
+    return (bool)out;
+}
+
 std::vector<float> speech_profile(AVFormatContext* fmt, AVCodecContext* dec_ctx, int audio_stream_index, int windows, double* coverage) {
     (void)windows;
     bool silero = silero_open();

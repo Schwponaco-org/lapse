@@ -33,6 +33,7 @@
 #include "align.h"
 #include "write_subtitle.h"
 #include "log.h"
+#include "transcribe.h"
 
 // The formats the parsers and the writers both handle. Callers can ask for the
 // list with --formats so they know what is safe to hand us
@@ -235,6 +236,40 @@ static void save_spans(const std::filesystem::path& path, const std::vector<std:
 
 
 static const double SURE_SIGMA = 8.0;
+static std::vector<int> heard_words(const std::string& video, int stream, const std::filesystem::path& cache, const std::string& model) {
+    std::filesystem::path saved = cache.empty() ? cache : std::filesystem::path(cache.string() + "." + std::filesystem::path(model).stem().string() + ".words");
+    std::vector<int> words;
+    std::ifstream in(saved);
+    int w;
+    while (in >> w) words.push_back(w);
+    if (!words.empty()) return words;
+
+    std::error_code ec;
+    std::string wav = (std::filesystem::temp_directory_path() / ("lapse-" + std::to_string(std::hash<std::string>()(video)) + ".wav")).string();
+    if (audio_to_wav(video.c_str(), stream, wav)) words = spoken_words(wav, model);
+    std::filesystem::remove(wav, ec);
+
+    if (!saved.empty() && !words.empty()) {
+        std::ofstream out(saved);
+        for (int at : words) out << at << '\n';
+    }
+    return words;
+}
+
+static void keep_spoken(std::vector<std::pair<int,int>>& spans, std::vector<float>& weights, const std::vector<int>& words) {
+    std::vector<std::pair<int,int>> kept;
+    std::vector<float> kept_weights;
+    for (size_t i = 0; i < spans.size(); i++) {
+        auto near = std::lower_bound(words.begin(), words.end(), spans[i].first - 300);
+        if (near == words.end() || *near > spans[i].second + 300) continue;
+        kept.push_back(spans[i]);
+        if (i < weights.size()) kept_weights.push_back(weights[i]);
+    }
+    say() << "Whisper heard " << words.size() << " words, " << kept.size() << " of " << spans.size() << " stretches of speech had some\n";
+    spans = kept;
+    weights = kept_weights;
+}
+
 static double sure_sigma = SURE_SIGMA;
 static const double SOME_SIGMA = 6.0;
 static const int SNAP_WINDOW_MS = 120;
@@ -425,10 +460,11 @@ static void report(const Report& r) {
 }
 
 void usage() {
-    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME]\n";
+    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME] [--whisper model]\n";
     std::cerr << "       --confidence N   how far the answer has to stand out before the original is overwritten (default " << sure_sigma << ")\n";
     std::cerr << "       --encoding NAME  write the result as utf8, utf8-bom, utf16le, utf16be or latin1 instead of whatever came in\n";
     std::cerr << "       --snap [ms]      pull a cue start onto the picture cut it lands next to, within ms (default " << SNAP_WINDOW_MS << ")\n";
+    std::cerr << "       --whisper model  only trust speech whisper-cli hears words in, model is a ggml file like ggml-base.en.bin\n";
     std::cerr << "       lapse --version\n";
     std::cerr << "       lapse --formats\n";
     std::cerr << "       lapse --vad\n";
@@ -463,6 +499,7 @@ int run(int argc, const char *argv[]) {
     int audio_track = -1;
     int sub_track = -1;
     int snap_window = 0;
+    std::string whisper_model;
     double fps = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -541,6 +578,9 @@ int run(int argc, const char *argv[]) {
                 snap_window = (int)got;
                 i++;
             }
+        } else if (arg == "--whisper") {
+            if (i + 1 >= argc) { usage(); return -1; }
+            whisper_model = argv[++i];
         } else if (arg == "--force") {
             force = true;
         } else {
@@ -702,6 +742,17 @@ int run(int argc, const char *argv[]) {
         }
     }
 
+    std::vector<int> words;
+    if (!whisper_model.empty() && !is_subtitle(ref_path) && !ref_weights.empty()) {
+        words = heard_words(ref_path, find_audio_stream(AVC, audio_track), cache, whisper_model);
+        if (words.size() < 50) {
+            say() << "Whisper heard " << words.size() << " words, too few to go on, using all the speech\n";
+            words.clear();
+        } else {
+            keep_spoken(ref_spans, ref_weights, words);
+        }
+    }
+
     if (ref_spans.empty()) {
         std::cerr << "No speech found in: " << ref_path << '\n';
         return 1;
@@ -719,6 +770,7 @@ int run(int argc, const char *argv[]) {
     card.output = output_path;
     if (is_subtitle(ref_path)) card.reference = "subtitle";
     else if (ref_weights.empty()) card.reference = "embedded";
+    else if (!words.empty()) card.reference = "vad+whisper";
 
     align_setup(ref_spans, ref_weights);
 
@@ -738,6 +790,7 @@ int run(int argc, const char *argv[]) {
         for (float p : profile) reference_activity.push_back(p >= SPEECH_THRESHOLD ? 1 : 0);
 
         if (!cache.empty()) save_spans(cache, ref_spans, ref_weights, ref_coverage);
+        if (!words.empty()) keep_spoken(ref_spans, ref_weights, words);
         align_setup(ref_spans, ref_weights);
         slices = chunk_offsets(spans, ref_spans, ref_weights, 8, ref_coverage);
         card.coverage = ref_coverage;

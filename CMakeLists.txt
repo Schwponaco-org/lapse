@@ -218,7 +218,8 @@ add_executable(lapse
     engine/silero.cpp
     engine/cuetext.cpp
     engine/charset.cpp
-    engine/log.cpp)
+    engine/log.cpp
+    engine/transcribe.cpp)
 
 target_compile_features(lapse PRIVATE cxx_std_20)
 target_include_directories(lapse PRIVATE engine)
