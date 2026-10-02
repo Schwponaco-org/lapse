@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import codecs
 import os
 import re
 import shutil
@@ -29,8 +30,22 @@ def kind(path):
     return ext
 
 
+def charset(path):
+    with open(path, "rb") as file:
+        raw = file.read()
+    if raw.startswith(codecs.BOM_UTF8):
+        return "utf-8-sig"
+    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return "utf-16"
+    try:
+        raw.decode("utf-8")
+        return "utf-8"
+    except UnicodeDecodeError:
+        return "cp1252"
+
+
 def read(path):
-    with open(path, "r", encoding="utf-8", errors="replace") as file:
+    with open(path, "r", encoding=charset(path), errors="surrogateescape", newline="") as file:
         return file.readlines()
 
 
@@ -115,7 +130,7 @@ def save(path, lines, mode, suffix):
     if mode.endswith("backup") and not os.path.exists(path + ".bak"):
         shutil.copy2(path, path + ".bak")
 
-    with open(target + ".part", "w", encoding="utf-8") as file:
+    with open(target + ".part", "w", encoding=charset(path), errors="surrogateescape", newline="") as file:
         file.writelines(lines)
     os.replace(target + ".part", target)
     return target

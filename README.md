@@ -165,10 +165,10 @@ What you change here is kept in the database and wins over the environment varia
 | `MEDIA_ROOT` | `/media` | Where to look. Comma separated for more than one library |
 | `DB_PATH` | `/data/lapse.db` | Where the record of finished work is kept |
 | `PUID` / `PGID` | unset | Run as this user and group |
-| `MODE` | `nosplit` | `nosplit`, `ols` or `split` |
+| `MODE` | `auto` | `auto`, `nosplit`, `ols` or `split` |
 | `PENALTY` | `6` | Split penalty, only used in split mode |
 | `SCAN_INTERVAL` | `900` | Seconds between full rescans. `0` turns them off |
-| `MIN_CONFIDENCE` | `0` | Put the original back when a result scores below this. `0` keeps everything |
+| `MIN_CONFIDENCE` | `0` | Put the original back when a result stands out less than this, on the same scale as `CONFIDENCE`. `0` keeps everything |
 | `MAX_ATTEMPTS` | `3` | How many times a failing pair is retried before it is left alone |
 | `TIMEOUT` | `1800` | Seconds a single sync may take |
 | `POLLING` | `0` | Set to `1` on network shares where file events do not arrive |
@@ -185,7 +185,7 @@ Everything the CLI takes is available in the container. Switches are `0` or `1`,
 | `NO_SIDECAR` | `--no-sidecar` | Do not write a `.lapse-unsure` guess when the result is uncertain |
 | `NO_EMBEDDED` | `--no-embedded` | Ignore subtitle tracks inside the video when picking a reference |
 | `NO_CACHE` | `--no-cache` | Listen to the video every time instead of reusing a cached scan |
-| `FULL_SCAN` | `--full-scan` | Listen to the whole video rather than sampling it |
+| `FULL_SCAN` | `--full-scan` | Accepted and ignored, the whole film is always listened to |
 | `FORCE` | `--force` | Sync even when there is little to go on |
 | `STRICT` | `--strict` | Only overwrite when the result is clearly right |
 | `DRY_RUN` | `--dry-run` | Work out every offset and write nothing, not even to the database |

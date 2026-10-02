@@ -146,12 +146,12 @@ def job(conn, job_id):
     ).fetchone()
 
 
-def note_written(conn, row, path, offset):
+def note_written(conn, row, path, offset, status="done"):
     conn.execute(
         "INSERT OR REPLACE INTO sync_jobs"
         " (video_path, srt_path, offset_ms, confidence, srt_mtime, attempts, status)"
-        " VALUES (?, ?, ?, ?, ?, 1, 'done')",
-        (row["video_path"], path, offset, row["confidence"], os.path.getmtime(path))
+        " VALUES (?, ?, ?, ?, ?, 1, ?)",
+        (row["video_path"], path, offset, row["confidence"], os.path.getmtime(path), status)
     )
 
 
@@ -248,16 +248,19 @@ def sync_one(conn, row, reference, mode):
     if written == target:
         conn.execute(
             "UPDATE sync_jobs SET offset_ms = ?, confidence = ?, srt_mtime = ?, status = ? WHERE id = ?",
-            (values.get("offset_ms"), values.get("confidence"),
+            (values.get("offset_ms"), values.get("sigma"),
              os.path.getmtime(written), status, row["id"])
         )
+    elif mode.startswith("new"):
+        note_written(conn, row, written, values.get("offset_ms"), status)
     else:
-        note_written(conn, row, written, values.get("offset_ms"))
+        conn.execute("UPDATE sync_jobs SET status = 'lowconf' WHERE id = ?", (row["id"],))
 
 
 def reference_sync(conn, ids, reference, everything, mode):
     if not reference:
         raise RuntimeError("Say which subtitle is already correct")
+    reference = os.path.normpath(reference)
     if not inside_library(reference) or not os.path.isfile(reference):
         raise RuntimeError("No such subtitle in the library: " + reference)
 
@@ -331,7 +334,10 @@ def queue_translations(conn, ids, language):
     rows = conn.execute("SELECT srt_path FROM sync_jobs WHERE id IN (%s)" % marks, ids).fetchall()
     for row in rows:
         source = row["srt_path"]
-        translate.remember(conn, source, translate.named(source, language), language, "waiting", "")
+        output = translate.named(source, language)
+        if translate.ours(conn, output) and os.path.exists(output):
+            continue
+        translate.remember(conn, source, output, language, "waiting", "")
         waiting.put((source, language))
     return len(rows)
 
