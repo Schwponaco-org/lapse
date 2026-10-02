@@ -320,7 +320,16 @@ static std::vector<int> shot_changes(const std::vector<int>& keys) {
         if (std::abs(gap - middle) <= 100) even++;
     if (even * 2 > (int)gaps.size()) return {};
 
-    return keys;
+    int longest = gaps.back();
+    int capped = 0;
+    for (int gap : gaps)
+        if (gap >= longest - 80) capped++;
+    if (capped < 3) return keys;
+
+    std::vector<int> cuts(1, keys[0]);
+    for (size_t i = 1; i < keys.size(); i++)
+        if (keys[i] - keys[i - 1] < longest - 80) cuts.push_back(keys[i]);
+    return cuts;
 }
 
 std::vector<int> picture_cuts(const char* filename) {
