@@ -169,7 +169,7 @@ std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_pr
 Lock best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights, double coverage, int max_offset) {
 
     if (align_ready() && max_offset <= align_reach() && !read_srt.empty()) {
-        std::vector<Hit> tops = align_peaks(read_srt, 10);
+        std::vector<Hit> tops = align_peaks(read_srt, 10, max_offset);
 
 
         Hit stay;

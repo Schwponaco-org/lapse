@@ -315,7 +315,7 @@ static int clusters_of(std::vector<Chunk> chunks) {
 static bool second_part(const std::vector<Chunk>& chunks, int offset) {
     std::vector<double> away;
     for (auto& c : chunks)
-        if (std::abs(c.offset - offset) > REFINE_WINDOW_MS) away.push_back(c.offset);
+        if (std::abs(c.offset - offset) > REFINE_WINDOW_MS && c.sigma >= SOME_SIGMA) away.push_back(c.offset);
     std::sort(away.begin(), away.end());
     for (size_t i = 1; i < away.size(); i++)
         if (away[i] - away[i - 1] <= AGREE_MS) return true;
@@ -899,6 +899,7 @@ int run(int argc, const char *argv[]) {
 
             double worst_sigma = 99.0;
             std::vector<int> joined = offsets_for_cuts(order_spans, ref_spans, ref_weights, cuts, ref_coverage, &worst_sigma);
+            joined = split_alignment(order_spans, ref_spans, ref_weights, p, joined[0]);
             card.mode = "auto/restart";
             card.offset = joined.empty() ? 0 : joined[0];
             card.sigma = worst_sigma;
@@ -925,12 +926,20 @@ int run(int argc, const char *argv[]) {
         std::string choice;
         double ratio = 1.0;
 
-        if (flat >= MIN_AGREEING && !second_part(slices, offset)) {
+        bool drifts = sloped >= MIN_AGREEING + 1 && std::abs(drift) > 1e-5;
+        bool far = second_part(slices, offset);
+        auto look_far = [&]() {
+            if (!far && flat + 2 <= (int)slices.size())
+                far = second_part(chunk_offsets(spans, ref_spans, ref_weights, 16, ref_coverage, CONCAT_SEARCH_MS), offset);
+            return far;
+        };
+
+        if (flat >= MIN_AGREEING && !look_far()) {
             choice = "shifted";
-        } else if (sloped >= MIN_AGREEING + 1 && std::abs(drift) > 1e-5) {
+        } else if (drifts) {
             choice = "drifting";
             ratio = snap_ratio(1.0 + drift);
-        } else if (groups >= 2) {
+        } else if (groups >= 2 || far) {
             choice = "recut";
         } else {
 
@@ -942,7 +951,7 @@ int run(int argc, const char *argv[]) {
                 choice = "drifting";
                 ratio = r;
             } else {
-                choice = "shifted";
+                choice = look_far() ? "recut" : "shifted";
             }
         }
 
@@ -956,6 +965,7 @@ int run(int argc, const char *argv[]) {
             double worst_sigma = 99.0;
             std::vector<int> joined = concat_offsets(file_spans, ref_spans, ref_weights, ref_coverage, &worst_sigma);
             if (!joined.empty()) {
+                joined = split_alignment(file_spans, ref_spans, ref_weights, p, joined[0]);
                 card.mode = "auto/joined";
                 card.offset = joined[0];
                 card.sigma = worst_sigma;

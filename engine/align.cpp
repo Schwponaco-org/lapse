@@ -42,18 +42,21 @@ static const double ON_W = 1.15;
 static const double ONSET_SM = 120;
 static const double TAU = 450;
 
-static int nfft = 0;
-static int reach = 0;
 static int ref_bins = 0;
 static std::vector<std::pair<int,int>> ref;
 static std::vector<float> ref_w;
 static std::vector<int> starts;
 static const void* base_key = nullptr;
 
-static double *in_buf = nullptr, *out_buf = nullptr;
-static fftw_complex *rb = nullptr, *ro = nullptr, *sb = nullptr, *so = nullptr, *mix = nullptr;
-static fftw_plan fwd = nullptr, back = nullptr;
-static double rb_norm = 1, ro_norm = 1;
+struct Plan {
+    int nfft = 0, reach = 0;
+    double *in = nullptr, *out = nullptr;
+    fftw_complex *rb = nullptr, *ro = nullptr, *sb = nullptr, *so = nullptr, *mix = nullptr;
+    fftw_plan fwd = nullptr, back = nullptr;
+    double rb_norm = 1, ro_norm = 1;
+};
+
+static Plan close_by, far_out;
 
 static int pow2(int n) {
     int p = 256;
@@ -100,51 +103,44 @@ static double energy(const std::vector<double>& v, int n) {
     return std::sqrt(e) + 1e-12;
 }
 
-static void run_fwd(std::vector<double>& v, fftw_complex* to) {
-    for (int i = 0; i < nfft; i++) in_buf[i] = v[i];
-    fftw_execute_dft_r2c(fwd, in_buf, to);
+static void run_fwd(Plan& p, std::vector<double>& v, fftw_complex* to) {
+    for (int i = 0; i < p.nfft; i++) p.in[i] = v[i];
+    fftw_execute_dft_r2c(p.fwd, p.in, to);
 }
 
-bool align_ready() { return nfft > 0; }
-int align_reach() { return reach; }
+static void drop(Plan& p) {
+    if (p.fwd) fftw_destroy_plan(p.fwd);
+    if (p.back) fftw_destroy_plan(p.back);
+    for (fftw_complex* c : {p.rb, p.ro, p.sb, p.so, p.mix}) if (c) fftw_free(c);
+    if (p.in) fftw_free(p.in);
+    if (p.out) fftw_free(p.out);
+    p = Plan();
+}
+
+bool align_ready() { return close_by.nfft > 0; }
+int align_reach() { return CONCAT_SEARCH_MS; }
 
 void align_drop() {
-    if (fwd) fftw_destroy_plan(fwd);
-    if (back) fftw_destroy_plan(back);
-    for (fftw_complex* c : {rb, ro, sb, so, mix}) if (c) fftw_free(c);
-    if (in_buf) fftw_free(in_buf);
-    if (out_buf) fftw_free(out_buf);
-    fwd = back = nullptr;
-    rb = ro = sb = so = mix = nullptr;
-    in_buf = out_buf = nullptr;
-    nfft = 0;
+    drop(close_by);
+    drop(far_out);
 }
 
-void align_setup(const std::vector<std::pair<int,int>>& spans, const std::vector<float>& weights) {
-    align_drop();
-    base_key = nullptr;
-    if (spans.size() < 4) return;
-
-    ref = spans;
-    ref_w = weights;
-    starts.clear();
-    for (auto& s : ref) starts.push_back(s.first);
-
-    ref_bins = ref.back().second / G + 2;
-    reach = MAX_OFFSET_MS;
-    nfft = pow2(ref_bins + ref_bins / 4 + reach / G + 64);
+static void plan_for(Plan& p, int reach) {
+    p.reach = reach;
+    p.nfft = pow2(ref_bins + ref_bins / 4 + reach / G + 64);
+    int nfft = p.nfft;
 
     int half = nfft / 2 + 1;
-    in_buf = (double*)fftw_malloc(sizeof(double) * nfft);
-    out_buf = (double*)fftw_malloc(sizeof(double) * nfft);
-    rb = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * half);
-    ro = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * half);
-    sb = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * half);
-    so = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * half);
-    mix = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * half);
+    p.in = (double*)fftw_malloc(sizeof(double) * nfft);
+    p.out = (double*)fftw_malloc(sizeof(double) * nfft);
+    p.rb = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * half);
+    p.ro = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * half);
+    p.sb = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * half);
+    p.so = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * half);
+    p.mix = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * half);
 
-    fwd = fftw_plan_dft_r2c_1d(nfft, in_buf, rb, FFTW_ESTIMATE);
-    back = fftw_plan_dft_c2r_1d(nfft, mix, out_buf, FFTW_ESTIMATE);
+    p.fwd = fftw_plan_dft_r2c_1d(nfft, p.in, p.rb, FFTW_ESTIMATE);
+    p.back = fftw_plan_dft_c2r_1d(nfft, p.mix, p.out, FFTW_ESTIMATE);
 
     std::vector<double> b(nfft, 0.0), o(nfft, 0.0);
     bool weighted = ref_w.size() == ref.size();
@@ -162,22 +158,36 @@ void align_setup(const std::vector<std::pair<int,int>>& spans, const std::vector
     highpass(b, ref_bins, HP_MS / G);
     highpass(o, ref_bins, HP_ON_MS / G);
 
-    rb_norm = energy(b, ref_bins);
-    ro_norm = energy(o, ref_bins);
+    p.rb_norm = energy(b, ref_bins);
+    p.ro_norm = energy(o, ref_bins);
 
-    run_fwd(b, rb);
-    run_fwd(o, ro);
+    run_fwd(p, b, p.rb);
+    run_fwd(p, o, p.ro);
+}
+
+void align_setup(const std::vector<std::pair<int,int>>& spans, const std::vector<float>& weights) {
+    align_drop();
+    base_key = nullptr;
+    if (spans.size() < 4) return;
+
+    ref = spans;
+    ref_w = weights;
+    starts.clear();
+    for (auto& s : ref) starts.push_back(s.first);
+
+    ref_bins = ref.back().second / G + 2;
+    plan_for(close_by, MAX_OFFSET_MS);
 }
 
 
-static int build(const std::vector<std::pair<int,int>>& cues, std::vector<double>& b, std::vector<double>& o) {
+static int build(const Plan& p, const std::vector<std::pair<int,int>>& cues, std::vector<double>& b, std::vector<double>& o) {
     int len = 0;
     for (auto& c : cues) len = std::max(len, c.second / G + 2);
-    if (len > nfft - reach / G - 8) len = nfft - reach / G - 8;
+    if (len > p.nfft - p.reach / G - 8) len = p.nfft - p.reach / G - 8;
     if (len < 4) return 0;
 
-    b.assign(nfft, 0.0);
-    o.assign(nfft, 0.0);
+    b.assign(p.nfft, 0.0);
+    o.assign(p.nfft, 0.0);
 
     for (auto& c : cues) {
         int a = c.first / G, e = c.second / G;
@@ -239,33 +249,36 @@ static void peaks_from(const std::vector<double>& curve, int lag, int want, std:
 }
 
 
-std::vector<Hit> align_peaks(const std::vector<std::pair<int,int>>& cues, int want) {
+std::vector<Hit> align_peaks(const std::vector<std::pair<int,int>>& cues, int want, int max_offset) {
     std::vector<Hit> found;
-    if (!nfft || cues.empty()) return found;
+    if (!close_by.nfft || cues.empty()) return found;
+    if (max_offset > close_by.reach && !far_out.nfft) plan_for(far_out, CONCAT_SEARCH_MS);
+    Plan& p = (max_offset > close_by.reach) ? far_out : close_by;
+    int nfft = p.nfft;
 
     std::vector<double> b, o;
-    int len = build(cues, b, o);
+    int len = build(p, cues, b, o);
     if (!len) return found;
 
     double bn = energy(b, len), on = energy(o, len);
-    run_fwd(b, sb);
-    run_fwd(o, so);
+    run_fwd(p, b, p.sb);
+    run_fwd(p, o, p.so);
 
     int half = nfft / 2 + 1;
-    double wb = 1.0 / (rb_norm * bn);
-    double wo = ON_W / (ro_norm * on);
+    double wb = 1.0 / (p.rb_norm * bn);
+    double wo = ON_W / (p.ro_norm * on);
 
-    int lag = reach / G;
+    int lag = std::min(p.reach, max_offset) / G;
     static const double blurs[4] = {0, 550, 450, 250};
     static const int only[4] = {2, 2, 1, 0};
 
     for (int pass = 0; pass < 4; pass++) {
         double blur = blurs[pass] / G;
         for (int k = 0; k < half; k++) {
-            double br = rb[k][0] * sb[k][0] + rb[k][1] * sb[k][1];
-            double bi = rb[k][1] * sb[k][0] - rb[k][0] * sb[k][1];
-            double orr = ro[k][0] * so[k][0] + ro[k][1] * so[k][1];
-            double oi = ro[k][1] * so[k][0] - ro[k][0] * so[k][1];
+            double br = p.rb[k][0] * p.sb[k][0] + p.rb[k][1] * p.sb[k][1];
+            double bi = p.rb[k][1] * p.sb[k][0] - p.rb[k][0] * p.sb[k][1];
+            double orr = p.ro[k][0] * p.so[k][0] + p.ro[k][1] * p.so[k][1];
+            double oi = p.ro[k][1] * p.so[k][0] - p.ro[k][0] * p.so[k][1];
             double re = 0, im = 0;
             if (only[pass] != 1) { re += br * wb; im += bi * wb; }
             if (only[pass] != 0) { re += orr * wo; im += oi * wo; }
@@ -275,15 +288,15 @@ std::vector<Hit> align_peaks(const std::vector<std::pair<int,int>>& cues, int wa
                 double f = (double)k / nfft;
                 g = std::exp(-2.0 * M_PI * M_PI * blur * blur * f * f);
             }
-            mix[k][0] = re * g;
-            mix[k][1] = im * g;
+            p.mix[k][0] = re * g;
+            p.mix[k][1] = im * g;
         }
-        fftw_execute_dft_c2r(back, mix, out_buf);
+        fftw_execute_dft_c2r(p.back, p.mix, p.out);
 
         std::vector<double> curve(2 * lag + 1);
         for (int m = -lag; m <= lag; m++) {
             int at = (m >= 0) ? m : m + nfft;
-            curve[m + lag] = out_buf[at] / nfft;
+            curve[m + lag] = p.out[at] / nfft;
         }
         peaks_from(curve, lag, want, found);
     }
