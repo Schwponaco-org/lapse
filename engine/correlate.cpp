@@ -606,14 +606,17 @@ static double span_score(const std::pair<int,int>& span, const std::vector<std::
 static void settle_boundaries(std::vector<int>& offsets, const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights) {
     const int REACH = 60;
     int n = (int)offsets.size();
+    int last = 0;
 
     for (int i = 1; i < n; i++) {
         if (offsets[i] == offsets[i - 1]) continue;
 
         int before = offsets[i - 1];
         int after = offsets[i];
-        int from = std::max(1, i - REACH);
-        int to = std::min(n - 1, i + REACH);
+        int next = i + 1;
+        while (next < n && offsets[next] == offsets[next - 1]) next++;
+        int from = std::max({1, i - REACH, last + 1});
+        int to = std::min({n - 1, i + REACH, next - 1});
 
         // walking the boundary right moves one cue from the after side to the before side, so the running total only changes by that one cue
         double running = 0;
@@ -650,6 +653,7 @@ static void settle_boundaries(std::vector<int>& offsets, const std::vector<std::
 
         for (int k = std::min(at, i); k < std::max(at, i); k++)
             offsets[k] = (k < at) ? before : after;
+        last = at;
         i = std::max(at, i);
     }
 }
