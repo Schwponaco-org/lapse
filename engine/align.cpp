@@ -401,6 +401,8 @@ static void baseline(const std::vector<std::pair<int,int>>& cues) {
     };
     stats(bunch, bunch_mean, bunch_sd);
     stats(over, over_mean, over_sd);
+    bunch_sd = std::max(bunch_sd, 1.0 / cues.size());
+    over_sd = std::max(over_sd, 1.0 / cues.size());
     slice_baseline(cues);
 }
 
@@ -438,6 +440,8 @@ static void slice_baseline(const std::vector<std::pair<int,int>>& cues) {
         };
         stats(b, sl_bm[c], sl_bsd[c]);
         stats(o, sl_om[c], sl_osd[c]);
+        sl_bsd[c] = std::max(sl_bsd[c], 1.0 / part.size());
+        sl_osd[c] = std::max(sl_osd[c], 1.0 / part.size());
     }
 }
 
