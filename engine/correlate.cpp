@@ -511,7 +511,8 @@ double snap_ratio(double ratio) {
 // offset we keep the whole score for every offset in the window. Sampling it
 // every 10ms rather than every millisecond is what makes split mode fit in
 //memory the old per millisecond version needed gigabytes for a film
-std::vector<double> score_curve(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, int lo, int hi, int step) {
+std::vector<double> score_curve(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, const std::vector<int>& grid) {
+    int lo = grid.front(), hi = grid.back();
     std::vector<std::pair<int, float>> slope_changes;
     std::vector<double> curve;
     bool weighted = reference_weights.size() == reference_spans.size();
@@ -552,13 +553,13 @@ std::vector<double> score_curve(const std::pair<int,int>& span, const std::vecto
 
     std::sort(slope_changes.begin(), slope_changes.end());
 
-    curve.reserve((hi - lo) / step + 1);
+    curve.reserve(grid.size());
     double fvalue = 0;
     double current_slope = 0;
     int sig_last = slope_changes.empty() ? lo : slope_changes[0].first;
     size_t j = 0;
 
-    for (int offset = lo; offset <= hi; offset += step) {
+    for (int offset : grid) {
         while (j < slope_changes.size() && slope_changes[j].first <= offset) {
             fvalue += current_slope * (slope_changes[j].first - sig_last);
             sig_last = slope_changes[j].first;
@@ -655,26 +656,34 @@ static void settle_boundaries(std::vector<int>& offsets, const std::vector<std::
 
 std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, float p, int base_offset, int window_ms, int step_ms) {
 
-    int lo = base_offset - window_ms;
-    int hi = base_offset + window_ms;
+    std::vector<int> grid;
+    for (int x = base_offset - window_ms; x <= base_offset + window_ms; x += step_ms) grid.push_back(x);
 
-    std::vector<double> t_prev = score_curve(read_srt[0], reference_spans, reference_weights, lo, hi, step_ms);
+    if (window_ms >= SPLIT_WINDOW_MS)
+        for (auto& c : chunk_offsets(read_srt, reference_spans, reference_weights, 16, 1.0, CONCAT_SEARCH_MS))
+            if (std::abs(c.offset - base_offset) > window_ms)
+                for (int x = (int)c.offset - REFINE_WINDOW_MS; x <= c.offset + REFINE_WINDOW_MS; x += step_ms) grid.push_back(x);
+    std::sort(grid.begin(), grid.end());
+    grid.erase(std::unique(grid.begin(), grid.end()), grid.end());
+
+    std::vector<double> t_prev = score_curve(read_srt[0], reference_spans, reference_weights, grid);
     std::vector<std::vector<uint16_t>> all_to;
 
     for (int n = 1; n < (int)read_srt.size(); n++) {
         if (n % 64 == 0) progress("Looking for cuts", n, (int)read_srt.size());
-        std::vector<double> scores = score_curve(read_srt[n], reference_spans, reference_weights, lo, hi, step_ms);
+        std::vector<double> scores = score_curve(read_srt[n], reference_spans, reference_weights, grid);
         std::vector<double> t_new(scores.size(), 0);
         std::vector<uint16_t> to(scores.size(), 0);
 
 
-        int gap = (read_srt[n].first - read_srt[n-1].second) / step_ms;
+        int gap = read_srt[n].first - read_srt[n-1].second;
         double s_max = -std::numeric_limits<double>::infinity();
         int s_max_at = 0;
         int reached = -1;
+        int allowed = -1;
 
         for (int sigma = 0; sigma < (int)scores.size(); sigma++) {
-            int allowed = std::min(sigma + gap, (int)t_prev.size() - 1);
+            while (allowed + 1 < (int)grid.size() && grid[allowed + 1] <= grid[sigma] + gap) allowed++;
             while (reached < allowed) {
                 reached++;
                 if (t_prev[reached] > s_max) {
@@ -707,11 +716,11 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
     }
 
     std::vector<int> offsets(read_srt.size());
-    offsets[read_srt.size() - 1] = lo + sigma_best * step_ms;
+    offsets[read_srt.size() - 1] = grid[sigma_best];
 
     for (int n = all_to.size() - 1; n >= 0; n--) {
         sigma_best = all_to[n][sigma_best];
-        offsets[n] = lo + sigma_best * step_ms;
+        offsets[n] = grid[sigma_best];
     }
 
     int from = 0;
