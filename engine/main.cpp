@@ -36,7 +36,7 @@
 
 // The formats the parsers and the writers both handle. Callers can ask for the
 // list with --formats so they know what is safe to hand us
-const char* subtitle_formats[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2", ".sup", ".sbv", ".idx", ".smi", ".sami", ".ttml", ".dfxp"};
+const char* subtitle_formats[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2", ".sup", ".sbv", ".idx", ".smi", ".sami", ".ttml", ".dfxp", ".scc"};
 
 bool is_subtitle(const std::string& path) {
     return !subtitle_kind(path).empty();
@@ -96,6 +96,8 @@ void write_offsets(const std::string& in_path, const std::string& out_path, doub
         write_smi_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
     else if (kind == ".ttml" || kind == ".dfxp")
         write_ttml_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
+    else if (kind == ".scc")
+        write_scc_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
 }
 
 static int nearest_cut(const std::vector<int>& cuts, int at) {
@@ -838,6 +840,8 @@ int run(int argc, const char *argv[]) {
                 write_smi_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
             else if (kind == ".ttml" || kind == ".dfxp")
                 write_ttml_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
+            else if (kind == ".scc")
+                write_scc_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
         }
         report(card);
         return (verdict != Verdict::Solid && !force) ? 3 : 0;

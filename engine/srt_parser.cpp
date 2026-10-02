@@ -198,7 +198,7 @@ static bool worth_reading(const std::string& path) {
 
 std::string subtitle_kind(const std::string& path) {
     static const char* known[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2",
-                                  ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp"};
+                                  ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp", ".scc"};
     std::string ext = std::filesystem::path(path).extension().string();
     for (char& c : ext) c = (char)tolower((unsigned char)c);
     if (ext == ".sami") return ".smi";
@@ -233,6 +233,8 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
         return read_smi(path.c_str());
     if (kind == ".ttml" || kind == ".dfxp")
         return read_ttml(path.c_str());
+    if (kind == ".scc")
+        return read_scc(path.c_str());
     throw std::runtime_error("Unsupported subtitle format: " + path);
 }
 
@@ -558,6 +560,70 @@ std::vector<std::pair<int,int>> read_sup(const char* filename) {
         }
         int start = marks[i].first;
         int end = (i + 1 < marks.size()) ? marks[i + 1].first : start + 2000;
+        if (end <= start) end = start + 2000;
+        if (end - start > MAX_CUE_MS) end = start + MAX_CUE_MS;
+        timestamps.push_back({start, end});
+    }
+    return timestamps;
+}
+
+std::vector<SccLine> scc_lines(const std::string& text) {
+    std::vector<SccLine> lines;
+    bool popon = true;
+    size_t pos = 0;
+
+    while (pos < text.size()) {
+        size_t end = text.find('\n', pos);
+        if (end == std::string::npos) end = text.size();
+        std::string line = text.substr(pos, end - pos);
+
+        int h, m, s, f;
+        char sep;
+        if (sscanf(line.c_str(), "%d:%d:%d%c%d", &h, &m, &s, &sep, &f) == 5 && (sep == ':' || sep == ';')) {
+            SccLine got;
+            got.at = pos;
+            got.len = std::min(line.find_first_not_of("0123456789:;"), line.size());
+            got.ms = (h * 3600 + m * 60 + s) * 1000 + f * 33;
+            got.sep = sep;
+
+            std::istringstream words(line.substr(std::min(got.len, line.size())));
+            std::string word;
+            while (words >> word) {
+                unsigned v = (unsigned)strtoul(word.c_str(), nullptr, 16) & 0x7f7f;
+                unsigned code = v & 0xf7ff;
+                if (code == 0x142f) got.show = true;
+                else if (code == 0x142c) got.hide = true;
+                else if (code == 0x1420) popon = true;
+                else if (code == 0x1425 || code == 0x1426 || code == 0x1427 || code == 0x1429) popon = false;
+                else if ((v >> 8) >= 0x20) {
+                    got.text += (char)(v >> 8);
+                    if ((v & 0xff) >= 0x20) got.text += (char)(v & 0xff);
+                }
+            }
+            if (!popon && !got.text.empty()) got.show = true;
+            got.load = popon && !got.show && !got.text.empty();
+            if (got.show) got.hide = false;
+            lines.push_back(got);
+        }
+        pos = end + 1;
+    }
+    return lines;
+}
+
+std::vector<std::pair<int,int>> read_scc(const char* filename) {
+    std::vector<SccLine> lines = scc_lines(load_text(filename));
+    std::vector<std::pair<int,int>> timestamps;
+
+    for (size_t i = 0; i < lines.size(); i++) {
+        if (!lines[i].show) continue;
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+        int start = lines[i].ms;
+        int end = start + 2000;
+        for (size_t j = i + 1; j < lines.size(); j++)
+            if (lines[j].show || lines[j].hide) { end = lines[j].ms; break; }
         if (end <= start) end = start + 2000;
         if (end - start > MAX_CUE_MS) end = start + MAX_CUE_MS;
         timestamps.push_back({start, end});

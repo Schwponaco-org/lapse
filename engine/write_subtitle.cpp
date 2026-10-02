@@ -501,6 +501,35 @@ static void write_ttml(const char* input_path, const char* output_path, const Sh
     save_file(output_path, out);
 }
 
+static std::string scc_tc(int ms, char sep) {
+    if (ms < 0) ms = 0;
+    int s = ms / 1000;
+    int f = std::min(29, (ms % 1000 + 16) / 33);
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d%c%02d", s / 3600, s / 60 % 60, s % 60, sep, f);
+    return buf;
+}
+
+static void write_scc(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string text = load_file(input_path);
+    std::vector<SccLine> lines = scc_lines(text);
+    int shows = 0;
+    for (auto& l : lines) shows += l.show;
+
+    std::string out;
+    size_t written = 0;
+    int cue = -1;
+    for (auto& l : lines) {
+        if (l.show) cue++;
+        int belongs = l.load ? std::min(cue + 1, shows - 1) : cue;
+        out += text.substr(written, l.at - written);
+        out += scc_tc(shift.apply(l.ms, belongs), l.sep);
+        written = l.at + l.len;
+    }
+    out += text.substr(written);
+    save_file(output_path, out);
+}
+
 static Shift one_line(double slope, double intercept_s) {
     Shift shift;
     shift.slope = slope;
@@ -552,6 +581,10 @@ void write_ttml_OLS(const char* input_path, const char* output_path, double slop
     write_ttml(input_path, output_path, one_line(slope, intercept_s));
 }
 
+void write_scc_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_scc(input_path, output_path, one_line(slope, intercept_s));
+}
+
 void write_srt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_cues(input_path, output_path, ',', per_cue(slope, offsets, mapping));
 }
@@ -586,4 +619,8 @@ void write_smi_split(const char* input_path, const char* output_path, double slo
 
 void write_ttml_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_ttml(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_scc_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_scc(input_path, output_path, per_cue(slope, offsets, mapping));
 }
