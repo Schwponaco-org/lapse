@@ -721,6 +721,8 @@ int run(int argc, const char *argv[]) {
     else if (ref_weights.empty()) card.reference = "embedded";
 
     align_setup(ref_spans, ref_weights);
+    chapter_hints(AVC ? chapter_marks(AVC) : std::vector<int>());
+    if (AVC && AVC->nb_chapters > 1) say() << "Reading " << AVC->nb_chapters << " chapters as places the film may have been cut\n";
 
     std::vector<Chunk> slices = chunk_offsets(spans, ref_spans, ref_weights, 8, ref_coverage);
 

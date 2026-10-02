@@ -283,7 +283,7 @@ Sync with split mode for director's cuts or ad-break versions:
 ./lapse video.mkv subtitles.srt split 6
 ```
 
-The fourth argument is the split penalty. A value of 6 is a good default. Higher values produce fewer splits. Leave the mode off and LAPSE decides for itself whether the file needs shifting, drifting, splitting, or some combination (`auto` mode)
+The fourth argument is the split penalty. A value of 6 is a good default. Higher values produce fewer splits. When the video has chapters, a split that lands on one is half the price, and a boundary in a quiet stretch goes on the chapter mark. Broadcasters put chapters where the ad breaks were, which is where the cuts usually are. Leave the mode off and LAPSE decides for itself whether the file needs shifting, drifting, splitting, or some combination (`auto` mode)
 
 ### Output options
 

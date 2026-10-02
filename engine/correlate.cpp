@@ -602,6 +602,15 @@ static double span_score(const std::pair<int,int>& span, const std::vector<std::
 
 // the dp puts a boundary anywhere inside a stretch with no dialogue, because every position there scores the same. slide it to where it actually pays,
 // and when that is still a tie put it in the biggest gap between two cues a film gets recut at a scene change, not in the middle of a conversation
+static std::vector<int> hints;
+
+void chapter_hints(const std::vector<int>& marks) { hints = marks; }
+
+static bool hinted(int from, int to) {
+    auto at = std::lower_bound(hints.begin(), hints.end(), from - 2000);
+    return at != hints.end() && *at <= to + 2000;
+}
+
 static void settle_boundaries(std::vector<int>& offsets, const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights) {
     const int REACH = 60;
     int n = (int)offsets.size();
@@ -619,7 +628,10 @@ static void settle_boundaries(std::vector<int>& offsets, const std::vector<std::
         for (int k = from; k < i; k++) running += span_score(read_srt[k], reference_spans, reference_weights, before);
         for (int k = i; k <= to; k++) running += span_score(read_srt[k], reference_spans, reference_weights, after);
 
-        double best = running;
+        auto worth = [&](int j, double score) {
+            return score + (hinted(read_srt[j - 1].second + before, read_srt[j].first + after) ? 0.5 : 0.0);
+        };
+        double best = worth(i, running);
         int at = i;
         int widest = read_srt[i].first - read_srt[i - 1].second;
 
@@ -628,8 +640,8 @@ static void settle_boundaries(std::vector<int>& offsets, const std::vector<std::
             walk += span_score(read_srt[j - 1], reference_spans, reference_weights, before)
                   - span_score(read_srt[j - 1], reference_spans, reference_weights, after);
             int gap = read_srt[j].first - read_srt[j - 1].second;
-            if (walk > best + 1e-9 || (walk > best - 1e-9 && gap > widest)) {
-                best = std::max(best, walk);
+            if (worth(j, walk) > best + 1e-9 || (worth(j, walk) > best - 1e-9 && gap > widest)) {
+                best = std::max(best, worth(j, walk));
                 widest = gap;
                 at = j;
             }
@@ -640,8 +652,8 @@ static void settle_boundaries(std::vector<int>& offsets, const std::vector<std::
             walk += span_score(read_srt[j], reference_spans, reference_weights, after)
                   - span_score(read_srt[j], reference_spans, reference_weights, before);
             int gap = read_srt[j].first - read_srt[j - 1].second;
-            if (walk > best + 1e-9 || (walk > best - 1e-9 && gap > widest)) {
-                best = std::max(best, walk);
+            if (worth(j, walk) > best + 1e-9 || (worth(j, walk) > best - 1e-9 && gap > widest)) {
+                best = std::max(best, worth(j, walk));
                 widest = gap;
                 at = j;
             }
@@ -669,6 +681,7 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
 
 
         int gap = (read_srt[n].first - read_srt[n-1].second) / step_ms;
+        float cost = hinted(read_srt[n - 1].second + base_offset, read_srt[n].first + base_offset) ? p / 2 : p;
         double s_max = -std::numeric_limits<double>::infinity();
         int s_max_at = 0;
         int reached = -1;
@@ -686,12 +699,12 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
             if (allowed < 0) {
                 t_new[sigma] = -std::numeric_limits<double>::infinity();
                 to[sigma] = 0;
-            } else if (gap >= 0 && t_prev[sigma] >= s_max - p) {
+            } else if (gap >= 0 && t_prev[sigma] >= s_max - cost) {
                 //Staying where the previous cue sits is free, moving somewhere else costs the split penalty
                 t_new[sigma] = scores[sigma] + t_prev[sigma];
                 to[sigma] = sigma;
             } else {
-                t_new[sigma] = scores[sigma] + s_max - p;
+                t_new[sigma] = scores[sigma] + s_max - cost;
                 to[sigma] = s_max_at;
             }
         }

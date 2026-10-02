@@ -370,6 +370,17 @@ std::vector<int> picture_cuts(const char* filename) {
     return cuts;
 }
 
+std::vector<int> chapter_marks(const AVFormatContext* fmt) {
+    std::vector<int> marks;
+    int offset = container_start_ms(fmt);
+    for (unsigned i = 0; i < fmt->nb_chapters; i++) {
+        int at = (int)av_rescale_q(fmt->chapters[i]->start, fmt->chapters[i]->time_base, AVRational{1, 1000}) - offset;
+        if (at > 0) marks.push_back(at);
+    }
+    std::sort(marks.begin(), marks.end());
+    return marks;
+}
+
 static std::string stamp(int ms) {
     if (ms < 0) ms = 0;
     char b[32];

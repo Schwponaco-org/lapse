@@ -34,4 +34,5 @@ int find_audio_stream(const AVFormatContext* pFormatContext, int wanted = -1);
 AVCodecContext* open_audio_decoder(const AVFormatContext* pFormatContext, int audio_stream_index);
 std::vector<std::pair<int, int>> embedded_spans(AVFormatContext* pFormatContext, int wanted = -1);
 std::vector<int> picture_cuts(const char* filename);
+std::vector<int> chapter_marks(const AVFormatContext* fmt);
 std::vector<float> speech_profile(AVFormatContext* pFormatContext, AVCodecContext* dec_ctx, int audio_stream_index, int windows = 0, double* coverage = nullptr);
