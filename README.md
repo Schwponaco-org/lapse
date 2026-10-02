@@ -377,7 +377,7 @@ LAPSE never simply refuses. If it cannot prove an answer it still writes one, it
 ```json
 {"mode":"auto/shifted","reference":"vad","offset_ms":22,"ratio":1,"confidence":0.455,
  "margin":0.12,"sigma":12.3,"agreement":0.75,"verdict":"solid","coverage":1,
- "cues":1578,"ignored_cues":1,"parts":1,"snapped":0,"written":true,"output":"...","splits":[]}
+ "cues":1578,"ignored_cues":1,"parts":1,"snapped":0,"written":true,"output":"...","splits":[],"offsets":[22]}
 ```
 
 `mode` says what LAPSE decided the file needed. `ols`, `nosplit` and `split` mean you asked for that yourself. Everything under `auto` is what it worked out on its own:
@@ -392,7 +392,7 @@ LAPSE never simply refuses. If it cannot prove an answer it still writes one, it
 | `auto/joined` | two parts in one video | `splits` |
 | `auto/restart` | the subtitle starts over partway through | `splits` |
 
-`parts` is how many pieces the file ended up in and `splits` holds the cue index each new piece starts at, so `parts` is always `splits` plus one. `ratio` is `1` unless the file was stretched. `snapped` is how many cue starts `--snap` moved onto a picture cut, and is `0` when the flag was not used.
+`parts` is how many pieces the file ended up in and `splits` holds the cue index each new piece starts at, so `parts` is always `splits` plus one. `offsets` holds the offset each of those pieces got, in milliseconds and in the same order, so a file cut about shows where it moved and by how much. `ratio` is `1` unless the file was stretched. `snapped` is how many cue starts `--snap` moved onto a picture cut, and is `0` when the flag was not used.
 
 ---
 

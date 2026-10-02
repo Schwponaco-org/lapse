@@ -121,7 +121,7 @@ cues were found and ignored, and how many parts the file was split into:
 ```json
 {"mode":"auto/shifted","reference":"vad","offset_ms":22,"ratio":1,"confidence":0.455,
  "margin":0.12,"sigma":12.3,"agreement":0.75,"verdict":"solid","coverage":1,
- "cues":1578,"ignored_cues":1,"parts":1,"written":true,"output":"...","splits":[]}
+ "cues":1578,"ignored_cues":1,"parts":1,"written":true,"output":"...","splits":[],"offsets":[22]}
 ```
 
 `mode` reports what lapse actually did. `ols`, `nosplit` and `split` show up
