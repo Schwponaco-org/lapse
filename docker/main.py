@@ -65,6 +65,7 @@ VALUES = [
     ("FPS", "--fps"),
     ("SNAP", "--snap"),
     ("ENCODING", "--encoding"),
+    ("MIN_SHIFT", "--min-shift"),
 ]
 
 VIDEO_EXTS = {
@@ -574,7 +575,10 @@ def finish(conn, video_path, srt_path, attempts, values):
 
     status = "done"
     verdict = values.get("verdict")
-    if not values.get("written"):
+    if values.get("unchanged"):
+        print("Already in sync, left it alone:", srt_path)
+        values["offset_ms"] = 0
+    elif not values.get("written"):
         print("Nothing lined up, left it alone:", srt_path)
         status = "lowconf"
     elif verdict != "solid":
