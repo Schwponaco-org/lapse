@@ -341,7 +341,7 @@ std::vector<int> picture_cuts(const char* filename) {
     }
 
     for (int i = 0; i < (int)fmt->nb_streams; i++)
-        fmt->streams[i]->discard = (i == video) ? AVDISCARD_NONKEY : AVDISCARD_ALL;
+        fmt->streams[i]->discard = (i == video) ? AVDISCARD_DEFAULT : AVDISCARD_ALL;
 
     AVRational millis = {1, 1000};
     AVRational tb = fmt->streams[video]->time_base;
