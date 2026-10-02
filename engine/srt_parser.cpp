@@ -942,24 +942,6 @@ std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const
 
 
 
-// Build some sort of activity profile that checks every 10ms for dialogue
-std::vector<int> activity(const std::vector<std::pair<int, int>>& spans) {
-    if (spans.empty()) return {};
-    std::vector<int> activity_profile = {};
-    int j = 0;
-    for (int i = 0; i <= spans.back().second; i += 10) {
-        while (j < (int)spans.size() && i > spans[j].second) {
-            j++;
-        }
-        if (j < (int)spans.size() && i >= spans[j].first && i <= spans[j].second) {
-            activity_profile.push_back(1);
-        } else {
-            activity_profile.push_back(0);
-        }
-    }
-    return activity_profile;
-}
-
 // Turns the vad output back into spans. One entry is one 10ms frame so the index has to be scaled before anything compares this to subtitle timestamps
 std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(const std::vector<float>& probability) {
     std::vector<std::pair<int, int>> raw;

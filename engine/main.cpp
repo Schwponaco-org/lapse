@@ -268,12 +268,6 @@ static bool worth_splitting(const std::vector<int>& offsets, int base) {
     return high - low >= 120;
 }
 
-static std::vector<std::pair<int,int>> stretch(const std::vector<std::pair<int,int>>& spans, double ratio) {
-    std::vector<std::pair<int,int>> out;
-    for (auto& s : spans) out.push_back({(int)(s.first * ratio), (int)(s.second * ratio)});
-    return out;
-}
-
 static int agree_count(const std::vector<Chunk>& chunks, const std::vector<double>& expected) {
     int agreed = 0;
     for (size_t i = 0; i < chunks.size() && i < expected.size(); i++)
@@ -592,7 +586,6 @@ int run(int argc, const char *argv[]) {
     // No --output means carry on overwriting the file we were given
     if (output_path.empty()) output_path = input_path;
 
-    std::vector<int> reference_activity;
     std::vector<std::pair<int,int>> ref_spans;
     std::vector<float> ref_weights;
     double ref_coverage = 1.0;
@@ -652,7 +645,6 @@ int run(int argc, const char *argv[]) {
     if (is_subtitle(ref_path)) {
         auto [rs, _] = process_spans(read_subtitle(ref_path));
         ref_spans = rs;
-        reference_activity = activity(ref_spans);
     } else {
         AVC = open_file(ref_path.c_str());
         if (!AVC) return 1;
@@ -661,7 +653,6 @@ int run(int argc, const char *argv[]) {
         if (use_embedded) {
             auto [rs, _] = process_spans(embedded_spans(AVC, sub_track));
             ref_spans = rs;
-            reference_activity = activity(ref_spans);
         }
 
         cache = use_cache ? cache_path(ref_path, audio_track) : std::filesystem::path{};
@@ -673,7 +664,6 @@ int run(int argc, const char *argv[]) {
                 ref_coverage = 1.0;
             } else {
                 say() << "Reusing the speech we found last time (" << ref_spans.size() << " spans)\n";
-                reference_activity = activity(ref_spans);
             }
         }
 
@@ -694,9 +684,6 @@ int run(int argc, const char *argv[]) {
             auto [rs, w] = reference_spans(profile);
             ref_spans = rs;
             ref_weights = w;
-
-            reference_activity.reserve(profile.size());
-            for (float p : profile) reference_activity.push_back(p >= SPEECH_THRESHOLD ? 1 : 0);
 
             if (!cache.empty()) save_spans(cache, ref_spans, ref_weights, ref_coverage);
         }
@@ -732,10 +719,6 @@ int run(int argc, const char *argv[]) {
         auto [rs2, w2] = reference_spans(profile);
         ref_spans = rs2;
         ref_weights = w2;
-
-        reference_activity.clear();
-        reference_activity.reserve(profile.size());
-        for (float p : profile) reference_activity.push_back(p >= SPEECH_THRESHOLD ? 1 : 0);
 
         if (!cache.empty()) save_spans(cache, ref_spans, ref_weights, ref_coverage);
         align_setup(ref_spans, ref_weights);
@@ -844,17 +827,18 @@ int run(int argc, const char *argv[]) {
     };
 
     if (mode == "ols") {
-        // Try the framerates people actually ship first. Only when none of them fit do we go back to measuring the drift chunk by chunk, which is the one thing that can still catch a stretch that isnt a standard ratio
+        // Try the framerates people actually ship first. Only when none of them fit do we search the ratios in between, which is the one thing that can still catch a stretch that isnt a standard ratio
         auto [ratio, offset, confidence, sigma] = best_framerate(spans, ref_spans, ref_weights, ref_coverage);
         double slope = ratio - 1.0;
         double intercept = offset / 1000.0;
 
-        if (sigma < SOME_SIGMA) {
-            say() << "No framerate fit well, measuring the drift instead\n";
-            std::vector<int> input_activity = activity(spans);
-            auto [s, i] = fft_crosscorrelate(reference_activity, input_activity);
-            slope = s;
-            intercept = i;
+        if (sigma < SOME_SIGMA) say() << "No framerate fit well, searching the ratios in between\n";
+        auto [r, shift, found] = (sigma < SOME_SIGMA) ? search_ratio(spans, ref_spans, ref_weights, ref_coverage, 0.94, 1.06)
+                                                       : search_ratio(spans, ref_spans, ref_weights, ref_coverage, ratio - 0.003, ratio + 0.003);
+        if (found > sigma + 1.0) {
+            slope = r - 1.0;
+            intercept = shift / 1000.0;
+            sigma = found;
         }
 
         card.mode = "ols";
@@ -925,11 +909,14 @@ int run(int argc, const char *argv[]) {
         std::string choice;
         double ratio = 1.0;
 
-        if (flat >= MIN_AGREEING && !second_part(slices, offset)) {
+        bool drifts = sloped >= MIN_AGREEING + 1 && std::abs(drift) > 1e-5;
+        if (flat >= MIN_AGREEING && !(drifts && sloped >= flat + 2) && !second_part(slices, offset)) {
             choice = "shifted";
-        } else if (sloped >= MIN_AGREEING + 1 && std::abs(drift) > 1e-5) {
+        } else if (drifts) {
             choice = "drifting";
             ratio = snap_ratio(1.0 + drift);
+            auto [near, unused, near_sigma] = search_ratio(spans, ref_spans, ref_weights, ref_coverage, 1.0 + drift - 0.003, 1.0 + drift + 0.003);
+            if (near_sigma > best_offset(stretch(spans, ratio), ref_spans, ref_weights, ref_coverage).sigma + 1.0) ratio = near;
         } else if (groups >= 2) {
             choice = "recut";
         } else {
@@ -942,7 +929,9 @@ int run(int argc, const char *argv[]) {
                 choice = "drifting";
                 ratio = r;
             } else {
-                choice = "shifted";
+                auto [r2, shift2, sigma3] = search_ratio(spans, ref_spans, ref_weights, ref_coverage, 0.94, 1.06);
+                choice = (sigma3 >= sure_sigma && sigma3 > sigma + 2.0) ? "drifting" : "shifted";
+                if (choice == "drifting") ratio = r2;
             }
         }
 

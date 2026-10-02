@@ -277,6 +277,8 @@ Sync with OLS mode for gradual framerate drift:
 ./lapse video.mkv subtitles.srt ols
 ```
 
+The usual framerate pairs are tried first, 23.976, 24, 25, 29.97 and 30 against each other. A drift that is none of those, a capture that ran a hair fast or a cut that was sped up by some odd amount, is searched for between 0.94 and 1.06, so a file running 0.07% or 1.2% fast still lands where it should. That search only runs when the usual pairs do not fit, and costs a few seconds when it does.
+
 Sync with split mode for director's cuts or ad-break versions:
 
 ```bash

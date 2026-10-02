@@ -74,5 +74,4 @@ const int MAX_TIME_MS = 24 * 3600 * 1000;
 const int MAX_CUES = 100000;
 const size_t MAX_SUBTITLE_BYTES = 64u * 1024 * 1024;
 
-std::vector<int> activity(const std::vector<std::pair<int, int>>& spans);
 std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(const std::vector<float>& probability);

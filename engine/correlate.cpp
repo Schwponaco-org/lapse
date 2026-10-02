@@ -19,153 +19,6 @@
 #include <cstdlib>
 #include <cstdint>
 
-// slope og intercept for y = slope*x + intercept
-std::pair<double, double> linear_regression(const std::vector<double>& x, const std::vector<double>& y, const std::vector<double>& w) {
-    double sw = 0, swx = 0 , swy = 0, swxx = 0, swxy = 0;
-    for (int i = 0; i < (int)x.size(); i++) {
-        sw   += w[i];
-        swx  += w[i] * x[i];
-        swy  += w[i] * y[i];
-        swxx += w[i] * x[i] * x[i];
-        swxy += w[i] * x[i] * y[i];
-    }
-
-    double denom = sw*swxx - swx*swx;
-    if (sw <= 0) return {0.0, 0.0};
-    if (std::abs(denom) < 1e-9) return {0.0, swy / sw};
-
-    double slope = (sw*swxy - swx*swy) / denom;
-    double intercept = (swy - slope*swx) / sw;
-    return {slope, intercept};
-}
-
-std::pair<double, double> fft_crosscorrelate(const std::vector<int>& activity_profile, const std::vector<int>& srt_profile) {
-    int padded = 262144;
-    int chunk_size = 90000;
-    int half = padded / 2 + 1;
-    int max_lag = MAX_OFFSET_MS / 10; // profiles hold one entry per 10ms
-
-    std::vector<double> t_vals, delta_vals, weights;
-    int chunk_number = 0;
-
-
-    double* activity_buf = (double*) fftw_malloc(sizeof(double) * padded);
-    double* srt_buf      = (double*) fftw_malloc(sizeof(double) * padded);
-    fftw_complex* activity_fft = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * half);
-    fftw_complex* srt_fft      = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * half);
-    fftw_complex* corr_buf     = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * half);
-    double* corr_out           = (double*) fftw_malloc(sizeof(double) * padded);
-
-
-    fftw_plan plan_activity = fftw_plan_dft_r2c_1d(padded, activity_buf, activity_fft, FFTW_ESTIMATE);
-    fftw_plan plan_srt      = fftw_plan_dft_r2c_1d(padded, srt_buf,      srt_fft,      FFTW_ESTIMATE);
-    fftw_plan plan_inv      = fftw_plan_dft_c2r_1d(padded, corr_buf,     corr_out,     FFTW_ESTIMATE);
-
-
-
-    for (int chunks = 45000; chunks + chunk_size <= (int)activity_profile.size(); chunks += chunk_size) {
-        chunk_number++;
-
-        double a_mean = 0, b_mean = 0;
-        for (int i = 0; i < chunk_size; ++i) {
-            a_mean += activity_profile[chunks + i];
-            if (chunks + i < (int)srt_profile.size()) b_mean += srt_profile[chunks + i];
-        }
-        a_mean /= chunk_size;
-        b_mean /= chunk_size;
-
-        // Fill activity buffer then full the rest with zeros
-        for (int i = 0; i < padded; ++i)
-            activity_buf[i] = (i < chunk_size) ? activity_profile[chunks + i] - a_mean : 0.0;
-
-        for (int i = 0; i < padded; ++i)
-            srt_buf[i] = (i < chunk_size && chunks + i < (int)srt_profile.size()) ? srt_profile[chunks + i] - b_mean : 0.0;
-
-
-        fftw_execute(plan_activity);
-        fftw_execute(plan_srt);
-
-        // Elementwise multiply activity with conjugate of srt
-        for (int k = 0; k < half; ++k) {
-            double a_re = activity_fft[k][0];
-            double a_im = activity_fft[k][1];
-            double b_re = srt_fft[k][0];
-            double b_im = srt_fft[k][1];
-            corr_buf[k][0] = a_re * b_re + a_im * b_im; // real
-            corr_buf[k][1] = a_im * b_re - a_re * b_im; // imag
-        }
-
-        // Inverse FFT
-        fftw_execute(plan_inv);
-
-        // Normalize
-        for (int i = 0; i < padded; ++i)
-            corr_out[i] /= padded;
-
-        // Find the peak, only looking at lags we would actually believe
-        double best_val = -std::numeric_limits<double>::infinity();
-        int best_lag = 0;
-
-        for (int i = 0; i < padded; ++i) {
-            int lag = (i < padded / 2) ? i : i - padded;
-            if (std::abs(lag) > max_lag) continue;
-            if (corr_out[i] > best_val) {
-                best_val = corr_out[i];
-                best_lag = lag;
-            }
-        }
-
-        double second_val = -std::numeric_limits<double>::infinity();
-        for (int i = 0; i < padded; ++i) {
-            int lag = (i < padded / 2) ? i : i - padded;
-            if (std::abs(lag) > max_lag) continue;
-            if (std::abs(lag - best_lag) < 100) continue;   // skip a second either side
-            if (corr_out[i] > second_val) second_val = corr_out[i];
-        }
-
-
-        int at = (best_lag >= 0) ? best_lag : best_lag + padded;
-        double left  = corr_out[(at - 1 + padded) % padded];
-        double right = corr_out[(at + 1) % padded];
-        double curve = left - 2 * best_val + right;
-        double shift = (std::abs(curve) > 1e-12) ? 0.5 * (left - right) / curve : 0.0;
-        if (shift > 0.5) shift = 0.5;
-        if (shift < -0.5) shift = -0.5;
-
-        double offset_ms = (best_lag + shift) * 10.0;
-        double sharpness = (second_val > 0) ? best_val / second_val : (best_val > 0 ? 10.0 : 0.0);
-
-        say() << "t_" << chunk_number << " offset: " << offset_ms << "ms\n";
-        say() << "Sharpness_" << chunk_number << ": " << sharpness << '\n';
-
-
-        if (sharpness < 1.05) continue;
-
-
-        t_vals.push_back((chunks + chunk_size / 2) * 0.01);
-        delta_vals.push_back(offset_ms / 1000.0);
-        weights.push_back(sharpness);
-    }
-
-    // Cleanup everything afteruse like a good boy ))
-    fftw_destroy_plan(plan_activity);
-    fftw_destroy_plan(plan_srt);
-    fftw_destroy_plan(plan_inv);
-    fftw_free(activity_buf);
-    fftw_free(srt_buf);
-    fftw_free(activity_fft);
-    fftw_free(srt_fft);
-    fftw_free(corr_buf);
-    fftw_free(corr_out);
-
-    auto [slope, intercept] = linear_regression(t_vals, delta_vals, weights);
-    say() << "Slope: " << slope << '\n';
-    say() << "Intercept: " << intercept << '\n';
-
-    return {slope, intercept};
-}
-
-
 Lock best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights, double coverage, int max_offset) {
 
     if (align_ready() && max_offset <= align_reach() && !read_srt.empty()) {
@@ -323,6 +176,50 @@ double peak_sigma(const std::vector<double>& peak, int best_bucket, double fmax)
     return sigma;
 }
 
+std::vector<std::pair<int, int>> stretch(const std::vector<std::pair<int, int>>& spans, double ratio) {
+    std::vector<std::pair<int, int>> out;
+    out.reserve(spans.size());
+    for (auto& s : spans) out.push_back({(int)(s.first * ratio), (int)(s.second * ratio)});
+    return out;
+}
+
+std::tuple<double, int, double> search_ratio(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights, double coverage, double lo, double hi) {
+    double length = std::max(60000, read_srt.back().second);
+    double best = (lo + hi) / 2;
+    auto scan = [&](double from, double to, double step) {
+        double top = -1;
+        for (double r = from; r <= to; r += step) {
+            std::vector<Hit> hits = align_peaks(stretch(read_srt, r), 1);
+            if (!hits.empty() && hits[0].z > top) {
+                top = hits[0].z;
+                best = r;
+            }
+        }
+    };
+    double coarse = std::max(0.0001, 2400.0 / length);
+    double step = coarse / 6;
+    scan(lo, hi, coarse);
+    scan(best - coarse, best + coarse, step);
+
+    auto at = [&](double r) { return best_offset(stretch(read_srt, r), reference_spans, reference_weights, coverage); };
+    const double g = 0.6180339887;
+    double a = best - step, b = best + step;
+    double x1 = b - g * (b - a), x2 = a + g * (b - a);
+    double f1 = at(x1).sigma, f2 = at(x2).sigma;
+    for (int i = 0; i < 12; i++) {
+        if (f1 > f2) {
+            b = x2; x2 = x1; f2 = f1;
+            x1 = b - g * (b - a); f1 = at(x1).sigma;
+        } else {
+            a = x1; x1 = x2; f1 = f2;
+            x2 = a + g * (b - a); f2 = at(x2).sigma;
+        }
+    }
+    Lock got = at((a + b) / 2);
+    say() << "ratio search: " << (a + b) / 2 << " offset=" << got.offset << "ms sigma=" << got.sigma << '\n';
+    return {(a + b) / 2, got.offset, got.sigma};
+}
+
 std::tuple<double, int, double, double> best_framerate(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights, double coverage) {
     double best_ratio = 1.0;
     int best_shift = 0;
@@ -330,12 +227,7 @@ std::tuple<double, int, double, double> best_framerate(const std::vector<std::pa
     double best_sigma = -1;
 
     for (double ratio : FRAMERATE_RATIOS) {
-        std::vector<std::pair<int, int>> scaled;
-        scaled.reserve(read_srt.size());
-        for (auto& s : read_srt)
-            scaled.push_back({(int)(s.first * ratio), (int)(s.second * ratio)});
-
-        Lock got = best_offset(scaled, reference_spans, reference_weights, coverage);
+        Lock got = best_offset(stretch(read_srt, ratio), reference_spans, reference_weights, coverage);
         say() << "ratio " << ratio << ": offset=" << got.offset << "ms confidence=" << got.confidence
               << " sigma=" << got.sigma << '\n';
 
