@@ -260,6 +260,27 @@ static std::vector<std::string> ttml_cue_text(const std::string& path) {
     return out;
 }
 
+static std::vector<std::string> stl_cue_text(const std::string& path) {
+    std::string data = load_bytes(path);
+    std::vector<std::string> out;
+    int last = -1;
+    for (size_t at = 1024; ebu_stl(data) && at + 128 <= data.size(); at += 128) {
+        const unsigned char* b = (const unsigned char*)data.data() + at;
+        int sn = b[1] | (b[2] << 8);
+        if (b[15]) {
+            last = sn;
+            continue;
+        }
+        if (sn != last) out.push_back("");
+        last = sn;
+        for (int i = 16; i < 128; i++) {
+            if (b[i] == 0x8a) out.back() += '\n';
+            else if (b[i] >= 0x20 && b[i] < 0x7f) out.back() += (char)b[i];
+        }
+    }
+    return out;
+}
+
 std::vector<std::string> read_cue_text(const std::string& path) {
     std::string kind = subtitle_kind(path);
     if (kind == ".sup" || kind == ".idx") return {};
@@ -267,6 +288,7 @@ std::vector<std::string> read_cue_text(const std::string& path) {
     if (kind == ".sub" || kind == ".mpl2") return sub_cue_text(path);
     if (kind == ".sbv") return sbv_cue_text(path);
     if (kind == ".ttml" || kind == ".dfxp") return ttml_cue_text(path);
+    if (kind == ".stl") return stl_cue_text(path);
     return srt_cue_text(path);
 }
 

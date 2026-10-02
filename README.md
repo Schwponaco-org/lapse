@@ -412,7 +412,7 @@ lapse/
 
 **Video:** All formats supported by FFmpeg (`.mp4`, `.mkv`, `.avi`, `.mov`, `.ts`, `.webm` and more)
 
-**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub` (MicroDVD, MPL2 and SubViewer 2), `.mpl2`, `.sup` (PGS), `.sbv`, `.idx` (VobSub, point it at the `.idx` file), `.smi` or `.sami`, `.ttml`, `.dfxp`. Upper case extensions are fine too
+**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub` (MicroDVD, MPL2 and SubViewer 2), `.mpl2`, `.sup` (PGS), `.sbv`, `.idx` (VobSub, point it at the `.idx` file), `.smi` or `.sami`, `.ttml`, `.dfxp`, `.stl` (EBU STL, the binary broadcast format). Upper case extensions are fine too
 
 Three formats share `.sub` and the name says nothing about which one you have, so LAPSE reads the file instead:
 
