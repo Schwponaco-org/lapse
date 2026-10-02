@@ -109,7 +109,8 @@ static int nearest_cut(const std::vector<int>& cuts, int at) {
 }
 
 static int snap_cues(const std::vector<std::pair<int,int>>& cues, const std::vector<int>& cuts,
-                     double slope, int window, std::vector<int>& offsets, std::vector<int>& mapping) {
+                     double slope, int window, std::vector<int>& offsets, std::vector<int>& mapping, std::vector<int>& ends) {
+    ends.clear();
     if (cues.empty() || cuts.empty() || window <= 0) return 0;
 
     std::vector<int> per_cue(cues.size(), 0);
@@ -118,7 +119,8 @@ static int snap_cues(const std::vector<std::pair<int,int>>& cues, const std::vec
         if (span >= 0 && span < (int)offsets.size()) per_cue[i] = offsets[span];
     }
 
-    int moved = 0;
+    std::vector<char> touched(cues.size(), 0);
+    bool starts_moved = false;
     for (size_t i = 0; i < cues.size(); i++) {
         if (cues[i].second <= cues[i].first) continue;
 
@@ -133,14 +135,42 @@ static int snap_cues(const std::vector<std::pair<int,int>>& cues, const std::vec
         if (start + by < 0 || start + by >= end) continue;
 
         per_cue[i] += by;
-        moved++;
+        touched[i] = 1;
+        starts_moved = true;
     }
 
-    if (moved == 0) return 0;
+    std::vector<int> begins;
+    for (size_t i = 0; i < cues.size(); i++)
+        if (cues[i].second > cues[i].first) begins.push_back((int)(cues[i].first * (1.0 + slope)) + per_cue[i]);
+    std::sort(begins.begin(), begins.end());
 
-    offsets = per_cue;
-    mapping.resize(cues.size());
-    for (size_t i = 0; i < mapping.size(); i++) mapping[i] = (int)i;
+    ends.assign(cues.size(), 0);
+    for (size_t i = 0; i < cues.size(); i++) {
+        if (cues[i].second <= cues[i].first) continue;
+
+        int start = (int)(cues[i].first * (1.0 + slope)) + per_cue[i];
+        int end   = (int)(cues[i].second * (1.0 + slope)) + per_cue[i];
+
+        int cut = nearest_cut(cuts, end);
+        if (cut < 0) continue;
+
+        int by = cut - end;
+        if (by == 0 || std::abs(by) > window || cut - start < 500) continue;
+        auto next = std::upper_bound(begins.begin(), begins.end(), end);
+        if (by > 0 && next != begins.end() && *next < cut) continue;
+
+        ends[i] = by;
+        touched[i] = 1;
+    }
+
+    int moved = (int)std::count(touched.begin(), touched.end(), 1);
+    if (moved == 0) ends.clear();
+
+    if (starts_moved) {
+        offsets = per_cue;
+        mapping.resize(cues.size());
+        for (size_t i = 0; i < mapping.size(); i++) mapping[i] = (int)i;
+    }
     return moved;
 }
 
@@ -794,7 +824,9 @@ int run(int argc, const char *argv[]) {
 
         std::vector<int> offsets = offs;
         std::vector<int> mapping = map;
-        card.snapped = snap_cues(timestamps, cuts, slope, snap_window, offsets, mapping);
+        std::vector<int> ends;
+        card.snapped = snap_cues(timestamps, cuts, slope, snap_window, offsets, mapping, ends);
+        end_moves(ends);
 
         if (!dry_run) {
             if (make_backup) backup_file(input_path.c_str());
@@ -813,7 +845,9 @@ int run(int argc, const char *argv[]) {
 
         std::vector<int> offsets(1, (int)std::lround(intercept * 1000.0));
         std::vector<int> mapping(timestamps.size(), 0);
-        card.snapped = snap_cues(timestamps, cuts, slope, snap_window, offsets, mapping);
+        std::vector<int> ends;
+        card.snapped = snap_cues(timestamps, cuts, slope, snap_window, offsets, mapping, ends);
+        end_moves(ends);
 
         std::string kind = subtitle_kind(input_path);
         if (!dry_run) {
