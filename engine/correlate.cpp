@@ -685,6 +685,7 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
         int s_max_at = 0;
         int reached = -1;
         int allowed = -1;
+        int anywhere = (int)(std::max_element(t_prev.begin(), t_prev.end()) - t_prev.begin());
 
         for (int sigma = 0; sigma < (int)scores.size(); sigma++) {
             while (allowed + 1 < (int)grid.size() && grid[allowed + 1] <= grid[sigma] + gap) allowed++;
@@ -706,6 +707,10 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
             } else {
                 t_new[sigma] = scores[sigma] + s_max - p;
                 to[sigma] = s_max_at;
+            }
+            if (t_prev[anywhere] - 2 * p > t_new[sigma] - scores[sigma]) {
+                t_new[sigma] = scores[sigma] + t_prev[anywhere] - 2 * p;
+                to[sigma] = anywhere;
             }
         }
         all_to.push_back(to);
