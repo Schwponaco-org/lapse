@@ -25,6 +25,10 @@ static const char* close_bracket[] = {"]", ")", "\xef\xbc\x89", "\xe3\x80\x91", 
 // nothing here is ever spoken out loud
 static const char* note_marks[] = {"\xe2\x99\xaa", "\xe2\x99\xab", "\xe2\x99\xac", "\xe2\x99\xa9", "#", "*", "~"};
 
+static const char* credit_marks[] = {"www.", "http", ".com", ".org", ".net", "subtitle", "synced by", "sync by",
+                                     "corrected by", "ripped by", "encoded by", "translated by", "opensubtitles",
+                                     "addic7ed", "subscene", "podnapisi", "advertise your", "tekstet af", "oversat af"};
+
 static bool starts_with(const std::string& s, const char* what) {
     return s.compare(0, strlen(what), what) == 0;
 }
@@ -89,8 +93,16 @@ static bool junk_line(const std::string& raw) {
     return false;
 }
 
+static bool credit(const std::string& text) {
+    std::string low;
+    for (char c : text) low += (char)tolower((unsigned char)c);
+    for (const char* m : credit_marks)
+        if (low.find(m) != std::string::npos) return true;
+    return false;
+}
+
 bool is_junk_cue(const std::string& text) {
-    if (trim(text).empty()) return true;
+    if (trim(text).empty() || credit(text)) return true;
 
     std::string line;
     bool any_real = false;
