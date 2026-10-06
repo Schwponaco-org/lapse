@@ -306,6 +306,7 @@ By default LAPSE overwrites the subtitle file it was given and leaves a `.bak` n
 --sub-track N       use the Nth embedded subtitle track as the reference
 --snap [ms]         pull cue starts onto the picture cuts they land next to, default window 120 ms
 --encoding NAME     write the result as utf8, utf8-bom, utf16le, utf16be or latin1
+--from VIDEO        the subtitle fits this video, move it to the first one by comparing their sound
 ```
 
 Without `--encoding` a subtitle goes back out in whatever it came in as, which is what you want almost every time. Give it a name and the output is written that way instead, which is the quick way to get a library of mixed UTF-16 and codepage files down to one encoding. `utf16` is taken as `utf16le`, and `iso-8859-1` and `cp1252` are taken as `latin1`.
@@ -342,6 +343,16 @@ echo 'video2.mkv subs2.srt ols' >> jobs.txt
 ```
 
 Each line gets exactly one line of JSON back on stdout, in the order the jobs came in, whether or not that job worked. `--json` is implied and does not need to be added to the lines. Paths with spaces in them need double quotes.
+
+### Moving a subtitle to another release
+
+A subtitle that is right for one copy of a film is often wrong for another: the TV broadcast against the Blu-ray, PAL against NTSC, a cut with a scene missing. When you still have the copy it was right for, the two soundtracks say exactly how the copies differ, which is far more to go on than a subtitle against speech. `--from` names the copy the subtitle already fits:
+
+```bash
+./lapse bluray.mkv tv.srt --from tv-recording.ts
+```
+
+Both films are listened to, and the speech of the old one is lined up against the speech of the new one with everything LAPSE does for a subtitle: one offset, a framerate stretch, parts cut out or put in. Each line of the subtitle then moves the way the speech around it moved. Both speech profiles are cached, so doing a second subtitle for the same pair is quick. On a test film played back 4.27% faster every line landed within 10 milliseconds, where syncing the same subtitle straight against the speech was 145 milliseconds out.
 
 ### Snapping to picture cuts
 

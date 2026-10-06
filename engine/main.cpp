@@ -21,6 +21,7 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <climits>
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
@@ -425,10 +426,11 @@ static void report(const Report& r) {
 }
 
 void usage() {
-    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME]\n";
+    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME] [--from video]\n";
     std::cerr << "       --confidence N   how far the answer has to stand out before the original is overwritten (default " << sure_sigma << ")\n";
     std::cerr << "       --encoding NAME  write the result as utf8, utf8-bom, utf16le, utf16be or latin1 instead of whatever came in\n";
     std::cerr << "       --snap [ms]      pull a cue start onto the picture cut it lands next to, within ms (default " << SNAP_WINDOW_MS << ")\n";
+    std::cerr << "       --from video     the subtitle is in sync with this video, move it to the first one by their sound\n";
     std::cerr << "       lapse --version\n";
     std::cerr << "       lapse --formats\n";
     std::cerr << "       lapse --vad\n";
@@ -444,6 +446,25 @@ struct Media {
         avformat_close_input(&file);
     }
 };
+
+static std::vector<std::pair<int,int>> speech_of(const std::string& path, int audio_track, bool use_cache) {
+    std::vector<std::pair<int,int>> spans;
+    std::vector<float> weights;
+    double coverage = 1.0;
+    std::filesystem::path cache = use_cache ? cache_path(path, audio_track) : std::filesystem::path{};
+    if (!cache.empty() && load_spans(cache, spans, weights, coverage)) return spans;
+
+    Media media;
+    media.file = open_file(path.c_str());
+    if (!media.file) return {};
+    int stream = find_audio_stream(media.file, audio_track);
+    media.audio = open_audio_decoder(media.file, stream);
+    if (!media.audio) return {};
+
+    std::tie(spans, weights) = reference_spans(speech_profile(media.file, media.audio, stream, 0, &coverage));
+    if (!cache.empty() && !spans.empty()) save_spans(cache, spans, weights, coverage);
+    return spans;
+}
 
 int run(int argc, const char *argv[]) {
     sure_sigma = SURE_SIGMA;
@@ -463,6 +484,7 @@ int run(int argc, const char *argv[]) {
     int audio_track = -1;
     int sub_track = -1;
     int snap_window = 0;
+    std::string from_video;
     double fps = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -541,6 +563,9 @@ int run(int argc, const char *argv[]) {
                 snap_window = (int)got;
                 i++;
             }
+        } else if (arg == "--from") {
+            if (i + 1 >= argc) { usage(); return -1; }
+            from_video = argv[++i];
         } else if (arg == "--force") {
             force = true;
         } else {
@@ -627,6 +652,20 @@ int run(int argc, const char *argv[]) {
     int junk = 0;
     timestamps = drop_junk_cues(timestamps, read_cue_text(input_path), &junk);
     if (junk) say() << "Ignoring " << junk << " cues that are not dialogue\n";
+
+    std::vector<std::pair<int,int>> cues = timestamps;
+    if (!from_video.empty()) {
+        if (is_subtitle(ref_path)) {
+            std::cerr << "--from wants the video the subtitle is synced to now, and a video to move it to\n";
+            return -1;
+        }
+        timestamps = speech_of(from_video, audio_track, use_cache);
+        if (timestamps.empty()) {
+            std::cerr << "No speech found in: " << from_video << '\n';
+            return 1;
+        }
+        say() << "Lining the speech in " << from_video << " up instead of the cues\n";
+    }
 
     auto [spans, mapping] = process_spans(timestamps, mode != "split", mode != "split");
     if (spans.empty()) {
@@ -794,7 +833,17 @@ int run(int argc, const char *argv[]) {
 
         std::vector<int> offsets = offs;
         std::vector<int> mapping = map;
-        card.snapped = snap_cues(timestamps, cuts, slope, snap_window, offsets, mapping);
+        if (!from_video.empty()) {
+            offsets.assign(cues.size(), offs[0]);
+            for (size_t i = 0; i < cues.size(); i++) {
+                size_t k = std::upper_bound(timestamps.begin(), timestamps.end(), std::make_pair(cues[i].first, INT_MAX)) - timestamps.begin();
+                if (k == timestamps.size() || (k > 0 && cues[i].first - timestamps[k - 1].second < timestamps[k].first - cues[i].first)) k--;
+                offsets[i] = offs[map[k]];
+            }
+            mapping.resize(cues.size());
+            for (size_t i = 0; i < mapping.size(); i++) mapping[i] = (int)i;
+        }
+        card.snapped = snap_cues(cues, cuts, slope, snap_window, offsets, mapping);
 
         if (!dry_run) {
             if (make_backup) backup_file(input_path.c_str());
@@ -812,8 +861,8 @@ int run(int argc, const char *argv[]) {
         card.written = true;
 
         std::vector<int> offsets(1, (int)std::lround(intercept * 1000.0));
-        std::vector<int> mapping(timestamps.size(), 0);
-        card.snapped = snap_cues(timestamps, cuts, slope, snap_window, offsets, mapping);
+        std::vector<int> mapping(cues.size(), 0);
+        card.snapped = snap_cues(cues, cuts, slope, snap_window, offsets, mapping);
 
         std::string kind = subtitle_kind(input_path);
         if (!dry_run) {
