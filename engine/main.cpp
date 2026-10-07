@@ -372,6 +372,7 @@ struct Report {
     std::string why;
     std::string output;
     std::vector<int> splits;
+    std::vector<int> offsets;
 };
 
 static bool as_json = false;
@@ -391,7 +392,10 @@ static void report(const Report& r) {
     if (!as_json) {
         say() << "Done (" << r.mode << "): offset=" << r.offset << "ms";
         if (r.ratio != 1.0) say() << " ratio=" << r.ratio;
-        if (r.parts > 1) say() << " parts=" << r.parts;
+        if (r.parts > 1) {
+            say() << " parts=" << r.parts << " offsets=";
+            for (size_t i = 0; i < r.offsets.size(); i++) say() << (i ? "," : "") << r.offsets[i];
+        }
         if (r.snapped) say() << " snapped=" << r.snapped;
         say() << " sigma=" << r.sigma << " agree=" << r.agreement << " confidence=" << r.confidence;
         say() << " [" << r.verdict << "]";
@@ -422,6 +426,9 @@ static void report(const Report& r) {
     std::cout << ",\"splits\":[";
     for (size_t i = 0; i < r.splits.size(); i++)
         std::cout << (i ? "," : "") << r.splits[i];
+    std::cout << "],\"offsets\":[";
+    for (size_t i = 0; i < r.offsets.size(); i++)
+        std::cout << (i ? "," : "") << r.offsets[i];
     std::cout << "]}\n";
 }
 
@@ -824,8 +831,12 @@ int run(int argc, const char *argv[]) {
 
     auto save = [&](const std::vector<int>& offs, const std::vector<int>& map, Verdict verdict, double slope = 0.0) {
         card.ratio = 1.0 + slope;
+        card.offsets.assign(1, offs[0]);
         for (size_t i = 1; i < offs.size(); i++)
-            if (offs[i] != offs[i - 1]) card.splits.push_back((int)i);
+            if (offs[i] != offs[i - 1]) {
+                card.splits.push_back((int)i);
+                card.offsets.push_back(offs[i]);
+            }
         card.parts = (int)card.splits.size() + 1;
 
         if (!settle(verdict)) { report(card); return 2; }
@@ -855,7 +866,8 @@ int run(int argc, const char *argv[]) {
 
     auto save_ols = [&](double slope, double intercept, Verdict verdict) {
         card.ratio = 1.0 + slope;
-        card.offset = (int)(intercept * 1000.0);
+        card.offset = (int)std::lround(intercept * 1000.0);
+        card.offsets.assign(1, card.offset);
 
         if (!settle(verdict)) { report(card); return 2; }
         card.written = true;
