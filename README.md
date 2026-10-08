@@ -194,6 +194,7 @@ Everything the CLI takes is available in the container. Switches are `0` or `1`,
 | `SUB_TRACK` | `--sub-track` | Which embedded subtitle track to use as reference |
 | `FPS` | `--fps` | Frame rate for frame based subtitles that do not carry one |
 | `SNAP` | `--snap` | Milliseconds a cue start may be moved to land on a picture cut. Empty leaves it off |
+| `MIN_SHIFT` | `--min-shift` | Leave a subtitle alone when nothing in it would move by this many milliseconds. Empty only skips a result that changes nothing at all |
 | `ENCODING` | `--encoding` | Write every result as `utf8`, `utf8-bom`, `utf16le`, `utf16be` or `latin1`. Empty keeps whatever the file came in as |
 
 All of it is in the web interface as well, under Settings, and what you save there is used from the next scan onwards. `OUTPUT_SUFFIX` and `NO_BACKUP` are the two halves of the file output picker there:
@@ -307,7 +308,10 @@ By default LAPSE overwrites the subtitle file it was given and leaves a `.bak` n
 --snap [ms]         pull cue starts onto the picture cuts they land next to, default window 120 ms
 --encoding NAME     write the result as utf8, utf8-bom, utf16le, utf16be or latin1
 --from VIDEO        the subtitle fits this video, move it to the first one by comparing their sound
+--min-shift ms      leave the file alone when no cue would move by this much
 ```
+
+A subtitle that is already right is not written again. When the answer would move nothing, the file is left as it is, with no `.bak` and the same modified time, and `unchanged` in the `--json` line says so. Listening to the film is only good to a few hundredths of a second though, so syncing a file that is already in sync can still nudge it by 30 or 40 milliseconds, and doing that over and over walks it about. `--min-shift 80` leaves it alone unless something would move by at least 80 milliseconds. A file that drifts, or a result written somewhere else with `--output`, is always written.
 
 Without `--encoding` a subtitle goes back out in whatever it came in as, which is what you want almost every time. Give it a name and the output is written that way instead, which is the quick way to get a library of mixed UTF-16 and codepage files down to one encoding. `utf16` is taken as `utf16le`, and `iso-8859-1` and `cp1252` are taken as `latin1`.
 
@@ -388,7 +392,7 @@ LAPSE never simply refuses. If it cannot prove an answer it still writes one, it
 ```json
 {"mode":"auto/shifted","reference":"vad","offset_ms":22,"ratio":1,"confidence":0.455,
  "margin":0.12,"sigma":12.3,"agreement":0.75,"verdict":"solid","coverage":1,
- "cues":1578,"ignored_cues":1,"parts":1,"snapped":0,"written":true,"output":"...","splits":[],"offsets":[22]}
+ "cues":1578,"ignored_cues":1,"parts":1,"snapped":0,"written":true,"unchanged":false,"output":"...","splits":[],"offsets":[22]}
 ```
 
 `mode` says what LAPSE decided the file needed. `ols`, `nosplit` and `split` mean you asked for that yourself. Everything under `auto` is what it worked out on its own:
