@@ -30,6 +30,7 @@ struct Shift {
     double intercept_s = 0;
     std::vector<int> offsets;
     std::vector<int> mapping;
+    std::vector<int> ends;
 
     int apply(int ms, int cue) const {
         int stretched = (int)std::lround(ms * (1.0 + slope) + intercept_s * 1000.0);
@@ -42,6 +43,7 @@ struct Shift {
 
     std::pair<int,int> both(int start, int end, int cue) const {
         int a = apply(start, cue), b = apply(end, cue);
+        if (cue >= 0 && cue < (int)ends.size()) b += ends[cue];
         if (a < 0) {
             b -= a;
             a = 0;
@@ -49,6 +51,10 @@ struct Shift {
         return {a, b};
     }
 };
+
+static std::vector<int> moved_ends;
+
+void end_moves(const std::vector<int>& by) { moved_ends = by; }
 
 static Charset came_as = Charset::Legacy;
 static Charset asked_for = Charset::Legacy;
@@ -513,6 +519,7 @@ static Shift per_cue(double slope, const std::vector<int>& offsets, const std::v
     shift.slope = slope;
     shift.offsets = offsets;
     shift.mapping = mapping;
+    shift.ends = moved_ends;
     return shift;
 }
 

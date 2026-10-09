@@ -362,16 +362,16 @@ Both films are listened to, and the speech of the old one is lined up against th
 
 A subtitler writing to picture puts a line up on the cut, not three frames after it. Moving the whole file by one number keeps every line the same distance from the cut it was written against, so a sync that is right to within a few frames still reads as slightly late all the way through.
 
-`--snap` takes that last step. Once the offset is settled, any cue start sitting within 120 milliseconds of a picture cut is moved onto it, and the end of that cue moves with it so the line stays on screen just as long:
+`--snap` takes that last step. Once the offset is settled, any cue start sitting within 120 milliseconds of a picture cut is moved onto it, and the end of that cue moves with it so the line stays on screen just as long. An end that then sits within the same distance of a cut is moved onto that cut too, so a line does not hang over into the next shot or vanish a few frames before it. An end is never pulled in under half a second after its start, and never pushed out over the start of the next line:
 
 ```bash
 ./lapse video.mkv subtitles.srt --snap
 ./lapse video.mkv subtitles.srt --snap 60
 ```
 
-The cuts come from the keyframes the encoder already wrote into the file, which costs a read of the index and no decoding, so it adds hundredths of a second to a run. Encoders start a keyframe when the picture changes and then again on a timer when it does not, and a file where every keyframe sits on the same even spacing has had scene detection turned off. There is nothing in a file like that to line anything up against, so LAPSE leaves it alone and says so. It also does nothing when the reference is another subtitle file, and it never moves a cue far enough to outlast itself.
+The cuts come from the keyframes the encoder already wrote into the file, which costs a read of the video packets and no decoding. Encoders start a keyframe when the picture changes and then again on a timer when it does not. The ones the timer put there sit exactly the encoder's longest gap after the keyframe before them, so they are left out and only the ones that came from a change in the picture count. A file where every keyframe sits on the same even spacing has had scene detection turned off. There is nothing in a file like that to line anything up against, so LAPSE leaves it alone and says so. It also does nothing when the reference is another subtitle file, and it never moves a cue far enough to outlast itself.
 
-`snapped` in the `--json` line says how many cue starts were moved. The flag is off unless you ask for it, and it changes nothing about how the offset itself is worked out.
+`snapped` in the `--json` line says how many cues had their start or their end moved onto a cut. The flag is off unless you ask for it, and it changes nothing about how the offset itself is worked out.
 
 ### Verdicts
 
@@ -407,7 +407,7 @@ LAPSE never simply refuses. If it cannot prove an answer it still writes one, it
 | `auto/joined` | two parts in one video | `splits` |
 | `auto/restart` | the subtitle starts over partway through | `splits` |
 
-`parts` is how many pieces the file ended up in and `splits` holds the cue index each new piece starts at, so `parts` is always `splits` plus one. `offsets` holds the offset each of those pieces got, in milliseconds and in the same order, so a file cut about shows where it moved and by how much. `ratio` is `1` unless the file was stretched. `snapped` is how many cue starts `--snap` moved onto a picture cut, and is `0` when the flag was not used.
+`parts` is how many pieces the file ended up in and `splits` holds the cue index each new piece starts at, so `parts` is always `splits` plus one. `offsets` holds the offset each of those pieces got, in milliseconds and in the same order, so a file cut about shows where it moved and by how much. `ratio` is `1` unless the file was stretched. `snapped` is how many cues `--snap` moved onto a picture cut, at either end, and is `0` when the flag was not used.
 
 `ignored_cues` counts the lines that were kept out of the measuring: sound effects in brackets, music notes, and the credit and advert lines subtitle sites slip in, like `Downloaded from www.OpenSubtitles.org` or `Synced and corrected by`. They are still moved along with everything else, they just do not get a say in where to.
 
