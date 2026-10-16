@@ -229,8 +229,10 @@ static bool load_spans(const std::filesystem::path& path, std::vector<std::pair<
     if (!in) return false;
 
     std::string tag;
-    in >> tag >> coverage;
-    if (tag != "lapse3") return false;
+    double heard = 0;
+    in >> tag >> heard;
+    if (tag != "lapse3" || heard < 1.0) return false;
+    coverage = heard;
 
     int start, end;
     float weight;
