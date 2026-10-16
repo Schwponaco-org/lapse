@@ -275,6 +275,14 @@ def paused(conn):
     return setting(conn, "paused", "0") == "1"
 
 
+def utf8(path):
+    try:
+        path.encode("utf-8")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
 def blocked(path):
     for prefix in EXCLUDED:
         if path == prefix or path.startswith(prefix + os.sep):
@@ -628,6 +636,10 @@ def run_scan(conn, path, verbose=False):
         if not running or paused(conn):
             return
 
+        if not utf8(video + subtitle):
+            print("Cannot keep a record of a name that is not UTF-8, rename it to have it synced:",
+                  os.fsencode(subtitle).decode("utf-8", "replace"))
+            continue
         remember_tracks(conn, video)
         ext = os.path.splitext(subtitle)[1].lower()
         if ext not in ENGINE_FORMATS:
