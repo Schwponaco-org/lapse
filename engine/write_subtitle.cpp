@@ -431,6 +431,7 @@ static void write_idx(const char* input_path, const char* output_path, const Shi
 
     std::string line;
     int cue = 0;
+    int delay = 0;
     const char* eol = "\n";
     while (std::getline(ss, line)) {
         if (!line.empty() && line.back() == '\r') {
@@ -439,10 +440,10 @@ static void write_idx(const char* input_path, const char* output_path, const Shi
         }
 
         size_t vf, vl;
-        if (idx_time_line(line, vf, vl)) {
+        if (!idx_delay_line(line, delay) && idx_time_line(line, vf, vl)) {
             int ms = idx_time_ms(line.substr(vf, vl));
             if (ms >= 0)
-                line = line.substr(0, vf) + ms_to_idx_ts(shift.apply(ms, cue)) + line.substr(vf + vl);
+                line = line.substr(0, vf) + ms_to_idx_ts(shift.apply(ms + delay, cue) - delay) + line.substr(vf + vl);
             cue++;
         }
 
