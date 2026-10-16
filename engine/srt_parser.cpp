@@ -838,15 +838,22 @@ std::vector<std::pair<int,int>> read_smi(const char* filename) {
 }
 
 bool ttml_attr(const std::string& text, size_t from, size_t to, const char* name, size_t& val_from, size_t& val_len) {
-    std::string key = std::string(name) + "=\"";
-    size_t pos = text.find(key, from);
-    if (pos == std::string::npos || pos > to) return false;
-    size_t start = pos + key.size();
-    size_t end = text.find('"', start);
-    if (end == std::string::npos || end > to) return false;
-    val_from = start;
-    val_len = end - start;
-    return true;
+    std::string key = name;
+    for (size_t pos = text.find(key, from); pos != std::string::npos && pos < to; pos = text.find(key, pos + 1)) {
+        if (pos == 0 || !isspace((unsigned char)text[pos - 1])) continue;
+        size_t at = pos + key.size();
+        while (at < to && isspace((unsigned char)text[at])) at++;
+        if (at >= to || text[at] != '=') continue;
+        at++;
+        while (at < to && isspace((unsigned char)text[at])) at++;
+        if (at >= to || (text[at] != '"' && text[at] != '\'')) continue;
+        size_t end = text.find(text[at], at + 1);
+        if (end == std::string::npos || end > to) return false;
+        val_from = at + 1;
+        val_len = end - at - 1;
+        return true;
+    }
+    return false;
 }
 
 static double tick_rate = 1, frame_rate = 30;
