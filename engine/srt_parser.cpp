@@ -600,10 +600,7 @@ std::vector<std::pair<int,int>> read_stl(const char* filename) {
     for (size_t at = 1024; at + 128 <= data.size(); at += 128) {
         const unsigned char* b = (const unsigned char*)data.data() + at;
         int sn = b[1] | (b[2] << 8);
-        if (sn == last || b[15]) {
-            last = sn;
-            continue;
-        }
+        if (b[15] || sn == last) continue;
         last = sn;
         if ((int)timestamps.size() >= MAX_CUES) {
             say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";

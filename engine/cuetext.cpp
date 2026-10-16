@@ -279,10 +279,7 @@ static std::vector<std::string> stl_cue_text(const std::string& path) {
     for (size_t at = 1024; ebu_stl(data) && at + 128 <= data.size(); at += 128) {
         const unsigned char* b = (const unsigned char*)data.data() + at;
         int sn = b[1] | (b[2] << 8);
-        if (b[15]) {
-            last = sn;
-            continue;
-        }
+        if (b[15]) continue;
         if (sn != last) out.push_back("");
         last = sn;
         for (int i = 16; i < 128; i++) {
