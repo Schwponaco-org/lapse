@@ -409,6 +409,8 @@ LAPSE never simply refuses. If it cannot prove an answer it still writes one, it
 
 `parts` is how many pieces the file ended up in and `splits` holds the cue index each new piece starts at, so `parts` is always `splits` plus one. `offsets` holds the offset each of those pieces got, in milliseconds and in the same order, so a file cut about shows where it moved and by how much. `ratio` is `1` unless the file was stretched. `snapped` is how many cues `--snap` moved onto a picture cut, at either end, and is `0` when the flag was not used.
 
+A subtitle with too few cues to be worth trying still gets its line, with `reference` set to `none`, `written` set to `false` and `why` saying how many cues there were, and exits 2.
+
 `ignored_cues` counts the lines that were kept out of the measuring: sound effects in brackets, music notes, and the credit and advert lines subtitle sites slip in, like `Downloaded from www.OpenSubtitles.org` or `Synced and corrected by`. They are still moved along with everything else, they just do not get a say in where to.
 
 ---

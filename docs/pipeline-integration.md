@@ -104,7 +104,10 @@ where the bar for `solid` sits, default `8`. `--force` treats every result
 as `solid` and always overwrites.
 
 A caller can read either the exit code or the `verdict` field in the JSON
-output to decide what to do with the result.
+output to decide what to do with the result. A subtitle with too few cues
+to try still gets a JSON line, with `reference` set to `none` and `written`
+set to `false`, so `--batch` answers it with a report instead of
+`{"error":true}`.
 
 ## Automation flags
 

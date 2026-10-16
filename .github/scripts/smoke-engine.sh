@@ -129,6 +129,16 @@ if [ "$status" = "$SOLID" ]; then
     fail "an unreadable format should come back as an error"
 fi
 
+echo "== too few cues still answers in json"
+head -8 pristine.srt > two.srt
+run reference.srt two.srt --json
+if [ "$status" != "2" ]; then
+    fail "expected exit 2 for a file with two cues, got $status"
+fi
+if ! echo "$output" | grep -q '"reference":"none".*"written":false'; then
+    fail "expected a json line saying nothing was written"
+fi
+
 echo "== an existing backup is never overwritten"
 echo "the original" > guarded.srt.bak
 cp pristine.srt guarded.srt

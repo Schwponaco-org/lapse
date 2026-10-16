@@ -579,7 +579,7 @@ def finish(conn, video_path, srt_path, attempts, values):
         print("Already in sync, left it alone:", srt_path)
         values["offset_ms"] = 0
     elif not values.get("written"):
-        print("Nothing lined up, left it alone:", srt_path)
+        print("Left it alone, %s:" % (values.get("why") or "nothing lined up"), srt_path)
         status = "lowconf"
     elif verdict != "solid":
         # the engine wrote its guess beside the original rather than over it
