@@ -140,9 +140,15 @@ def save_engine(conn, options):
     conn.commit()
 
 
+def restorable():
+    return MIN_CONFIDENCE > 0 and not ENGINE.get("suffix")
+
+
 def engine_flags():
     flags = []
     for name, option in SWITCHES:
+        if option == "--no-backup" and restorable():
+            continue
         if ENGINE.get(name.lower()):
             flags.append(option)
     for name, option in VALUES:
@@ -476,6 +482,7 @@ def run_batch(conn, batch):
         try:
             while todo:
                 video, subtitle, attempts = todo[0]
+                had_backup = os.path.exists(subtitle + ".bak")
                 clock = threading.Timer(TIMEOUT, force, [child])
                 clock.start()
                 try:
@@ -497,7 +504,7 @@ def run_batch(conn, batch):
                 if not values or values.get("error"):
                     failed(conn, video, subtitle, attempts)
                 else:
-                    finish(conn, video, subtitle, attempts, values)
+                    finish(conn, video, subtitle, attempts, values, had_backup)
         finally:
             with engine_lock:
                 engine = None
@@ -561,7 +568,7 @@ def remember_tracks(conn, video_path):
     conn.commit()
 
 
-def finish(conn, video_path, srt_path, attempts, values):
+def finish(conn, video_path, srt_path, attempts, values, had_backup=True):
     print("%s: %s offset=%sms sigma=%.1f agree=%.2f reference=%s" % (
         os.path.basename(srt_path), values.get("verdict"), values.get("offset_ms"),
         values.get("sigma", 0), values.get("agreement", 0), values.get("reference")))
@@ -599,6 +606,10 @@ def finish(conn, video_path, srt_path, attempts, values):
             shutil.copy2(backup_path, srt_path)
             print("Confidence %.2f is under %.2f, put the original back: %s" % (confidence, MIN_CONFIDENCE, srt_path))
             status = "lowconf"
+
+    if ENGINE.get("no_backup") and restorable() and not had_backup and backup_path:
+        os.remove(backup_path)
+        backup_path = None
 
     save_result(conn, video_path, srt_path, backup_path, values, attempts, status)
 
