@@ -24,7 +24,6 @@ WORK=$(mktemp -d)
 cd "$WORK"
 
 SOLID=0
-REFUSED=2
 UNSURE=3
 
 timestamp() {
@@ -53,6 +52,20 @@ for i in $(seq 0 39); do
 done
 cp late.srt pristine.srt
 cp late.srt sidecar.srt
+
+cue=0
+for i in $(seq 0 39); do
+    start=$((5000 + i * 7000))
+    end=$((start + 3000))
+    by=$SHIFT
+    [ $i -ge 20 ] && by=$((SHIFT + 2500))
+    cue=$((cue + 1))
+    printf "%d\n%s --> %s\nline %d\n\n" "$cue" "$(timestamp $((start + by)))" "$(timestamp $((end + by)))" "$i" >> recut.srt
+    if [ $((i % 4)) = 1 ]; then
+        cue=$((cue + 1))
+        printf "%d\n%s --> %s\n- and another\n\n" "$cue" "$(timestamp $((start + by + 300)))" "$(timestamp $((end + by - 200)))" >> recut.srt
+    fi
+done
 
 echo "== a subtitle that is ${SHIFT}ms late"
 cp pristine.srt unsure.srt
@@ -97,14 +110,28 @@ fi
 echo "== --strict refuses instead of writing beside the original"
 cp pristine.srt strict.srt
 run reference.srt strict.srt --strict
-if [ "$status" != "$REFUSED" ]; then
-    fail "expected exit $REFUSED with --strict, got $status"
+if [ "$status" != "$UNSURE" ]; then
+    fail "expected exit $UNSURE with --strict, got $status"
 fi
 if [ -f strict.lapse-unsure.srt ] || [ -f strict.srt.bak ]; then
     fail "--strict wrote something anyway"
 fi
 if ! cmp -s strict.srt pristine.srt; then
     fail "--strict changed the original"
+fi
+
+echo "== two lines on screen at once do not cut the file in pieces"
+run reference.srt recut.srt split --json --dry-run --strict
+cues=$(echo "$output" | sed -n 's/.*"cues":\([0-9]*\).*/\1/p')
+splits=$(echo "$output" | sed -n 's/.*"splits":\[\([0-9,]*\)\].*/\1/p')
+if [ "$cues" != "50" ]; then
+    fail "expected 50 cues in the report, got '$cues'"
+fi
+if [ "$splits" != "25" ]; then
+    fail "expected one split at cue 25, got '$splits'"
+fi
+if ! echo "$output" | grep -q '"offsets":\[-4200,-6700\]'; then
+    fail "expected the two parts to move by -4200 and -6700"
 fi
 
 echo "== writing a sidecar and leaving the original alone"
