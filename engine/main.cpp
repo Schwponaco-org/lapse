@@ -864,10 +864,8 @@ int run(int argc, const char *argv[]) {
             card.why = because;
             return false;
         }
-        if (output_path == input_path) {
-            output_path = beside(input_path);
-            make_backup = false;
-        }
+        output_path = beside(output_path);
+        make_backup = false;
         card.why = because;
         card.output = output_path;
         return true;

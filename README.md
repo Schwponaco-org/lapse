@@ -180,7 +180,7 @@ Everything the CLI takes is available in the container. Switches are `0` or `1`,
 
 | Variable | Flag | What it does |
 |---|---|---|
-| `OUTPUT_SUFFIX` | `--output` | Write to `name<suffix>.srt` and never touch the original. `.synced` gives `movie.synced.srt` |
+| `OUTPUT_SUFFIX` | `--output` | Write to `name<suffix>.srt` and never touch the original. `.synced` gives `movie.synced.srt`, and a result it is not sure of `movie.synced.lapse-unsure.srt` |
 | `NO_BACKUP` | `--no-backup` | Do not leave a `.bak` beside the file that was overwritten |
 | `NO_SIDECAR` | `--no-sidecar` | Do not write a `.lapse-unsure` guess when the result is uncertain |
 | `NO_EMBEDDED` | `--no-embedded` | Ignore subtitle tracks inside the video when picking a reference |
@@ -335,6 +335,8 @@ Together they cover the four ways a caller may want the output handled:
 ```
 
 The flags may appear anywhere on the command line. An existing `.bak` is never overwritten, so the first backup stays the untouched original no matter how many times you run LAPSE on a file.
+
+A result short of `solid` is never written to the `--output` path itself. It goes beside it, so `--output out.srt` gives `out.lapse-unsure.srt` and never a guess named like the real thing, and the original gets no `.bak` for it.
 
 ### Batch mode
 

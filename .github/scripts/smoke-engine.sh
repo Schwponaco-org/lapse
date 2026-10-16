@@ -122,6 +122,19 @@ if [ "$(grep -m1 -- '-->' fixed.srt)" != "$(grep -m1 -- '-->' reference.srt)" ];
     fail "--output did not line up with the reference"
 fi
 
+echo "== an unsure answer with --output goes beside that path"
+cp pristine.srt aside.srt
+run reference.srt aside.srt --output aside.synced.srt
+if [ "$status" != "$UNSURE" ]; then
+    fail "expected exit $UNSURE, got $status"
+fi
+if [ -f aside.synced.srt ] || [ ! -f aside.synced.lapse-unsure.srt ]; then
+    fail "the guess was not put beside the --output path"
+fi
+if [ -f aside.srt.bak ] || ! cmp -s aside.srt pristine.srt; then
+    fail "the input was backed up or touched for a guess"
+fi
+
 echo "== a format the engine does not read"
 cp reference.srt unreadable.xyz
 run reference.srt unreadable.xyz
