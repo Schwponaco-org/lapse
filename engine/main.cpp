@@ -295,8 +295,8 @@ static void keep_spoken(std::vector<std::pair<int,int>>& spans, std::vector<floa
     std::vector<std::pair<int,int>> kept;
     std::vector<float> kept_weights;
     for (size_t i = 0; i < spans.size(); i++) {
-        auto near = std::lower_bound(words.begin(), words.end(), spans[i].first - 300);
-        if (near == words.end() || *near > spans[i].second + 300) continue;
+        auto heard = std::lower_bound(words.begin(), words.end(), spans[i].first - 300);
+        if (heard == words.end() || *heard > spans[i].second + 300) continue;
         kept.push_back(spans[i]);
         if (i < weights.size()) kept_weights.push_back(weights[i]);
     }
