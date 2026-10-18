@@ -196,6 +196,7 @@ Everything the CLI takes is available in the container. Switches are `0` or `1`,
 | `SNAP` | `--snap` | Milliseconds a cue start may be moved to land on a picture cut. Empty leaves it off |
 | `MIN_SHIFT` | `--min-shift` | Leave a subtitle alone when nothing in it would move by this many milliseconds. Empty only skips a result that changes nothing at all |
 | `ENCODING` | `--encoding` | Write every result as `utf8`, `utf8-bom`, `utf16le`, `utf16be` or `latin1`. Empty keeps whatever the file came in as |
+| `WHISPER` | `--whisper` | Path inside the container to a whisper.cpp model such as `ggml-base.en.bin`. Needs `whisper-cli` mounted in too, see `Listening for words` below |
 
 All of it is in the web interface as well, under Settings, and what you save there is used from the next scan onwards. `OUTPUT_SUFFIX` and `NO_BACKUP` are the two halves of the file output picker there:
 
@@ -309,6 +310,7 @@ By default LAPSE overwrites the subtitle file it was given and leaves a `.bak` n
 --encoding NAME     write the result as utf8, utf8-bom, utf16le, utf16be or latin1
 --from VIDEO        the subtitle fits this video, move it to the first one by comparing their sound
 --min-shift ms      leave the file alone when no cue would move by this much
+--whisper MODEL     only trust the stretches of speech whisper-cli hears words in
 ```
 
 A subtitle that is already right is not written again. When the answer would move nothing, the file is left as it is, with no `.bak` and the same modified time, and `unchanged` in the `--json` line says so. Listening to the film is only good to a few hundredths of a second though, so syncing a file that is already in sync can still nudge it by 30 or 40 milliseconds, and doing that over and over walks it about. `--min-shift 80` leaves it alone unless something would move by at least 80 milliseconds. A file that drifts, or a result written somewhere else with `--output`, is always written.
@@ -357,6 +359,18 @@ A subtitle that is right for one copy of a film is often wrong for another: the 
 ```
 
 Both films are listened to, and the speech of the old one is lined up against the speech of the new one with everything LAPSE does for a subtitle: one offset, a framerate stretch, parts cut out or put in. Each line of the subtitle then moves the way the speech around it moved. Both speech profiles are cached, so doing a second subtitle for the same pair is quick. On a test film played back 4.27% faster every line landed within 10 milliseconds, where syncing the same subtitle straight against the speech was 145 milliseconds out.
+
+### Listening for words
+
+Voice detection hears a voice. It does not know whether that voice is saying anything, so a song, a crowd or someone shouting over gunfire all count as speech, and in a film with a lot of that the answer stands out less than it should. `--whisper` runs the audio through [whisper.cpp](https://github.com/ggml-org/whisper.cpp) as well and keeps only the stretches of speech it heard words in:
+
+```bash
+./lapse video.mkv subtitles.srt --whisper ~/models/ggml-base.en.bin
+```
+
+LAPSE does not ship whisper.cpp. It runs `whisper-cli` from the `PATH`, or wherever `LAPSE_WHISPER_CLI` points, and the model is any ggml file from the whisper.cpp project, named the way they name them so LAPSE can tell which one it is. `ggml-base.en.bin` is plenty for English and the multilingual `ggml-base.bin` for anything else. The words come with timings to the hundredth from whisper's own alignment, and they are cached next to the speech profile, so only the first run on a film pays for the transcription. That is about two minutes for a two hour film on a recent laptop, and a lot more on a small server with no GPU.
+
+The timings still come from voice detection, which is sharper about where a line starts than whisper is, so this does not move a good answer. What it does is make a good answer stand out more when the soundtrack is busy. With music laid under the speech at the same level, sigma went from 18 to 19 and the worst cue landed a few milliseconds closer. It is off unless you ask for it, and when whisper-cli cannot be found or hears fewer than 50 words, LAPSE says so and carries on with all the speech.
 
 ### Snapping to picture cuts
 
