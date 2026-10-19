@@ -915,8 +915,8 @@ int run(int argc, const char *argv[]) {
         } else if (drifts) {
             choice = "drifting";
             ratio = snap_ratio(1.0 + drift);
-            auto [near, unused, near_sigma] = search_ratio(spans, ref_spans, ref_weights, ref_coverage, 1.0 + drift - 0.003, 1.0 + drift + 0.003);
-            if (near_sigma > best_offset(stretch(spans, ratio), ref_spans, ref_weights, ref_coverage).sigma + 1.0) ratio = near;
+            auto [searched, unused, searched_sigma] = search_ratio(spans, ref_spans, ref_weights, ref_coverage, 1.0 + drift - 0.003, 1.0 + drift + 0.003);
+            if (searched_sigma > best_offset(stretch(spans, ratio), ref_spans, ref_weights, ref_coverage).sigma + 1.0) ratio = searched;
         } else if (groups >= 2) {
             choice = "recut";
         } else {
