@@ -84,4 +84,5 @@ std::pair<double, double> robust_line(const std::vector<Chunk>& chunks);
 double snap_ratio(double ratio);
 double peak_sigma(const std::vector<double>& peak, int best_bucket, double fmax);
 std::vector<double> score_curve(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, int lo, int hi, int step);
+void chapter_hints(const std::vector<int>& marks);
 std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, float p, int base_offset, int window_ms = SPLIT_WINDOW_MS, int step_ms = SPLIT_COARSE_MS);

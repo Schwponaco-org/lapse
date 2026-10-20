@@ -35,4 +35,5 @@ AVCodecContext* open_audio_decoder(const AVFormatContext* pFormatContext, int au
 std::vector<std::pair<int, int>> embedded_spans(AVFormatContext* pFormatContext, int wanted = -1);
 std::vector<int> picture_cuts(const char* filename);
 bool audio_to_wav(const char* path, int stream_index, const std::string& wav);
+std::vector<int> chapter_marks(const AVFormatContext* fmt);
 std::vector<float> speech_profile(AVFormatContext* pFormatContext, AVCodecContext* dec_ctx, int audio_stream_index, int windows = 0, double* coverage = nullptr);
