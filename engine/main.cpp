@@ -21,6 +21,7 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <climits>
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
@@ -33,10 +34,11 @@
 #include "align.h"
 #include "write_subtitle.h"
 #include "log.h"
+#include "transcribe.h"
 
 // The formats the parsers and the writers both handle. Callers can ask for the
 // list with --formats so they know what is safe to hand us
-const char* subtitle_formats[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2", ".sup", ".sbv", ".idx", ".smi", ".sami", ".ttml", ".dfxp"};
+const char* subtitle_formats[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2", ".sup", ".sbv", ".idx", ".smi", ".sami", ".ttml", ".dfxp", ".stl", ".scc"};
 
 bool is_subtitle(const std::string& path) {
     return !subtitle_kind(path).empty();
@@ -96,6 +98,10 @@ void write_offsets(const std::string& in_path, const std::string& out_path, doub
         write_smi_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
     else if (kind == ".ttml" || kind == ".dfxp")
         write_ttml_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
+    else if (kind == ".stl")
+        write_stl_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
+    else if (kind == ".scc")
+        write_scc_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
 }
 
 static int nearest_cut(const std::vector<int>& cuts, int at) {
@@ -109,7 +115,8 @@ static int nearest_cut(const std::vector<int>& cuts, int at) {
 }
 
 static int snap_cues(const std::vector<std::pair<int,int>>& cues, const std::vector<int>& cuts,
-                     double slope, int window, std::vector<int>& offsets, std::vector<int>& mapping) {
+                     double slope, int window, std::vector<int>& offsets, std::vector<int>& mapping, std::vector<int>& ends) {
+    ends.clear();
     if (cues.empty() || cuts.empty() || window <= 0) return 0;
 
     std::vector<int> per_cue(cues.size(), 0);
@@ -118,7 +125,8 @@ static int snap_cues(const std::vector<std::pair<int,int>>& cues, const std::vec
         if (span >= 0 && span < (int)offsets.size()) per_cue[i] = offsets[span];
     }
 
-    int moved = 0;
+    std::vector<char> touched(cues.size(), 0);
+    bool starts_moved = false;
     for (size_t i = 0; i < cues.size(); i++) {
         if (cues[i].second <= cues[i].first) continue;
 
@@ -133,14 +141,42 @@ static int snap_cues(const std::vector<std::pair<int,int>>& cues, const std::vec
         if (start + by < 0 || start + by >= end) continue;
 
         per_cue[i] += by;
-        moved++;
+        touched[i] = 1;
+        starts_moved = true;
     }
 
-    if (moved == 0) return 0;
+    std::vector<int> begins;
+    for (size_t i = 0; i < cues.size(); i++)
+        if (cues[i].second > cues[i].first) begins.push_back((int)(cues[i].first * (1.0 + slope)) + per_cue[i]);
+    std::sort(begins.begin(), begins.end());
 
-    offsets = per_cue;
-    mapping.resize(cues.size());
-    for (size_t i = 0; i < mapping.size(); i++) mapping[i] = (int)i;
+    ends.assign(cues.size(), 0);
+    for (size_t i = 0; i < cues.size(); i++) {
+        if (cues[i].second <= cues[i].first) continue;
+
+        int start = (int)(cues[i].first * (1.0 + slope)) + per_cue[i];
+        int end   = (int)(cues[i].second * (1.0 + slope)) + per_cue[i];
+
+        int cut = nearest_cut(cuts, end);
+        if (cut < 0) continue;
+
+        int by = cut - end;
+        if (by == 0 || std::abs(by) > window || cut - start < 500) continue;
+        auto next = std::upper_bound(begins.begin(), begins.end(), end);
+        if (by > 0 && next != begins.end() && *next < cut) continue;
+
+        ends[i] = by;
+        touched[i] = 1;
+    }
+
+    int moved = (int)std::count(touched.begin(), touched.end(), 1);
+    if (moved == 0) ends.clear();
+
+    if (starts_moved) {
+        offsets = per_cue;
+        mapping.resize(cues.size());
+        for (size_t i = 0; i < mapping.size(); i++) mapping[i] = (int)i;
+    }
     return moved;
 }
 
@@ -167,15 +203,15 @@ static std::filesystem::path cache_dir() {
     return std::filesystem::path(".") / ".cache" / "lapse";
 }
 
-static std::filesystem::path cache_path(const std::string& video, int audio_track) {
+static std::filesystem::path cache_path(const std::string& video, int track, bool subtitles = false) {
     std::error_code ec;
     uintmax_t size = std::filesystem::file_size(video, ec);
     if (ec) return {};
     auto written = std::filesystem::last_write_time(video, ec);
     if (ec) return {};
 
-    std::string key = video + "|" + std::to_string((long long)size) + "|" + std::to_string((long long)written.time_since_epoch().count()) + "|" + std::to_string(audio_track);
-    key += silero_open() ? "|silero" : "|fvad";
+    std::string key = video + "|" + std::to_string((long long)size) + "|" + std::to_string((long long)written.time_since_epoch().count()) + "|" + std::to_string(track);
+    key += subtitles ? "|sub" : silero_open() ? "|silero" : "|fvad";
     unsigned long long hash = 1469598103934665603ULL;
     for (char c : key) {
         hash ^= (unsigned char)c;
@@ -191,7 +227,7 @@ static std::filesystem::path cache_path(const std::string& video, int audio_trac
     return dir / name;
 }
 
-static bool load_spans(const std::filesystem::path& path, std::vector<std::pair<int,int>>& spans, std::vector<float>& weights, double& coverage) {
+static bool load_spans(const std::filesystem::path& path, std::vector<std::pair<int,int>>& spans, std::vector<float>& weights, double& coverage, size_t least = 20) {
     std::ifstream in(path);
     if (!in) return false;
 
@@ -206,7 +242,7 @@ static bool load_spans(const std::filesystem::path& path, std::vector<std::pair<
         weights.push_back(weight);
     }
 
-    if (spans.size() < 20) {
+    if (spans.size() < least) {
         spans.clear();
         weights.clear();
         return false;
@@ -235,6 +271,40 @@ static void save_spans(const std::filesystem::path& path, const std::vector<std:
 
 
 static const double SURE_SIGMA = 8.0;
+static std::vector<int> heard_words(const std::string& video, int stream, const std::filesystem::path& cache, const std::string& model) {
+    std::filesystem::path saved = cache.empty() ? cache : std::filesystem::path(cache.string() + "." + std::filesystem::path(model).stem().string() + ".words");
+    std::vector<int> words;
+    std::ifstream in(saved);
+    int w;
+    while (in >> w) words.push_back(w);
+    if (!words.empty()) return words;
+
+    std::error_code ec;
+    std::string wav = (std::filesystem::temp_directory_path() / ("lapse-" + std::to_string(std::hash<std::string>()(video)) + ".wav")).string();
+    if (audio_to_wav(video.c_str(), stream, wav)) words = spoken_words(wav, model);
+    std::filesystem::remove(wav, ec);
+
+    if (!saved.empty() && !words.empty()) {
+        std::ofstream out(saved);
+        for (int at : words) out << at << '\n';
+    }
+    return words;
+}
+
+static void keep_spoken(std::vector<std::pair<int,int>>& spans, std::vector<float>& weights, const std::vector<int>& words) {
+    std::vector<std::pair<int,int>> kept;
+    std::vector<float> kept_weights;
+    for (size_t i = 0; i < spans.size(); i++) {
+        auto heard = std::lower_bound(words.begin(), words.end(), spans[i].first - 300);
+        if (heard == words.end() || *heard > spans[i].second + 300) continue;
+        kept.push_back(spans[i]);
+        if (i < weights.size()) kept_weights.push_back(weights[i]);
+    }
+    say() << "Whisper heard " << words.size() << " words, " << kept.size() << " of " << spans.size() << " stretches of speech had some\n";
+    spans = kept;
+    weights = kept_weights;
+}
+
 static double sure_sigma = SURE_SIGMA;
 static const double SOME_SIGMA = 6.0;
 static const int SNAP_WINDOW_MS = 120;
@@ -266,12 +336,6 @@ static bool worth_splitting(const std::vector<int>& offsets, int base) {
         high = std::max(high, o);
     }
     return high - low >= 120;
-}
-
-static std::vector<std::pair<int,int>> stretch(const std::vector<std::pair<int,int>>& spans, double ratio) {
-    std::vector<std::pair<int,int>> out;
-    for (auto& s : spans) out.push_back({(int)(s.first * ratio), (int)(s.second * ratio)});
-    return out;
 }
 
 static int agree_count(const std::vector<Chunk>& chunks, const std::vector<double>& expected) {
@@ -367,10 +431,12 @@ struct Report {
     int parts = 1;
     int snapped = 0;
     bool written = false;
+    bool unchanged = false;
     std::string verdict = "nothing";
     std::string why;
     std::string output;
     std::vector<int> splits;
+    std::vector<int> offsets;
 };
 
 static bool as_json = false;
@@ -390,11 +456,15 @@ static void report(const Report& r) {
     if (!as_json) {
         say() << "Done (" << r.mode << "): offset=" << r.offset << "ms";
         if (r.ratio != 1.0) say() << " ratio=" << r.ratio;
-        if (r.parts > 1) say() << " parts=" << r.parts;
+        if (r.parts > 1) {
+            say() << " parts=" << r.parts << " offsets=";
+            for (size_t i = 0; i < r.offsets.size(); i++) say() << (i ? "," : "") << r.offsets[i];
+        }
         if (r.snapped) say() << " snapped=" << r.snapped;
         say() << " sigma=" << r.sigma << " agree=" << r.agreement << " confidence=" << r.confidence;
         say() << " [" << r.verdict << "]";
         if (!r.written) say() << " NOT WRITTEN (" << r.why << ")";
+        else if (r.unchanged) say() << " -> already in sync, left alone";
         else say() << " -> " << r.output;
         say() << '\n';
         return;
@@ -414,21 +484,28 @@ static void report(const Report& r) {
               << ",\"ignored_cues\":" << r.ignored
               << ",\"parts\":" << r.parts
               << ",\"snapped\":" << r.snapped
-              << ",\"written\":" << (r.written ? "true" : "false");
+              << ",\"written\":" << (r.written ? "true" : "false")
+              << ",\"unchanged\":" << (r.unchanged ? "true" : "false");
     if (!r.why.empty()) std::cout << ",\"why\":\"" << escaped(r.why) << "\"";
     std::cout << ",\"output\":\"" << escaped(r.output) << "\"";
 
     std::cout << ",\"splits\":[";
     for (size_t i = 0; i < r.splits.size(); i++)
         std::cout << (i ? "," : "") << r.splits[i];
+    std::cout << "],\"offsets\":[";
+    for (size_t i = 0; i < r.offsets.size(); i++)
+        std::cout << (i ? "," : "") << r.offsets[i];
     std::cout << "]}\n";
 }
 
 void usage() {
-    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME]\n";
+    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME] [--from video] [--min-shift ms] [--whisper model]\n";
     std::cerr << "       --confidence N   how far the answer has to stand out before the original is overwritten (default " << sure_sigma << ")\n";
     std::cerr << "       --encoding NAME  write the result as utf8, utf8-bom, utf16le, utf16be or latin1 instead of whatever came in\n";
     std::cerr << "       --snap [ms]      pull a cue start onto the picture cut it lands next to, within ms (default " << SNAP_WINDOW_MS << ")\n";
+    std::cerr << "       --from video     the subtitle is in sync with this video, move it to the first one by their sound\n";
+    std::cerr << "       --min-shift ms   leave the file alone when nothing in it would move by this much\n";
+    std::cerr << "       --whisper model  only trust speech whisper-cli hears words in, model is a ggml file like ggml-base.en.bin\n";
     std::cerr << "       lapse --version\n";
     std::cerr << "       lapse --formats\n";
     std::cerr << "       lapse --vad\n";
@@ -444,6 +521,46 @@ struct Media {
         avformat_close_input(&file);
     }
 };
+
+static std::vector<std::pair<int,int>> speech_of(const std::string& path, int audio_track, bool use_cache) {
+    std::vector<std::pair<int,int>> spans;
+    std::vector<float> weights;
+    double coverage = 1.0;
+    std::filesystem::path cache = use_cache ? cache_path(path, audio_track) : std::filesystem::path{};
+    if (!cache.empty() && load_spans(cache, spans, weights, coverage)) return spans;
+
+    Media media;
+    media.file = open_file(path.c_str());
+    if (!media.file) return {};
+    int stream = find_audio_stream(media.file, audio_track);
+    media.audio = open_audio_decoder(media.file, stream);
+    if (!media.audio) return {};
+
+    std::tie(spans, weights) = reference_spans(speech_profile(media.file, media.audio, stream, 0, &coverage));
+    if (!cache.empty() && !spans.empty()) save_spans(cache, spans, weights, coverage);
+    return spans;
+}
+
+static std::vector<std::pair<int,int>> embedded_timings(AVFormatContext* file, const std::string& path, int sub_track, bool use_cache) {
+    bool any = false;
+    for (unsigned i = 0; i < file->nb_streams; i++)
+        if (file->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE) any = true;
+    if (!any) return {};
+
+    std::vector<std::pair<int,int>> spans;
+    std::vector<float> unused;
+    double whole = 1.0;
+    std::filesystem::path cache = use_cache ? cache_path(path, sub_track, true) : std::filesystem::path{};
+    if (!cache.empty() && load_spans(cache, spans, unused, whole, 0)) {
+        if (spans.empty()) say() << "The subtitle tracks inside were no use last time, going by the audio\n";
+        else say() << "Reusing the subtitle track we read last time (" << spans.size() << " cues)\n";
+        return spans;
+    }
+
+    spans = embedded_spans(file, sub_track);
+    if (!cache.empty()) save_spans(cache, spans, {}, 1.0);
+    return spans;
+}
 
 int run(int argc, const char *argv[]) {
     sure_sigma = SURE_SIGMA;
@@ -463,6 +580,9 @@ int run(int argc, const char *argv[]) {
     int audio_track = -1;
     int sub_track = -1;
     int snap_window = 0;
+    std::string from_video;
+    int min_shift = 1;
+    std::string whisper_model;
     double fps = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -541,6 +661,19 @@ int run(int argc, const char *argv[]) {
                 snap_window = (int)got;
                 i++;
             }
+        } else if (arg == "--from") {
+            if (i + 1 >= argc) { usage(); return -1; }
+            from_video = argv[++i];
+        } else if (arg == "--min-shift") {
+            double got;
+            if (i + 1 >= argc || !number(argv[++i], got) || got < 0 || got > 60000) {
+                std::cerr << "--min-shift wants a number of ms between 0 and 60000\n";
+                return -1;
+            }
+            min_shift = std::max(1, (int)got);
+        } else if (arg == "--whisper") {
+            if (i + 1 >= argc) { usage(); return -1; }
+            whisper_model = argv[++i];
         } else if (arg == "--force") {
             force = true;
         } else {
@@ -592,7 +725,6 @@ int run(int argc, const char *argv[]) {
     // No --output means carry on overwriting the file we were given
     if (output_path.empty()) output_path = input_path;
 
-    std::vector<int> reference_activity;
     std::vector<std::pair<int,int>> ref_spans;
     std::vector<float> ref_weights;
     double ref_coverage = 1.0;
@@ -628,6 +760,20 @@ int run(int argc, const char *argv[]) {
     timestamps = drop_junk_cues(timestamps, read_cue_text(input_path), &junk);
     if (junk) say() << "Ignoring " << junk << " cues that are not dialogue\n";
 
+    std::vector<std::pair<int,int>> cues = timestamps;
+    if (!from_video.empty()) {
+        if (is_subtitle(ref_path)) {
+            std::cerr << "--from wants the video the subtitle is synced to now, and a video to move it to\n";
+            return -1;
+        }
+        timestamps = speech_of(from_video, audio_track, use_cache);
+        if (timestamps.empty()) {
+            std::cerr << "No speech found in: " << from_video << '\n';
+            return 1;
+        }
+        say() << "Lining the speech in " << from_video << " up instead of the cues\n";
+    }
+
     auto [spans, mapping] = process_spans(timestamps, mode != "split", mode != "split");
     if (spans.empty()) {
         std::cerr << "No timestamps found in: " << input_path << '\n';
@@ -652,16 +798,14 @@ int run(int argc, const char *argv[]) {
     if (is_subtitle(ref_path)) {
         auto [rs, _] = process_spans(read_subtitle(ref_path));
         ref_spans = rs;
-        reference_activity = activity(ref_spans);
     } else {
         AVC = open_file(ref_path.c_str());
         if (!AVC) return 1;
 
 
         if (use_embedded) {
-            auto [rs, _] = process_spans(embedded_spans(AVC, sub_track));
+            auto [rs, _] = process_spans(embedded_timings(AVC, ref_path, sub_track, use_cache));
             ref_spans = rs;
-            reference_activity = activity(ref_spans);
         }
 
         cache = use_cache ? cache_path(ref_path, audio_track) : std::filesystem::path{};
@@ -673,7 +817,6 @@ int run(int argc, const char *argv[]) {
                 ref_coverage = 1.0;
             } else {
                 say() << "Reusing the speech we found last time (" << ref_spans.size() << " spans)\n";
-                reference_activity = activity(ref_spans);
             }
         }
 
@@ -695,10 +838,18 @@ int run(int argc, const char *argv[]) {
             ref_spans = rs;
             ref_weights = w;
 
-            reference_activity.reserve(profile.size());
-            for (float p : profile) reference_activity.push_back(p >= SPEECH_THRESHOLD ? 1 : 0);
-
             if (!cache.empty()) save_spans(cache, ref_spans, ref_weights, ref_coverage);
+        }
+    }
+
+    std::vector<int> words;
+    if (!whisper_model.empty() && !is_subtitle(ref_path) && !ref_weights.empty()) {
+        words = heard_words(ref_path, find_audio_stream(AVC, audio_track), cache, whisper_model);
+        if (words.size() < 50) {
+            say() << "Whisper heard " << words.size() << " words, too few to go on, using all the speech\n";
+            words.clear();
+        } else {
+            keep_spoken(ref_spans, ref_weights, words);
         }
     }
 
@@ -719,8 +870,11 @@ int run(int argc, const char *argv[]) {
     card.output = output_path;
     if (is_subtitle(ref_path)) card.reference = "subtitle";
     else if (ref_weights.empty()) card.reference = "embedded";
+    else if (!words.empty()) card.reference = "vad+whisper";
 
     align_setup(ref_spans, ref_weights);
+    chapter_hints(AVC ? chapter_marks(AVC) : std::vector<int>());
+    if (AVC && AVC->nb_chapters > 1) say() << "Reading " << AVC->nb_chapters << " chapters as places the film may have been cut\n";
 
     std::vector<Chunk> slices = chunk_offsets(spans, ref_spans, ref_weights, 8, ref_coverage);
 
@@ -733,11 +887,8 @@ int run(int argc, const char *argv[]) {
         ref_spans = rs2;
         ref_weights = w2;
 
-        reference_activity.clear();
-        reference_activity.reserve(profile.size());
-        for (float p : profile) reference_activity.push_back(p >= SPEECH_THRESHOLD ? 1 : 0);
-
         if (!cache.empty()) save_spans(cache, ref_spans, ref_weights, ref_coverage);
+        if (!words.empty()) keep_spoken(ref_spans, ref_weights, words);
         align_setup(ref_spans, ref_weights);
         slices = chunk_offsets(spans, ref_spans, ref_weights, 8, ref_coverage);
         card.coverage = ref_coverage;
@@ -783,10 +934,21 @@ int run(int argc, const char *argv[]) {
         return true;
     };
 
+    auto still = [&](const std::vector<int>& offsets, double slope) {
+        if (slope != 0.0 || output_path != input_path) return false;
+        for (int o : offsets)
+            if (std::abs(o) >= min_shift) return false;
+        return true;
+    };
+
     auto save = [&](const std::vector<int>& offs, const std::vector<int>& map, Verdict verdict, double slope = 0.0) {
         card.ratio = 1.0 + slope;
+        card.offsets.assign(1, offs[0]);
         for (size_t i = 1; i < offs.size(); i++)
-            if (offs[i] != offs[i - 1]) card.splits.push_back((int)i);
+            if (offs[i] != offs[i - 1]) {
+                card.splits.push_back((int)i);
+                card.offsets.push_back(offs[i]);
+            }
         card.parts = (int)card.splits.size() + 1;
 
         if (!settle(verdict)) { report(card); return 2; }
@@ -794,9 +956,22 @@ int run(int argc, const char *argv[]) {
 
         std::vector<int> offsets = offs;
         std::vector<int> mapping = map;
-        card.snapped = snap_cues(timestamps, cuts, slope, snap_window, offsets, mapping);
+        if (!from_video.empty()) {
+            offsets.assign(cues.size(), offs[0]);
+            for (size_t i = 0; i < cues.size(); i++) {
+                size_t k = std::upper_bound(timestamps.begin(), timestamps.end(), std::make_pair(cues[i].first, INT_MAX)) - timestamps.begin();
+                if (k == timestamps.size() || (k > 0 && cues[i].first - timestamps[k - 1].second < timestamps[k].first - cues[i].first)) k--;
+                offsets[i] = offs[map[k]];
+            }
+            mapping.resize(cues.size());
+            for (size_t i = 0; i < mapping.size(); i++) mapping[i] = (int)i;
+        }
+        std::vector<int> ends;
+        card.snapped = snap_cues(cues, cuts, slope, snap_window, offsets, mapping, ends);
+        end_moves(ends);
+        card.unchanged = ends.empty() && still(offsets, slope);
 
-        if (!dry_run) {
+        if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
             write_offsets(input_path, output_path, slope, offsets, mapping);
         }
@@ -806,17 +981,21 @@ int run(int argc, const char *argv[]) {
 
     auto save_ols = [&](double slope, double intercept, Verdict verdict) {
         card.ratio = 1.0 + slope;
-        card.offset = (int)(intercept * 1000.0);
+        card.offset = (int)std::lround(intercept * 1000.0);
+        card.offsets.assign(1, card.offset);
 
         if (!settle(verdict)) { report(card); return 2; }
         card.written = true;
 
         std::vector<int> offsets(1, (int)std::lround(intercept * 1000.0));
-        std::vector<int> mapping(timestamps.size(), 0);
-        card.snapped = snap_cues(timestamps, cuts, slope, snap_window, offsets, mapping);
+        std::vector<int> mapping(cues.size(), 0);
+        std::vector<int> ends;
+        card.snapped = snap_cues(cues, cuts, slope, snap_window, offsets, mapping, ends);
+        end_moves(ends);
+        card.unchanged = ends.empty() && still(offsets, slope);
 
         std::string kind = subtitle_kind(input_path);
-        if (!dry_run) {
+        if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
             if (card.snapped)
                 write_offsets(input_path, output_path, slope, offsets, mapping);
@@ -838,23 +1017,28 @@ int run(int argc, const char *argv[]) {
                 write_smi_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
             else if (kind == ".ttml" || kind == ".dfxp")
                 write_ttml_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
+            else if (kind == ".stl")
+                write_stl_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
+            else if (kind == ".scc")
+                write_scc_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
         }
         report(card);
         return (verdict != Verdict::Solid && !force) ? 3 : 0;
     };
 
     if (mode == "ols") {
-        // Try the framerates people actually ship first. Only when none of them fit do we go back to measuring the drift chunk by chunk, which is the one thing that can still catch a stretch that isnt a standard ratio
+        // Try the framerates people actually ship first. Only when none of them fit do we search the ratios in between, which is the one thing that can still catch a stretch that isnt a standard ratio
         auto [ratio, offset, confidence, sigma] = best_framerate(spans, ref_spans, ref_weights, ref_coverage);
         double slope = ratio - 1.0;
         double intercept = offset / 1000.0;
 
-        if (sigma < SOME_SIGMA) {
-            say() << "No framerate fit well, measuring the drift instead\n";
-            std::vector<int> input_activity = activity(spans);
-            auto [s, i] = fft_crosscorrelate(reference_activity, input_activity);
-            slope = s;
-            intercept = i;
+        if (sigma < SOME_SIGMA) say() << "No framerate fit well, searching the ratios in between\n";
+        auto [r, shift, found] = (sigma < SOME_SIGMA) ? search_ratio(spans, ref_spans, ref_weights, ref_coverage, 0.94, 1.06)
+                                                       : search_ratio(spans, ref_spans, ref_weights, ref_coverage, ratio - 0.003, ratio + 0.003);
+        if (found > sigma + 1.0) {
+            slope = r - 1.0;
+            intercept = shift / 1000.0;
+            sigma = found;
         }
 
         card.mode = "ols";
@@ -934,11 +1118,13 @@ int run(int argc, const char *argv[]) {
             return far;
         };
 
-        if (flat >= MIN_AGREEING && !look_far()) {
+        if (flat >= MIN_AGREEING && !(drifts && sloped >= flat + 2) && !look_far()) {
             choice = "shifted";
         } else if (drifts) {
             choice = "drifting";
             ratio = snap_ratio(1.0 + drift);
+            auto [searched, unused, searched_sigma] = search_ratio(spans, ref_spans, ref_weights, ref_coverage, 1.0 + drift - 0.003, 1.0 + drift + 0.003);
+            if (searched_sigma > best_offset(stretch(spans, ratio), ref_spans, ref_weights, ref_coverage).sigma + 1.0) ratio = searched;
         } else if (groups >= 2 || far) {
             choice = "recut";
         } else {
@@ -951,7 +1137,13 @@ int run(int argc, const char *argv[]) {
                 choice = "drifting";
                 ratio = r;
             } else {
-                choice = look_far() ? "recut" : "shifted";
+                if (look_far()) {
+                    choice = "recut";
+                } else {
+                    auto [r2, shift2, sigma3] = search_ratio(spans, ref_spans, ref_weights, ref_coverage, 0.94, 1.06);
+                    choice = (sigma3 >= sure_sigma && sigma3 > sigma + 2.0) ? "drifting" : "shifted";
+                    if (choice == "drifting") ratio = r2;
+                }
             }
         }
 

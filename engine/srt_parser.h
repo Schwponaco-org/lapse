@@ -26,6 +26,7 @@
 
 int parse_timestamp(const std::string& line, size_t from);
 std::string load_text(const std::string& path, Charset* was = nullptr);
+std::string load_bytes(const std::string& path);
 std::string trim(const std::string& s);
 
 std::vector<size_t> ass_commas(const std::string& line);
@@ -51,6 +52,21 @@ std::vector<std::pair<int,int>> read_sub(const char* filename);
 std::vector<std::pair<int,int>> read_sup(const char* filename);
 std::vector<std::pair<int,int>> read_sbv(const char* filename);
 bool sbv_time_line(const std::string& line);
+bool ebu_stl(const std::string& data);
+int stl_fps(const std::string& data);
+int stl_ms(const unsigned char* tc, int fps);
+int stl_zero(const std::string& data, int fps);
+std::vector<std::pair<int,int>> read_stl(const char* filename);
+
+struct SccLine {
+    size_t at = 0, len = 0;
+    int ms = 0;
+    char sep = ':';
+    bool show = false, hide = false, load = false;
+    std::string text;
+};
+std::vector<SccLine> scc_lines(const std::string& text);
+std::vector<std::pair<int,int>> read_scc(const char* filename);
 std::vector<std::pair<int,int>> read_idx(const char* filename);
 bool idx_time_line(const std::string& line, size_t& val_from, size_t& val_len);
 int idx_time_ms(const std::string& v);
@@ -74,5 +90,4 @@ const int MAX_TIME_MS = 24 * 3600 * 1000;
 const int MAX_CUES = 100000;
 const size_t MAX_SUBTITLE_BYTES = 64u * 1024 * 1024;
 
-std::vector<int> activity(const std::vector<std::pair<int, int>>& spans);
 std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(const std::vector<float>& probability);

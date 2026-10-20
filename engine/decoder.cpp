@@ -320,7 +320,16 @@ static std::vector<int> shot_changes(const std::vector<int>& keys) {
         if (std::abs(gap - middle) <= 100) even++;
     if (even * 2 > (int)gaps.size()) return {};
 
-    return keys;
+    int longest = gaps.back();
+    int capped = 0;
+    for (int gap : gaps)
+        if (gap >= longest - 80) capped++;
+    if (capped < 3) return keys;
+
+    std::vector<int> cuts(1, keys[0]);
+    for (size_t i = 1; i < keys.size(); i++)
+        if (keys[i] - keys[i - 1] < longest - 80) cuts.push_back(keys[i]);
+    return cuts;
 }
 
 std::vector<int> picture_cuts(const char* filename) {
@@ -341,7 +350,7 @@ std::vector<int> picture_cuts(const char* filename) {
     }
 
     for (int i = 0; i < (int)fmt->nb_streams; i++)
-        fmt->streams[i]->discard = (i == video) ? AVDISCARD_NONKEY : AVDISCARD_ALL;
+        fmt->streams[i]->discard = (i == video) ? AVDISCARD_DEFAULT : AVDISCARD_ALL;
 
     AVRational millis = {1, 1000};
     AVRational tb = fmt->streams[video]->time_base;
@@ -368,6 +377,17 @@ std::vector<int> picture_cuts(const char* filename) {
     std::vector<int> cuts = shot_changes(keys);
     say() << "Read " << keys.size() << " keyframes, " << cuts.size() << " of them look like picture cuts\n";
     return cuts;
+}
+
+std::vector<int> chapter_marks(const AVFormatContext* fmt) {
+    std::vector<int> marks;
+    int offset = container_start_ms(fmt);
+    for (unsigned i = 0; i < fmt->nb_chapters; i++) {
+        int at = (int)av_rescale_q(fmt->chapters[i]->start, fmt->chapters[i]->time_base, AVRational{1, 1000}) - offset;
+        if (at > 0) marks.push_back(at);
+    }
+    std::sort(marks.begin(), marks.end());
+    return marks;
 }
 
 static std::string stamp(int ms) {
@@ -748,6 +768,23 @@ static std::vector<int16_t> decode_range(const std::string& path, int stream_ind
     avcodec_free_context(&dec);
     avformat_close_input(&fmt);
     return pcm;
+}
+
+bool audio_to_wav(const char* path, int stream_index, const std::string& wav) {
+    std::vector<int16_t> pcm = decode_range(path, stream_index, 1, -1, -1, -1, 0, MAX_TIME_MS);
+    std::ofstream out(wav, std::ios::binary);
+    if (pcm.empty() || !out) return false;
+
+    auto put = [&](uint32_t v, int bytes) {
+        for (int i = 0; i < bytes; i++) out.put((char)(v >> (8 * i)));
+    };
+    uint32_t data = (uint32_t)(pcm.size() * 2);
+    out.write("RIFF", 4); put(36 + data, 4);
+    out.write("WAVEfmt ", 8); put(16, 4); put(1, 2); put(1, 2);
+    put(RATE, 4); put(RATE * 2, 4); put(2, 2); put(16, 2);
+    out.write("data", 4); put(data, 4);
+    out.write((const char*)pcm.data(), data);
+    return (bool)out;
 }
 
 std::vector<float> speech_profile(AVFormatContext* fmt, AVCodecContext* dec_ctx, int audio_stream_index, int windows, double* coverage) {

@@ -30,6 +30,7 @@ struct Shift {
     double intercept_s = 0;
     std::vector<int> offsets;
     std::vector<int> mapping;
+    std::vector<int> ends;
 
     int apply(int ms, int cue) const {
         int stretched = (int)std::lround(ms * (1.0 + slope) + intercept_s * 1000.0);
@@ -42,6 +43,7 @@ struct Shift {
 
     std::pair<int,int> both(int start, int end, int cue) const {
         int a = apply(start, cue), b = apply(end, cue);
+        if (cue >= 0 && cue < (int)ends.size()) b += ends[cue];
         if (a < 0) {
             b -= a;
             a = 0;
@@ -49,6 +51,10 @@ struct Shift {
         return {a, b};
     }
 };
+
+static std::vector<int> moved_ends;
+
+void end_moves(const std::vector<int>& by) { moved_ends = by; }
 
 static Charset came_as = Charset::Legacy;
 static Charset asked_for = Charset::Legacy;
@@ -338,11 +344,17 @@ static void write_sub_lines(const char* input_path, const char* output_path, con
     save_file(output_path, out);
 }
 
+static void save_bytes(const char* output_path, const std::string& data) {
+    std::string temp_path = std::string(output_path) + ".tmp";
+    std::ofstream out(temp_path, std::ios::binary);
+    if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
+    out.write(data.data(), (std::streamsize)data.size());
+    out.close();
+    std::filesystem::rename(temp_path, output_path);
+}
+
 static void write_sup(const char* input_path, const char* output_path, const Shift& shift) {
-    std::ifstream in(input_path, std::ios::binary);
-    if (!in) throw std::runtime_error("Cannot open subtitle: " + std::string(input_path));
-    std::string data((std::istreambuf_iterator<char>(in)), {});
-    in.close();
+    std::string data = load_bytes(input_path);
 
     unsigned char* b = (unsigned char*)&data[0];
     size_t n = data.size();
@@ -371,12 +383,33 @@ static void write_sup(const char* input_path, const char* output_path, const Shi
         pos = payload + size;
     }
 
-    std::string temp_path = std::string(output_path) + ".tmp";
-    std::ofstream out(temp_path, std::ios::binary);
-    if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
-    out.write(data.data(), (std::streamsize)data.size());
-    out.close();
-    std::filesystem::rename(temp_path, output_path);
+    save_bytes(output_path, data);
+}
+
+static void put_tc(unsigned char* tc, int ms, int fps) {
+    int frames = (int)std::lround(std::max(ms, 0) * fps / 1000.0);
+    tc[3] = frames % fps;
+    tc[2] = frames / fps % 60;
+    tc[1] = frames / fps / 60 % 60;
+    tc[0] = frames / fps / 3600;
+}
+
+static void write_stl(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string data = load_bytes(input_path);
+    if (!ebu_stl(data)) throw std::runtime_error("Not an EBU STL file: " + std::string(input_path));
+
+    int fps = stl_fps(data), zero = stl_zero(data, fps), last = -1, cue = -1;
+    for (size_t at = 1024; at + 128 <= data.size(); at += 128) {
+        unsigned char* b = (unsigned char*)&data[at];
+        int sn = b[1] | (b[2] << 8);
+        if (sn != last && !b[15]) cue++;
+        last = sn;
+
+        auto [a, e] = shift.both(stl_ms(b + 5, fps) - zero, stl_ms(b + 9, fps) - zero, cue);
+        put_tc(b + 5, a + zero, fps);
+        put_tc(b + 9, e + zero, fps);
+    }
+    save_bytes(output_path, data);
 }
 
 static std::string ms_to_idx_ts(int ms) {
@@ -501,6 +534,37 @@ static void write_ttml(const char* input_path, const char* output_path, const Sh
     save_file(output_path, out);
 }
 
+static std::string scc_tc(int ms, char sep) {
+    if (ms < 0) ms = 0;
+    int s = ms / 1000;
+    int f = std::min(29, (ms % 1000 + 16) / 33);
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d%c%02d", s / 3600, s / 60 % 60, s % 60, sep, f);
+    return buf;
+}
+
+static void write_scc(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string text = load_file(input_path);
+    std::vector<SccLine> lines = scc_lines(text);
+    int shows = 0;
+    for (auto& l : lines) shows += l.show;
+
+    std::string out;
+    size_t written = 0;
+    int cue = -1;
+    for (auto& l : lines) {
+        if (l.show) cue++;
+        int belongs = l.load ? std::min(cue + 1, shows - 1) : cue;
+        int at = shift.apply(l.ms, belongs);
+        if (l.hide && !l.load && cue >= 0 && cue < (int)shift.ends.size()) at += shift.ends[cue];
+        out += text.substr(written, l.at - written);
+        out += scc_tc(at, l.sep);
+        written = l.at + l.len;
+    }
+    out += text.substr(written);
+    save_file(output_path, out);
+}
+
 static Shift one_line(double slope, double intercept_s) {
     Shift shift;
     shift.slope = slope;
@@ -513,6 +577,7 @@ static Shift per_cue(double slope, const std::vector<int>& offsets, const std::v
     shift.slope = slope;
     shift.offsets = offsets;
     shift.mapping = mapping;
+    shift.ends = moved_ends;
     return shift;
 }
 
@@ -552,6 +617,14 @@ void write_ttml_OLS(const char* input_path, const char* output_path, double slop
     write_ttml(input_path, output_path, one_line(slope, intercept_s));
 }
 
+void write_stl_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_stl(input_path, output_path, one_line(slope, intercept_s));
+}
+
+void write_scc_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
+    write_scc(input_path, output_path, one_line(slope, intercept_s));
+}
+
 void write_srt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_cues(input_path, output_path, ',', per_cue(slope, offsets, mapping));
 }
@@ -586,4 +659,12 @@ void write_smi_split(const char* input_path, const char* output_path, double slo
 
 void write_ttml_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     write_ttml(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_stl_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_stl(input_path, output_path, per_cue(slope, offsets, mapping));
+}
+
+void write_scc_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
+    write_scc(input_path, output_path, per_cue(slope, offsets, mapping));
 }

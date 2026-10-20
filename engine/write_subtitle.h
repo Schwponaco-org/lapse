@@ -27,6 +27,7 @@
 void backup_file(const char* path);
 void force_output_charset(Charset how);
 void keep_output_charset();
+void end_moves(const std::vector<int>& by);
 void write_srt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_ass_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_vtt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
@@ -36,6 +37,8 @@ void write_sbv_OLS(const char* input_path, const char* output_path, double slope
 void write_idx_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_smi_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_ttml_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
+void write_stl_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
+void write_scc_OLS(const char* input_path, const char* output_path, double slope, double intercept_s);
 void write_srt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
 void write_ass_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
 void write_vtt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
@@ -45,3 +48,5 @@ void write_sbv_split(const char* input_path, const char* output_path, double slo
 void write_idx_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
 void write_smi_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
 void write_ttml_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
+void write_stl_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);
+void write_scc_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping);

@@ -25,6 +25,10 @@ static const char* close_bracket[] = {"]", ")", "\xef\xbc\x89", "\xe3\x80\x91", 
 // nothing here is ever spoken out loud
 static const char* note_marks[] = {"\xe2\x99\xaa", "\xe2\x99\xab", "\xe2\x99\xac", "\xe2\x99\xa9", "#", "*", "~"};
 
+static const char* credit_marks[] = {"www.", "http", ".com", ".org", ".net", "subtitle", "synced by", "sync by",
+                                     "corrected by", "ripped by", "encoded by", "translated by", "opensubtitles",
+                                     "addic7ed", "subscene", "podnapisi", "advertise your", "tekstet af", "oversat af"};
+
 static bool starts_with(const std::string& s, const char* what) {
     return s.compare(0, strlen(what), what) == 0;
 }
@@ -89,8 +93,16 @@ static bool junk_line(const std::string& raw) {
     return false;
 }
 
+static bool credit(const std::string& text) {
+    std::string low;
+    for (char c : text) low += (char)tolower((unsigned char)c);
+    for (const char* m : credit_marks)
+        if (low.find(m) != std::string::npos) return true;
+    return false;
+}
+
 bool is_junk_cue(const std::string& text) {
-    if (trim(text).empty()) return true;
+    if (trim(text).empty() || credit(text)) return true;
 
     std::string line;
     bool any_real = false;
@@ -260,6 +272,40 @@ static std::vector<std::string> ttml_cue_text(const std::string& path) {
     return out;
 }
 
+static std::vector<std::string> stl_cue_text(const std::string& path) {
+    std::string data = load_bytes(path);
+    std::vector<std::string> out;
+    int last = -1;
+    for (size_t at = 1024; ebu_stl(data) && at + 128 <= data.size(); at += 128) {
+        const unsigned char* b = (const unsigned char*)data.data() + at;
+        int sn = b[1] | (b[2] << 8);
+        if (b[15]) {
+            last = sn;
+            continue;
+        }
+        if (sn != last) out.push_back("");
+        last = sn;
+        for (int i = 16; i < 128; i++) {
+            if (b[i] == 0x8a) out.back() += '\n';
+            else if (b[i] >= 0x20 && b[i] < 0x7f) out.back() += (char)b[i];
+        }
+    }
+    return out;
+}
+
+static std::vector<std::string> scc_cue_text(const std::string& path) {
+    std::vector<std::string> out;
+    std::string pending;
+    for (auto& l : scc_lines(load_text(path))) {
+        if (l.load) pending += l.text + "\n";
+        if (l.show) {
+            out.push_back(pending + l.text);
+            pending.clear();
+        }
+    }
+    return out;
+}
+
 std::vector<std::string> read_cue_text(const std::string& path) {
     std::string kind = subtitle_kind(path);
     if (kind == ".sup" || kind == ".idx") return {};
@@ -267,6 +313,8 @@ std::vector<std::string> read_cue_text(const std::string& path) {
     if (kind == ".sub" || kind == ".mpl2") return sub_cue_text(path);
     if (kind == ".sbv") return sbv_cue_text(path);
     if (kind == ".ttml" || kind == ".dfxp") return ttml_cue_text(path);
+    if (kind == ".stl") return stl_cue_text(path);
+    if (kind == ".scc") return scc_cue_text(path);
     return srt_cue_text(path);
 }
 

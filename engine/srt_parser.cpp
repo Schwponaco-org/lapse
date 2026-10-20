@@ -44,6 +44,12 @@ std::string load_text(const std::string& path, Charset* was) {
     return decode(raw, how);
 }
 
+std::string load_bytes(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("Cannot open subtitle: " + path);
+    return std::string((std::istreambuf_iterator<char>(in)), {});
+}
+
 std::string trim(const std::string& s) {
     size_t a = s.find_first_not_of(" \t\r\n");
     if (a == std::string::npos) return "";
@@ -198,7 +204,7 @@ static bool worth_reading(const std::string& path) {
 
 std::string subtitle_kind(const std::string& path) {
     static const char* known[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2",
-                                  ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp"};
+                                  ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp", ".stl", ".scc"};
     std::string ext = std::filesystem::path(path).extension().string();
     for (char& c : ext) c = (char)tolower((unsigned char)c);
     if (ext == ".sami") return ".smi";
@@ -233,6 +239,10 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
         return read_smi(path.c_str());
     if (kind == ".ttml" || kind == ".dfxp")
         return read_ttml(path.c_str());
+    if (kind == ".stl")
+        return read_stl(path.c_str());
+    if (kind == ".scc")
+        return read_scc(path.c_str());
     throw std::runtime_error("Unsupported subtitle format: " + path);
 }
 
@@ -526,9 +536,7 @@ std::vector<std::pair<int,int>> read_sub(const char* filename) {
 }
 
 std::vector<std::pair<int,int>> read_sup(const char* filename) {
-    std::ifstream in(filename, std::ios::binary);
-    if (!in) throw std::runtime_error("Cannot open subtitle: " + std::string(filename));
-    std::string data((std::istreambuf_iterator<char>(in)), {});
+    std::string data = load_bytes(filename);
     const unsigned char* b = (const unsigned char*)data.data();
     size_t n = data.size();
 
@@ -558,6 +566,113 @@ std::vector<std::pair<int,int>> read_sup(const char* filename) {
         }
         int start = marks[i].first;
         int end = (i + 1 < marks.size()) ? marks[i + 1].first : start + 2000;
+        if (end <= start) end = start + 2000;
+        if (end - start > MAX_CUE_MS) end = start + MAX_CUE_MS;
+        timestamps.push_back({start, end});
+    }
+    return timestamps;
+}
+
+bool ebu_stl(const std::string& data) {
+    return data.size() >= 1024 && data.compare(3, 3, "STL") == 0 && data.compare(8, 3, ".01") == 0;
+}
+
+int stl_fps(const std::string& data) {
+    return data.compare(6, 2, "30") == 0 ? 30 : 25;
+}
+
+int stl_ms(const unsigned char* tc, int fps) {
+    return ((tc[0] * 60 + tc[1]) * 60 + tc[2]) * 1000 + tc[3] * 1000 / fps;
+}
+
+int stl_zero(const std::string& data, int fps) {
+    int h, m, s, f;
+    if (sscanf(data.substr(256, 8).c_str(), "%2d%2d%2d%2d", &h, &m, &s, &f) != 4) return 0;
+    int zero = ((h * 60 + m) * 60 + s) * 1000 + f * 1000 / fps;
+    if (data.size() >= 1024 + 128 && stl_ms((const unsigned char*)data.data() + 1024 + 5, fps) < zero) return 0;
+    return zero;
+}
+
+std::vector<std::pair<int,int>> read_stl(const char* filename) {
+    std::string data = load_bytes(filename);
+    if (!ebu_stl(data)) throw std::runtime_error("Not an EBU STL file: " + std::string(filename));
+
+    int fps = stl_fps(data), zero = stl_zero(data, fps), last = -1;
+    std::vector<std::pair<int,int>> timestamps;
+    for (size_t at = 1024; at + 128 <= data.size(); at += 128) {
+        const unsigned char* b = (const unsigned char*)data.data() + at;
+        int sn = b[1] | (b[2] << 8);
+        if (sn == last || b[15]) {
+            last = sn;
+            continue;
+        }
+        last = sn;
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+        timestamps.push_back({stl_ms(b + 5, fps) - zero, stl_ms(b + 9, fps) - zero});
+    }
+    return timestamps;
+}
+
+std::vector<SccLine> scc_lines(const std::string& text) {
+    std::vector<SccLine> lines;
+    bool popon = true;
+    size_t pos = 0;
+
+    while (pos < text.size()) {
+        size_t end = text.find('\n', pos);
+        if (end == std::string::npos) end = text.size();
+        std::string line = text.substr(pos, end - pos);
+
+        int h, m, s, f;
+        char sep;
+        if (sscanf(line.c_str(), "%d:%d:%d%c%d", &h, &m, &s, &sep, &f) == 5 && (sep == ':' || sep == ';')) {
+            SccLine got;
+            got.at = pos;
+            got.len = std::min(line.find_first_not_of("0123456789:;"), line.size());
+            got.ms = (h * 3600 + m * 60 + s) * 1000 + f * 33;
+            got.sep = sep;
+
+            std::istringstream words(line.substr(std::min(got.len, line.size())));
+            std::string word;
+            while (words >> word) {
+                unsigned v = (unsigned)strtoul(word.c_str(), nullptr, 16) & 0x7f7f;
+                unsigned code = v & 0xf7ff;
+                if (code == 0x142f) got.show = true;
+                else if (code == 0x142c) got.hide = true;
+                else if (code == 0x1420) popon = true;
+                else if (code == 0x1425 || code == 0x1426 || code == 0x1427 || code == 0x1429) popon = false;
+                else if ((v >> 8) >= 0x20) {
+                    got.text += (char)(v >> 8);
+                    if ((v & 0xff) >= 0x20) got.text += (char)(v & 0xff);
+                }
+            }
+            if (!popon && !got.text.empty()) got.show = true;
+            got.load = popon && !got.show && !got.text.empty();
+            if (got.show) got.hide = false;
+            lines.push_back(got);
+        }
+        pos = end + 1;
+    }
+    return lines;
+}
+
+std::vector<std::pair<int,int>> read_scc(const char* filename) {
+    std::vector<SccLine> lines = scc_lines(load_text(filename));
+    std::vector<std::pair<int,int>> timestamps;
+
+    for (size_t i = 0; i < lines.size(); i++) {
+        if (!lines[i].show) continue;
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+        int start = lines[i].ms;
+        int end = start + 2000;
+        for (size_t j = i + 1; j < lines.size(); j++)
+            if (lines[j].show || lines[j].hide) { end = lines[j].ms; break; }
         if (end <= start) end = start + 2000;
         if (end - start > MAX_CUE_MS) end = start + MAX_CUE_MS;
         timestamps.push_back({start, end});
@@ -941,24 +1056,6 @@ std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const
 }
 
 
-
-// Build some sort of activity profile that checks every 10ms for dialogue
-std::vector<int> activity(const std::vector<std::pair<int, int>>& spans) {
-    if (spans.empty()) return {};
-    std::vector<int> activity_profile = {};
-    int j = 0;
-    for (int i = 0; i <= spans.back().second; i += 10) {
-        while (j < (int)spans.size() && i > spans[j].second) {
-            j++;
-        }
-        if (j < (int)spans.size() && i >= spans[j].first && i <= spans[j].second) {
-            activity_profile.push_back(1);
-        } else {
-            activity_profile.push_back(0);
-        }
-    }
-    return activity_profile;
-}
 
 // Turns the vad output back into spans. One entry is one 10ms frame so the index has to be scaled before anything compares this to subtitle timestamps
 std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(const std::vector<float>& probability) {
