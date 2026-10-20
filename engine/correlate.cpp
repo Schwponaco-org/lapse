@@ -22,7 +22,7 @@
 Lock best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::vector<std::pair<int, int>>& reference_spans, const std::vector<float>& reference_weights, double coverage, int max_offset) {
 
     if (align_ready() && max_offset <= align_reach() && !read_srt.empty()) {
-        std::vector<Hit> tops = align_peaks(read_srt, 10);
+        std::vector<Hit> tops = align_peaks(read_srt, 10, max_offset);
 
 
         Hit stay;
@@ -189,7 +189,7 @@ std::tuple<double, int, double> search_ratio(const std::vector<std::pair<int, in
     auto scan = [&](double from, double to, double step) {
         double top = -1;
         for (double r = from; r <= to; r += step) {
-            std::vector<Hit> hits = align_peaks(stretch(read_srt, r), 1);
+            std::vector<Hit> hits = align_peaks(stretch(read_srt, r), 1, MAX_OFFSET_MS);
             if (!hits.empty() && hits[0].z > top) {
                 top = hits[0].z;
                 best = r;
@@ -403,7 +403,8 @@ double snap_ratio(double ratio) {
 // offset we keep the whole score for every offset in the window. Sampling it
 // every 10ms rather than every millisecond is what makes split mode fit in
 //memory the old per millisecond version needed gigabytes for a film
-std::vector<double> score_curve(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, int lo, int hi, int step) {
+std::vector<double> score_curve(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, const std::vector<int>& grid) {
+    int lo = grid.front(), hi = grid.back();
     std::vector<std::pair<int, float>> slope_changes;
     std::vector<double> curve;
     bool weighted = reference_weights.size() == reference_spans.size();
@@ -444,13 +445,13 @@ std::vector<double> score_curve(const std::pair<int,int>& span, const std::vecto
 
     std::sort(slope_changes.begin(), slope_changes.end());
 
-    curve.reserve((hi - lo) / step + 1);
+    curve.reserve(grid.size());
     double fvalue = 0;
     double current_slope = 0;
     int sig_last = slope_changes.empty() ? lo : slope_changes[0].first;
     size_t j = 0;
 
-    for (int offset = lo; offset <= hi; offset += step) {
+    for (int offset : grid) {
         while (j < slope_changes.size() && slope_changes[j].first <= offset) {
             fvalue += current_slope * (slope_changes[j].first - sig_last);
             sig_last = slope_changes[j].first;
@@ -506,14 +507,17 @@ static bool hinted(int from, int to) {
 static void settle_boundaries(std::vector<int>& offsets, const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights) {
     const int REACH = 60;
     int n = (int)offsets.size();
+    int last = 0;
 
     for (int i = 1; i < n; i++) {
         if (offsets[i] == offsets[i - 1]) continue;
 
         int before = offsets[i - 1];
         int after = offsets[i];
-        int from = std::max(1, i - REACH);
-        int to = std::min(n - 1, i + REACH);
+        int next = i + 1;
+        while (next < n && offsets[next] == offsets[next - 1]) next++;
+        int from = std::max({1, i - REACH, last + 1});
+        int to = std::min({n - 1, i + REACH, next - 1});
 
         // walking the boundary right moves one cue from the after side to the before side, so the running total only changes by that one cue
         double running = 0;
@@ -553,33 +557,43 @@ static void settle_boundaries(std::vector<int>& offsets, const std::vector<std::
 
         for (int k = std::min(at, i); k < std::max(at, i); k++)
             offsets[k] = (k < at) ? before : after;
+        last = at;
         i = std::max(at, i);
     }
 }
 
 std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, float p, int base_offset, int window_ms, int step_ms) {
 
-    int lo = base_offset - window_ms;
-    int hi = base_offset + window_ms;
+    std::vector<int> grid;
+    for (int x = base_offset - window_ms; x <= base_offset + window_ms; x += step_ms) grid.push_back(x);
 
-    std::vector<double> t_prev = score_curve(read_srt[0], reference_spans, reference_weights, lo, hi, step_ms);
+    if (window_ms >= SPLIT_WINDOW_MS)
+        for (auto& c : chunk_offsets(read_srt, reference_spans, reference_weights, 16, 1.0, CONCAT_SEARCH_MS))
+            if (std::abs(c.offset - base_offset) > window_ms)
+                for (int x = (int)c.offset - REFINE_WINDOW_MS; x <= c.offset + REFINE_WINDOW_MS; x += step_ms) grid.push_back(x);
+    std::sort(grid.begin(), grid.end());
+    grid.erase(std::unique(grid.begin(), grid.end()), grid.end());
+
+    std::vector<double> t_prev = score_curve(read_srt[0], reference_spans, reference_weights, grid);
     std::vector<std::vector<uint16_t>> all_to;
 
     for (int n = 1; n < (int)read_srt.size(); n++) {
         if (n % 64 == 0) progress("Looking for cuts", n, (int)read_srt.size());
-        std::vector<double> scores = score_curve(read_srt[n], reference_spans, reference_weights, lo, hi, step_ms);
+        std::vector<double> scores = score_curve(read_srt[n], reference_spans, reference_weights, grid);
         std::vector<double> t_new(scores.size(), 0);
         std::vector<uint16_t> to(scores.size(), 0);
 
 
-        int gap = (read_srt[n].first - read_srt[n-1].second) / step_ms;
+        int gap = read_srt[n].first - read_srt[n-1].second;
         float cost = hinted(read_srt[n - 1].second + base_offset, read_srt[n].first + base_offset) ? p / 2 : p;
         double s_max = -std::numeric_limits<double>::infinity();
         int s_max_at = 0;
         int reached = -1;
+        int allowed = -1;
+        int anywhere = (int)(std::max_element(t_prev.begin(), t_prev.end()) - t_prev.begin());
 
         for (int sigma = 0; sigma < (int)scores.size(); sigma++) {
-            int allowed = std::min(sigma + gap, (int)t_prev.size() - 1);
+            while (allowed + 1 < (int)grid.size() && grid[allowed + 1] <= grid[sigma] + gap) allowed++;
             while (reached < allowed) {
                 reached++;
                 if (t_prev[reached] > s_max) {
@@ -599,6 +613,10 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
                 t_new[sigma] = scores[sigma] + s_max - cost;
                 to[sigma] = s_max_at;
             }
+            if (t_prev[anywhere] - 2 * p > t_new[sigma] - scores[sigma]) {
+                t_new[sigma] = scores[sigma] + t_prev[anywhere] - 2 * p;
+                to[sigma] = anywhere;
+            }
         }
         all_to.push_back(to);
         t_prev.swap(t_new);
@@ -612,11 +630,11 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
     }
 
     std::vector<int> offsets(read_srt.size());
-    offsets[read_srt.size() - 1] = lo + sigma_best * step_ms;
+    offsets[read_srt.size() - 1] = grid[sigma_best];
 
     for (int n = all_to.size() - 1; n >= 0; n--) {
         sigma_best = all_to[n][sigma_best];
-        offsets[n] = lo + sigma_best * step_ms;
+        offsets[n] = grid[sigma_best];
     }
 
     int from = 0;
