@@ -67,6 +67,7 @@ build audio24.wav deep.mkv      -c:a flac -sample_fmt s32
 ffmpeg -v error -y -i plain.mkv -c:v mpeg4 -c:a mp3 clip.avi
 ffmpeg -v error -y -i aac51.mp4 -c copy -output_ts_offset 3600 -muxdelay 0 late.ts
 build concat_audio.wav joined.mkv -c:a flac
+ffmpeg -v error -y -i joined.mkv -i concat_truth.srt -map 0 -map 1 -c copy -c:s srt tracked.mkv
 
 # how far every cue ended up from where it should be
 check() {
@@ -154,6 +155,19 @@ if "$LAPSE" plain.mkv work.srt --no-backup --no-embedded 2>&1 | grep -q "Reusing
     echo "  cache is reused              ok"
 else
     echo "  cache is reused              FAIL second run did not reuse it"
+    fails=$((fails + 1))
+fi
+
+rm -rf "$LAPSE_CACHE"
+first=$("$LAPSE" tracked.mkv concat_gap.srt --dry-run --json 2> /dev/null || true)
+again=$("$LAPSE" tracked.mkv concat_gap.srt --dry-run 2>&1 || true)
+if ! echo "$first" | grep -q '"reference":"embedded"'; then
+    echo "  track inside the video       FAIL it was not used as the reference"
+    fails=$((fails + 1))
+elif echo "$again" | grep -q "Reusing the subtitle track"; then
+    echo "  track timings are reused     ok"
+else
+    echo "  track timings are reused     FAIL second run read the track again"
     fails=$((fails + 1))
 fi
 

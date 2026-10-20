@@ -203,15 +203,15 @@ static std::filesystem::path cache_dir() {
     return std::filesystem::path(".") / ".cache" / "lapse";
 }
 
-static std::filesystem::path cache_path(const std::string& video, int audio_track) {
+static std::filesystem::path cache_path(const std::string& video, int track, bool subtitles = false) {
     std::error_code ec;
     uintmax_t size = std::filesystem::file_size(video, ec);
     if (ec) return {};
     auto written = std::filesystem::last_write_time(video, ec);
     if (ec) return {};
 
-    std::string key = video + "|" + std::to_string((long long)size) + "|" + std::to_string((long long)written.time_since_epoch().count()) + "|" + std::to_string(audio_track);
-    key += silero_open() ? "|silero" : "|fvad";
+    std::string key = video + "|" + std::to_string((long long)size) + "|" + std::to_string((long long)written.time_since_epoch().count()) + "|" + std::to_string(track);
+    key += subtitles ? "|sub" : silero_open() ? "|silero" : "|fvad";
     unsigned long long hash = 1469598103934665603ULL;
     for (char c : key) {
         hash ^= (unsigned char)c;
@@ -227,7 +227,7 @@ static std::filesystem::path cache_path(const std::string& video, int audio_trac
     return dir / name;
 }
 
-static bool load_spans(const std::filesystem::path& path, std::vector<std::pair<int,int>>& spans, std::vector<float>& weights, double& coverage) {
+static bool load_spans(const std::filesystem::path& path, std::vector<std::pair<int,int>>& spans, std::vector<float>& weights, double& coverage, size_t least = 20) {
     std::ifstream in(path);
     if (!in) return false;
 
@@ -242,7 +242,7 @@ static bool load_spans(const std::filesystem::path& path, std::vector<std::pair<
         weights.push_back(weight);
     }
 
-    if (spans.size() < 20) {
+    if (spans.size() < least) {
         spans.clear();
         weights.clear();
         return false;
@@ -541,6 +541,27 @@ static std::vector<std::pair<int,int>> speech_of(const std::string& path, int au
     return spans;
 }
 
+static std::vector<std::pair<int,int>> embedded_timings(AVFormatContext* file, const std::string& path, int sub_track, bool use_cache) {
+    bool any = false;
+    for (unsigned i = 0; i < file->nb_streams; i++)
+        if (file->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE) any = true;
+    if (!any) return {};
+
+    std::vector<std::pair<int,int>> spans;
+    std::vector<float> unused;
+    double whole = 1.0;
+    std::filesystem::path cache = use_cache ? cache_path(path, sub_track, true) : std::filesystem::path{};
+    if (!cache.empty() && load_spans(cache, spans, unused, whole, 0)) {
+        if (spans.empty()) say() << "The subtitle tracks inside were no use last time, going by the audio\n";
+        else say() << "Reusing the subtitle track we read last time (" << spans.size() << " cues)\n";
+        return spans;
+    }
+
+    spans = embedded_spans(file, sub_track);
+    if (!cache.empty()) save_spans(cache, spans, {}, 1.0);
+    return spans;
+}
+
 int run(int argc, const char *argv[]) {
     sure_sigma = SURE_SIGMA;
     keep_output_charset();
@@ -783,7 +804,7 @@ int run(int argc, const char *argv[]) {
 
 
         if (use_embedded) {
-            auto [rs, _] = process_spans(embedded_spans(AVC, sub_track));
+            auto [rs, _] = process_spans(embedded_timings(AVC, ref_path, sub_track, use_cache));
             ref_spans = rs;
         }
 

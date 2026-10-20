@@ -112,7 +112,7 @@ output to decide what to do with the result.
 --json      one machine readable line on stdout, everything else on stderr
 --quiet      say nothing but errors, implied by --json
 --dry-run     work out the answer without writing anything
---no-cache    do not read or write the saved speech profile
+--no-cache    do not read or write the saved speech profile or track timings
 ```
 
 The JSON line includes the offset, confidence, verdict, coverage, how many

@@ -172,7 +172,7 @@ What you change here is kept in the database and wins over the environment varia
 | `MAX_ATTEMPTS` | `3` | How many times a failing pair is retried before it is left alone |
 | `TIMEOUT` | `1800` | Seconds a single sync may take |
 | `POLLING` | `0` | Set to `1` on network shares where file events do not arrive |
-| `CACHE_DAYS` | `30` | Days a cached audio scan is kept before it is deleted. `0` keeps them forever |
+| `CACHE_DAYS` | `30` | Days a cached scan of a video is kept before it is deleted. `0` keeps them forever |
 
 ### Engine settings
 
@@ -184,7 +184,7 @@ Everything the CLI takes is available in the container. Switches are `0` or `1`,
 | `NO_BACKUP` | `--no-backup` | Do not leave a `.bak` beside the file that was overwritten |
 | `NO_SIDECAR` | `--no-sidecar` | Do not write a `.lapse-unsure` guess when the result is uncertain |
 | `NO_EMBEDDED` | `--no-embedded` | Ignore subtitle tracks inside the video when picking a reference |
-| `NO_CACHE` | `--no-cache` | Listen to the video every time instead of reusing a cached scan |
+| `NO_CACHE` | `--no-cache` | Listen to the video and read its subtitle tracks every time instead of reusing a cached scan |
 | `FULL_SCAN` | `--full-scan` | Accepted and ignored, the whole film is always listened to |
 | `FORCE` | `--force` | Sync even when there is little to go on |
 | `STRICT` | `--strict` | Only overwrite when the result is clearly right |
@@ -211,7 +211,7 @@ All of it is in the web interface as well, under Settings, and what you save the
 
 `DRY_RUN=1` is worth a first pass over a large library. The log shows what every file would get without anything being written or recorded, so a second run with it off starts from scratch.
 
-Cached audio scans are kept in a `cache` folder next to the database so they survive a restart, and anything unused for `CACHE_DAYS` is deleted. Set `LAPSE_CACHE` to put them somewhere else.
+Cached scans are kept in a `cache` folder next to the database so they survive a restart, and anything unused for `CACHE_DAYS` is deleted. Set `LAPSE_CACHE` to put them somewhere else.
 
 ### Translation
 
@@ -299,7 +299,7 @@ By default LAPSE overwrites the subtitle file it was given and leaves a `.bak` n
 --no-embedded       ignore subtitle tracks inside the video and use the audio
 --full-scan         accepted and ignored, the whole film is always listened to
 --no-sidecar        write nothing at all rather than an unsure file beside the original
---no-cache          do not read or write the saved speech profile
+--no-cache          do not read or write the saved speech profile or subtitle track timings
 --force             overwrite the input whatever the verdict is
 --strict            refuse instead of writing an unsure result beside the original
 --dry-run           work out the answer but write nothing
@@ -457,7 +457,7 @@ Three formats share `.sub` and the name says nothing about which one you have, s
 
 So a `.sub` holding MPL2 or SubViewer syncs with no video and no `--fps`, which MicroDVD cannot do. `.mpl2` is taken as a name for MPL2 as well. Each format is written back the way it came in, down to its own resolution, so a result in MPL2 lands on the nearest tenth of a second and one in SubViewer on the nearest hundredth. SubViewer's `[INFORMATION]` block and style line are left where they are.
 
-**Embedded tracks:** `lapse video.mkv` on its own pulls the default subtitle track out of the container and syncs it, see [CLI usage](#cli-usage) above. This covers text tracks, including `mov_text`. PGS and VobSub tracks are bitmap subtitles with no text to pull out, but when one is present LAPSE reads its timing and uses it as a fast, accurate sync reference instead of falling back to decoding the audio.
+**Embedded tracks:** `lapse video.mkv` on its own pulls the default subtitle track out of the container and syncs it, see [CLI usage](#cli-usage) above. This covers text tracks, including `mov_text`. PGS and VobSub tracks are bitmap subtitles with no text to pull out, but when one is present LAPSE reads its timing and uses it as a fast, accurate sync reference instead of falling back to decoding the audio. Reading a track means reading the whole file, since its packets are spread from one end of it to the other, so the timings are cached next to the speech profile. A second subtitle for the same video starts from them, and a video whose tracks turned out to be no use goes straight to its speech profile. `--sub-track` gets its own entry, and changing the video starts over.
 
 Run `lapse --formats` to print the subtitle extensions your binary can read, one per line
 
