@@ -1111,11 +1111,11 @@ int run(int argc, const char *argv[]) {
         double ratio = 1.0;
 
         bool drifts = sloped >= MIN_AGREEING + 1 && std::abs(drift) > 1e-5;
-        bool far = second_part(slices, offset);
+        bool distant = second_part(slices, offset);
         auto look_far = [&]() {
-            if (!far && flat + 2 <= (int)slices.size())
-                far = second_part(chunk_offsets(spans, ref_spans, ref_weights, 16, ref_coverage, CONCAT_SEARCH_MS), offset);
-            return far;
+            if (!distant && flat + 2 <= (int)slices.size())
+                distant = second_part(chunk_offsets(spans, ref_spans, ref_weights, 16, ref_coverage, CONCAT_SEARCH_MS), offset);
+            return distant;
         };
 
         if (flat >= MIN_AGREEING && !(drifts && sloped >= flat + 2) && !look_far()) {
@@ -1125,7 +1125,7 @@ int run(int argc, const char *argv[]) {
             ratio = snap_ratio(1.0 + drift);
             auto [searched, unused, searched_sigma] = search_ratio(spans, ref_spans, ref_weights, ref_coverage, 1.0 + drift - 0.003, 1.0 + drift + 0.003);
             if (searched_sigma > best_offset(stretch(spans, ratio), ref_spans, ref_weights, ref_coverage).sigma + 1.0) ratio = searched;
-        } else if (groups >= 2 || far) {
+        } else if (groups >= 2 || distant) {
             choice = "recut";
         } else {
 
