@@ -754,13 +754,13 @@ int run(int argc, const char *argv[]) {
     }
 
     std::vector<std::pair<int,int>> timestamps = read_subtitle(input_path);
+    std::vector<std::pair<int,int>> cues = timestamps;
 
     // sounds and [door slams] are in the file but never in the audio. they still get written back out, they just do not get a vote
     int junk = 0;
     timestamps = drop_junk_cues(timestamps, read_cue_text(input_path), &junk);
     if (junk) say() << "Ignoring " << junk << " cues that are not dialogue\n";
 
-    std::vector<std::pair<int,int>> cues = timestamps;
     if (!from_video.empty()) {
         if (is_subtitle(ref_path)) {
             std::cerr << "--from wants the video the subtitle is synced to now, and a video to move it to\n";
