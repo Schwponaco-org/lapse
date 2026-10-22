@@ -141,6 +141,11 @@ cp /tmp/video.mkv "/media/TV/Show/Season 01/Show.S01E02.1080p.WEB-DL.mkv"
 speech_srt "/media/TV/Show/Season 01/Show.S01E01.en.srt" $SHIFT
 speech_srt "/media/TV/Show/Season 01/Show.S01E02.da.srt" $SHIFT
 
+odd=$(printf 'Gammel D\346mon (1999)')
+mkdir -p "/media/Movies/$odd"
+cp /tmp/video.mkv "/media/Movies/$odd/$odd.mkv"
+speech_srt "/media/Movies/$odd/$odd.srt" $SHIFT
+
 # Things that should be left where they are
 mkdir -p "/media/TV/Show/Season 01/@eaDir" "/media/Movies/Orphan"
 speech_srt "/media/TV/Show/Season 01/@eaDir/Show.S01E01.srt" 0

@@ -63,6 +63,11 @@ echo "== checking what it did"
 docker run --rm -v $DATA:/data -v $MEDIA:/media -v "$SCRIPTS:/scripts:ro" \
     --entrypoint python3 $IMAGE /scripts/check-db.py
 
+if ! docker logs $CONTAINER 2>&1 | grep -q "not UTF-8"; then
+    echo "FAIL: the file whose name is not UTF-8 was not passed over"
+    exit 1
+fi
+
 if docker logs $CONTAINER 2>&1 | grep -q "@eaDir"; then
     echo "FAIL: it went into @eaDir"
     exit 1
