@@ -399,7 +399,7 @@ Every run reports a verdict, and it decides what happens to your file:
 | `unsure` | there is an answer, it is just not proven | original untouched, answer written to `name.lapse-unsure.srt` | 3 |
 | `nothing` | the audio does not support any offset | original untouched, best guess written to `name.lapse-unsure.srt` | 3 |
 
-LAPSE never simply refuses. If it cannot prove an answer it still writes one, it just puts it in a sidecar file and leaves yours alone. `--no-sidecar` writes nothing at all instead. `--confidence` moves the bar for what counts as `solid`; `--force` overwrites regardless; `--strict` writes nothing rather than a sidecar.
+LAPSE never simply refuses. If it cannot prove an answer it still writes one, it just puts it in a sidecar file and leaves yours alone. `--no-sidecar` writes nothing at all instead. `--confidence` moves the bar for what counts as `solid`; `--force` overwrites regardless; `--strict` writes nothing rather than a sidecar. The exit code follows the verdict either way, so an `unsure` or `nothing` that `--strict` or `--no-sidecar` kept back still exits 3, with `written` set to `false` in the `--json` line. Exit 2 is only for a subtitle with too few cues to try at all.
 
 ### Machine readable output
 
@@ -423,7 +423,7 @@ LAPSE never simply refuses. If it cannot prove an answer it still writes one, it
 | `auto/joined` | two parts in one video | `splits` |
 | `auto/restart` | the subtitle starts over partway through | `splits` |
 
-`parts` is how many pieces the file ended up in and `splits` holds the cue index each new piece starts at, so `parts` is always `splits` plus one. `offsets` holds the offset each of those pieces got, in milliseconds and in the same order, so a file cut about shows where it moved and by how much. `ratio` is `1` unless the file was stretched. `snapped` is how many cues `--snap` moved onto a picture cut, at either end, and is `0` when the flag was not used.
+`parts` is how many pieces the file ended up in and `splits` holds the cue index each new piece starts at, so `parts` is always `splits` plus one. The index counts from 0 in the order the cues sit in the file and `cues` is how many the file holds, so every split is below `cues`. `offsets` holds the offset each of those pieces got, in milliseconds and in the same order, so a file cut about shows where it moved and by how much. `ratio` is `1` unless the file was stretched. `snapped` is how many cues `--snap` moved onto a picture cut, at either end, and is `0` when the flag was not used.
 
 `ignored_cues` counts the lines that were kept out of the measuring: sound effects in brackets, music notes, and the credit and advert lines subtitle sites slip in, like `Downloaded from www.OpenSubtitles.org` or `Synced and corrected by`. They are still moved along with everything else, they just do not get a say in where to.
 

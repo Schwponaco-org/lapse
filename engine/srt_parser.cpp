@@ -1005,9 +1005,6 @@ std::vector<std::pair<int,int>> read_ttml(const char* filename) {
 
 // Cues that sit on top of each other normally get glued into one span - they
 // are the same moment on screen and counting them twice only skews the score.
-// Split mode asks for them separately though: when a file jumps halfway through
-// the two halves overlap each other once sorted, and merging across that jump
-// welds cues from either side of it together so they can never come apart again
 std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const std::vector<std::pair<int, int>>& timestamps, bool merge, bool sort_by_time) {
     // Sort the cues by time but remember where each one sat in the file the
     // writers go through the file top to bottom and look their span back up
@@ -1030,10 +1027,11 @@ std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const
     std::vector<bool> kept(timestamps.size(), false);
 
     for (int i = 0; i < (int)ys.size(); i++) {
-        if (!merge || spans.empty() || ys[i].first.first >= spans.back().second) {
+        auto [start, end] = ys[i].first;
+        if (!merge || spans.empty() || start < spans.back().first || start >= spans.back().second) {
             spans.push_back(ys[i].first);
         } else {
-            spans.back().second = std::max(ys[i].first.second, spans.back().second);
+            spans.back().second = std::max(end, spans.back().second);
         }
         mapping[ys[i].second] = (int)spans.size() - 1;
         kept[ys[i].second] = true;

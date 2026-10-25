@@ -99,9 +99,11 @@ the file and the exit code:
 | `nothing` | the audio does not support any offset | original untouched, best guess written to `name.lapse-unsure.srt` | `3` |
 
 `--strict` or `--no-sidecar` refuse to write anything for `unsure` or
-`nothing` instead of the sidecar file, and exit `2`. `--confidence N` moves
-where the bar for `solid` sits, default `8`. `--force` treats every result
-as `solid` and always overwrites.
+`nothing` instead of the sidecar file. The exit code is still `3`, and
+`written` is `false` in the JSON line. Exit `2` means the subtitle had too
+few cues to try at all. `--confidence N` moves where the bar for `solid`
+sits, default `8`. `--force` treats every result as `solid` and always
+overwrites.
 
 A caller can read either the exit code or the `verdict` field in the JSON
 output to decide what to do with the result.

@@ -776,7 +776,7 @@ int run(int argc, const char *argv[]) {
         say() << "Lining the speech in " << from_video << " up instead of the cues\n";
     }
 
-    auto [spans, mapping] = process_spans(timestamps, mode != "split", mode != "split");
+    auto [spans, mapping] = process_spans(timestamps, true, mode != "split");
     if (spans.empty()) {
         std::cerr << "No timestamps found in: " << input_path << '\n';
         return 1;
@@ -867,7 +867,7 @@ int run(int argc, const char *argv[]) {
 
     Report card;
     card.coverage = ref_coverage;
-    card.cues = (int)spans.size();
+    card.cues = (int)cues.size();
     card.ignored = junk;
     card.output = output_path;
     if (is_subtitle(ref_path)) card.reference = "subtitle";
@@ -945,16 +945,6 @@ int run(int argc, const char *argv[]) {
 
     auto save = [&](const std::vector<int>& offs, const std::vector<int>& map, Verdict verdict, double slope = 0.0) {
         card.ratio = 1.0 + slope;
-        card.offsets.assign(1, offs[0]);
-        for (size_t i = 1; i < offs.size(); i++)
-            if (offs[i] != offs[i - 1]) {
-                card.splits.push_back((int)i);
-                card.offsets.push_back(offs[i]);
-            }
-        card.parts = (int)card.splits.size() + 1;
-
-        if (!settle(verdict)) { report(card); return 2; }
-        card.written = true;
 
         std::vector<int> offsets = offs;
         std::vector<int> mapping = map;
@@ -968,6 +958,19 @@ int run(int argc, const char *argv[]) {
             mapping.resize(cues.size());
             for (size_t i = 0; i < mapping.size(); i++) mapping[i] = (int)i;
         }
+
+        card.offsets.clear();
+        for (size_t i = 0; i < mapping.size(); i++) {
+            int at = offsets[mapping[i]];
+            if (!card.offsets.empty() && at == card.offsets.back()) continue;
+            if (i > 0) card.splits.push_back((int)i);
+            card.offsets.push_back(at);
+        }
+        card.parts = (int)card.splits.size() + 1;
+
+        if (!settle(verdict)) { report(card); return 3; }
+        card.written = true;
+
         std::vector<int> ends;
         card.snapped = snap_cues(cues, cuts, slope, snap_window, offsets, mapping, ends);
         end_moves(ends);
@@ -986,7 +989,7 @@ int run(int argc, const char *argv[]) {
         card.offset = (int)std::lround(intercept * 1000.0);
         card.offsets.assign(1, card.offset);
 
-        if (!settle(verdict)) { report(card); return 2; }
+        if (!settle(verdict)) { report(card); return 3; }
         card.written = true;
 
         std::vector<int> offsets(1, (int)std::lround(intercept * 1000.0));
@@ -1078,7 +1081,7 @@ int run(int argc, const char *argv[]) {
         return save(offsets, mapping, judge(sigma, margin, agree_count(slices, want)));
 
     } else if (mode == "auto") {
-        auto [order_spans, order_mapping] = process_spans(timestamps, false, false);
+        auto [order_spans, order_mapping] = process_spans(timestamps, true, false);
         std::vector<int> cuts = backward_jumps(order_spans);
         if (!cuts.empty()) {
             say() << "auto: the subtitle restarts " << cuts.size() << " time(s), so this is one file per part\n";
@@ -1155,7 +1158,7 @@ int run(int argc, const char *argv[]) {
         card.sigma = sigma;
 
         if (choice == "recut") {
-            auto [file_spans, file_mapping] = process_spans(timestamps, false, false);
+            auto [file_spans, file_mapping] = process_spans(timestamps, true, false);
             double worst_sigma = 99.0;
             std::vector<int> joined = concat_offsets(file_spans, ref_spans, ref_weights, ref_coverage, &worst_sigma);
             if (!joined.empty()) {
@@ -1235,7 +1238,7 @@ int run(int argc, const char *argv[]) {
         }
 
         {
-            auto [file_spans, file_mapping] = process_spans(timestamps, false, false);
+            auto [file_spans, file_mapping] = process_spans(timestamps, true, false);
             card.mode = "auto/recut";
             std::vector<int> offsets = split_alignment(file_spans, ref_spans, ref_weights, p, offset);
 
