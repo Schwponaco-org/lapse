@@ -211,12 +211,12 @@ static void peaks_from(const std::vector<double>& curve, int lag, int want, std:
 
     std::vector<double> noise;
     for (size_t i = 0; i < curve.size(); i += 3) noise.push_back(curve[i]);
-    std::sort(noise.begin(), noise.end());
+    std::nth_element(noise.begin(), noise.begin() + noise.size() / 2, noise.end());
     double mid = noise[noise.size() / 2];
 
     std::vector<double> away;
     for (double v : noise) away.push_back(std::abs(v - mid));
-    std::sort(away.begin(), away.end());
+    std::nth_element(away.begin(), away.begin() + away.size() / 2, away.end());
     double spread = 1.4826 * away[away.size() / 2];
     if (spread < 1e-12) spread = 1e-12;
 
