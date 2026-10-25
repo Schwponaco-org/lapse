@@ -340,6 +340,20 @@ static bool worth_splitting(const std::vector<int>& offsets, int base) {
     return high - low >= 120;
 }
 
+static bool parts_hold(const std::vector<int>& offsets, const std::vector<std::pair<int,int>>& spans, const std::vector<std::pair<int,int>>& ref_spans, const std::vector<float>& ref_weights, double coverage) {
+    int runs = 0;
+    for (size_t i = 0; i < offsets.size();) {
+        size_t j = i;
+        while (j + 1 < offsets.size() && offsets[j + 1] == offsets[i]) j++;
+        std::vector<std::pair<int,int>> part(spans.begin() + i, spans.begin() + j + 1);
+        Lock got = best_offset(part, ref_spans, ref_weights, coverage, CONCAT_SEARCH_MS);
+        if (std::abs(got.offset - offsets[i]) > AGREE_MS || got.sigma < SOME_SIGMA) return false;
+        runs++;
+        i = j + 1;
+    }
+    return runs >= 2;
+}
+
 static int agree_count(const std::vector<Chunk>& chunks, const std::vector<double>& expected) {
     int agreed = 0;
     for (size_t i = 0; i < chunks.size() && i < expected.size(); i++)
@@ -1173,6 +1187,16 @@ int run(int argc, const char *argv[]) {
             }
         }
 
+        auto pieces = [&](const std::vector<std::pair<int,int>>& s, int base, bool doubt) {
+            std::vector<int> tidied = split_alignment(s, ref_spans, ref_weights, p, base, REFINE_WINDOW_MS, REFINE_STEP_MS);
+            bool near = worth_splitting(tidied, base);
+            if (doubt || near) {
+                std::vector<int> wide = split_alignment(s, ref_spans, ref_weights, p, base);
+                if (parts_hold(wide, s, ref_spans, ref_weights, ref_coverage)) return wide;
+            }
+            return near ? tidied : std::vector<int>{};
+        };
+
         auto shifted = [&]() {
             card.mode = "auto/shifted";
             card.offset = offset;
@@ -1184,11 +1208,10 @@ int run(int argc, const char *argv[]) {
 
             std::vector<int> offsets(spans.size(), offset);
             if (verdict == Verdict::Solid) {
-                std::vector<int> tidied = split_alignment(spans, ref_spans, ref_weights, p, offset,
-                REFINE_WINDOW_MS, REFINE_STEP_MS);
-                if (worth_splitting(tidied, offset)) {
+                std::vector<int> split = pieces(spans, offset, flat < (int)slices.size());
+                if (!split.empty()) {
                     say() << "auto: one offset does not fit the whole file, splitting it\n";
-                    offsets = tidied;
+                    offsets = split;
                     card.mode = "auto/shifted+split";
                 }
             }
@@ -1225,12 +1248,11 @@ int run(int argc, const char *argv[]) {
 
 
             if (verdict == Verdict::Solid) {
-                std::vector<int> tidied = split_alignment(scaled, ref_spans, ref_weights, p, shift,
-                                                          REFINE_WINDOW_MS, REFINE_STEP_MS);
-                if (worth_splitting(tidied, shift)) {
+                std::vector<int> split = pieces(scaled, shift, backing < (int)after.size());
+                if (!split.empty()) {
                     say() << "auto: the stretched file still jumps about, splitting it as well\n";
                     card.mode = "auto/drifting+split";
-                    return save(tidied, mapping, verdict, ratio - 1.0);
+                    return save(split, mapping, verdict, ratio - 1.0);
                 }
             }
 
