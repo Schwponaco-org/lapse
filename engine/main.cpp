@@ -1129,7 +1129,16 @@ int run(int argc, const char *argv[]) {
         std::string choice;
         double ratio = 1.0;
 
+        auto off_by = [&](const std::vector<Chunk>& chunks, const std::vector<double>& want) {
+            double sum = 0;
+            for (size_t i = 0; i < chunks.size(); i++) sum += std::abs(chunks[i].offset - want[i]);
+            return sum;
+        };
+        std::vector<double> on_line;
+        for (auto& c : slices) on_line.push_back(drift * c.time + start);
+
         bool drifts = sloped >= MIN_AGREEING + 1 && std::abs(drift) > 1e-5;
+        bool leans = drifts && snap_ratio(1.0 + drift) != 1.0 && off_by(slices, on_line) * 2 < off_by(slices, expected_at(offset, 1.0));
         bool distant = second_part(slices, offset);
         auto look_far = [&]() {
             if (!distant && flat + 2 <= (int)slices.size())
@@ -1137,7 +1146,7 @@ int run(int argc, const char *argv[]) {
             return distant;
         };
 
-        if (flat >= MIN_AGREEING && !(drifts && sloped >= flat + 2) && !look_far()) {
+        if (flat >= MIN_AGREEING && !(drifts && sloped >= flat + 2) && !leans && !look_far()) {
             choice = "shifted";
         } else if (drifts) {
             choice = "drifting";
@@ -1197,6 +1206,16 @@ int run(int argc, const char *argv[]) {
             return near ? tidied : std::vector<int>{};
         };
 
+        auto along = [&](const std::vector<Chunk>& chunks, const std::vector<std::pair<int,int>>& s, const std::vector<int>& offs) {
+            std::vector<double> want;
+            int at = 0;
+            for (auto& c : chunks) {
+                while (at + 1 < (int)s.size() && (s[at].first + s[at].second) / 2.0 < c.time) at++;
+                want.push_back(offs[at]);
+            }
+            return want;
+        };
+
         auto shifted = [&]() {
             card.mode = "auto/shifted";
             card.offset = offset;
@@ -1213,6 +1232,35 @@ int run(int argc, const char *argv[]) {
                     say() << "auto: one offset does not fit the whole file, splitting it\n";
                     offsets = split;
                     card.mode = "auto/shifted+split";
+
+                    std::vector<double> want = along(slices, spans, split);
+                    std::vector<double> slopes;
+                    for (size_t i = 0; i < slices.size(); i++)
+                        for (size_t j = i + 1; j < slices.size(); j++)
+                            if (want[i] == want[j] && slices[j].time - slices[i].time >= 1000)
+                                slopes.push_back((slices[j].offset - slices[i].offset) / (slices[j].time - slices[i].time));
+                    double r = 1.0;
+                    if (!slopes.empty()) {
+                        std::nth_element(slopes.begin(), slopes.begin() + slopes.size() / 2, slopes.end());
+                        r = snap_ratio(1.0 + slopes[slopes.size() / 2]);
+                    }
+                    std::vector<double> leaned = want;
+                    for (size_t i = 0, j; i < slices.size(); i = j) {
+                        std::vector<double> base;
+                        for (j = i; j < slices.size() && want[j] == want[i]; j++) base.push_back(slices[j].offset - (r - 1.0) * slices[j].time);
+                        std::nth_element(base.begin(), base.begin() + base.size() / 2, base.end());
+                        for (size_t k = i; k < j; k++) leaned[k] = base[base.size() / 2] + (r - 1.0) * slices[k].time;
+                    }
+                    if (r != 1.0 && off_by(slices, leaned) * 2 < off_by(slices, want)) {
+                        std::vector<std::pair<int,int>> scaled = stretch(spans, r);
+                        std::vector<int> again = pieces(scaled, best_offset(scaled, ref_spans, ref_weights, ref_coverage).offset, true);
+                        std::vector<Chunk> after = chunk_offsets(scaled, ref_spans, ref_weights, (int)slices.size(), ref_coverage);
+                        if (!again.empty() && off_by(after, along(after, scaled, again)) * 2 < off_by(slices, want)) {
+                            say() << "auto: the pieces drift as well, stretching them by " << r << "\n";
+                            card.mode = "auto/drifting+split";
+                            return save(again, mapping, verdict, r - 1.0);
+                        }
+                    }
                 }
             }
             return save(offsets, mapping, verdict);
@@ -1264,12 +1312,7 @@ int run(int argc, const char *argv[]) {
             card.mode = "auto/recut";
             std::vector<int> offsets = split_alignment(file_spans, ref_spans, ref_weights, p, offset);
 
-            std::vector<double> want;
-            for (auto& c : slices) {
-                int at = 0;
-                while (at + 1 < (int)file_spans.size() && (file_spans[at].first + file_spans[at].second) / 2.0 < c.time) at++;
-                want.push_back(offsets[at]);
-            }
+            std::vector<double> want = along(slices, file_spans, offsets);
             card.agreement = agreement_of(slices, want);
             return save(offsets, file_mapping, judge(sigma, margin, agree_count(slices, want)));
         }
