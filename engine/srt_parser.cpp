@@ -628,11 +628,14 @@ std::vector<SccLine> scc_lines(const std::string& text) {
 
         int h, m, s, f;
         char sep;
-        if (sscanf(line.c_str(), "%d:%d:%d%c%d", &h, &m, &s, &sep, &f) == 5 && (sep == ':' || sep == ';')) {
+        long long ms = -1;
+        if (sscanf(line.c_str(), "%d:%d:%d%c%d", &h, &m, &s, &sep, &f) == 5 && (sep == ':' || sep == ';'))
+            ms = (h * 3600LL + m * 60LL + s) * 1000 + f * 33LL;
+        if (ms >= 0 && ms <= MAX_TIME_MS) {
             SccLine got;
             got.at = pos;
             got.len = std::min(line.find_first_not_of("0123456789:;"), line.size());
-            got.ms = (h * 3600 + m * 60 + s) * 1000 + f * 33;
+            got.ms = (int)ms;
             got.sep = sep;
 
             std::istringstream words(line.substr(std::min(got.len, line.size())));
@@ -738,7 +741,8 @@ bool idx_time_line(const std::string& line, size_t& val_from, size_t& val_len) {
 int idx_time_ms(const std::string& v) {
     int h, m, s, ms;
     if (sscanf(v.c_str(), "%d:%d:%d:%d", &h, &m, &s, &ms) != 4) return -1;
-    return h * 3600000 + m * 60000 + s * 1000 + ms;
+    long long at = h * 3600000LL + m * 60000LL + s * 1000LL + ms;
+    return (at < 0 || at > MAX_TIME_MS) ? -1 : (int)at;
 }
 
 int spu_stop_ms(const unsigned char* spu, size_t n) {
@@ -938,7 +942,8 @@ int ttml_time_ms(const std::string& v) {
     double f;
     if (std::count(v.begin(), v.end(), ':') == 3) {
         if (sscanf(v.c_str(), "%d:%d:%d:%lf", &h, &m, &s, &f) != 4) return -1;
-        return (int)((h * 3600 + m * 60 + s) * 1000 + f * 1000 / frame_rate + 0.5);
+        double ms = (h * 3600.0 + m * 60.0 + s) * 1000 + f * 1000 / frame_rate;
+        return (ms < 0 || ms > MAX_TIME_MS) ? -1 : (int)(ms + 0.5);
     }
     if (v.find(':') != std::string::npos) return parse_timestamp(v, 0);
 
