@@ -787,6 +787,16 @@ int run(int argc, const char *argv[]) {
     if ((int)spans.size() < MIN_CUES && !force) {
         std::cerr << "Only " << spans.size() << " cues in " << input_path
                   << ", that is not enough to go on. Pass --force to sync it anyway.\n";
+        if (as_json) {
+            Report card;
+            card.mode = mode;
+            card.reference = "none";
+            card.cues = (int)cues.size();
+            card.ignored = junk;
+            card.output = output_path;
+            card.why = "only " + std::to_string(spans.size()) + " cues to line up, not enough to go on";
+            report(card);
+        }
         return 2;
     }
 
