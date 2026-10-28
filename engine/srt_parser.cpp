@@ -745,6 +745,21 @@ int idx_time_ms(const std::string& v) {
     return (at < 0 || at > MAX_TIME_MS) ? -1 : (int)at;
 }
 
+bool idx_delay_line(const std::string& line, int& delay) {
+    if (line.rfind("delay:", 0) != 0) return false;
+    size_t at = 6;
+    while (at < line.size() && line[at] == ' ') at++;
+    int sign = 1;
+    if (at < line.size() && (line[at] == '-' || line[at] == '+')) {
+        if (line[at] == '-') sign = -1;
+        at++;
+    }
+    int h = 0, m = 0, s = 0, ms = 0;
+    sscanf(line.c_str() + at, "%d:%d:%d:%d", &h, &m, &s, &ms);
+    delay = sign * (h * 3600000 + m * 60000 + s * 1000 + ms);
+    return true;
+}
+
 int spu_stop_ms(const unsigned char* spu, size_t n) {
     if (n < 4) return -1;
     size_t total = std::min(n, (size_t)((spu[0] << 8) | spu[1]));
@@ -800,17 +815,19 @@ std::vector<std::pair<int,int>> read_idx(const char* filename) {
 
     std::ifstream bin(std::filesystem::path(filename).replace_extension(".sub"), std::ios::binary);
     std::string sub((std::istreambuf_iterator<char>(bin)), {});
+    int delay = 0;
 
     while (getline(read_file, line)) {
         size_t vf, vl;
-        if (!idx_time_line(line, vf, vl)) continue;
+        if (idx_delay_line(line, delay) || !idx_time_line(line, vf, vl)) continue;
 
         if ((int)starts.size() >= MAX_CUES) {
             say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
             break;
         }
 
-        starts.push_back(idx_time_ms(line.substr(vf, vl)));
+        int at = idx_time_ms(line.substr(vf, vl));
+        starts.push_back(at < 0 ? -1 : at + delay);
 
         size_t pos = line.find("filepos:");
         std::string spu = (pos == std::string::npos || sub.empty()) ? "" : spu_at(sub, strtoull(line.c_str() + pos + 8, nullptr, 16));

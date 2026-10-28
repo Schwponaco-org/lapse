@@ -107,6 +107,21 @@ if [ "$(grep -m1 -- '-->' forced.srt)" != "$(grep -m1 -- '-->' reference.srt)" ]
     fail "the corrected file does not line up with the reference"
 fi
 
+echo "== a VobSub .idx with a delay line"
+{
+    printf "# VobSub index file, v7 (do not modify this line!)\n#\t delay: [sign]hh:mm:ss:ms\n\nid: en, index: 0\ndelay: 00:00:01:000\n"
+    for i in $(seq 0 39); do
+        printf "timestamp: %s, filepos: %09x\n" "$(timestamp $((4000 + i * 7000 + SHIFT)) | tr , :)" $((i * 2048))
+    done
+} > delayed.idx
+run reference.srt delayed.idx --force --no-backup
+if [ "$status" != "$SOLID" ]; then
+    fail "expected exit $SOLID for an .idx with a delay, got $status"
+fi
+if ! grep -q "^timestamp: 00:00:04:000, filepos: 000000000$" delayed.idx; then
+    fail "the .idx did not keep its delay out of the timestamps it wrote"
+fi
+
 echo "== --strict refuses instead of writing beside the original"
 cp pristine.srt strict.srt
 run reference.srt strict.srt --strict
