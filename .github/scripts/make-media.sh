@@ -150,6 +150,7 @@ speech_srt "/media/Movies/$odd/$odd.srt" $SHIFT
 mkdir -p "/media/TV/Show/Season 01/@eaDir" "/media/Movies/Orphan"
 speech_srt "/media/TV/Show/Season 01/@eaDir/Show.S01E01.srt" 0
 speech_srt "/media/Movies/Orphan/orphan.srt" 0
+printf '$FontName = Arial\n00:00:05:00 , 00:00:08:00 , Hello there\n' > "/media/Movies/Test Movie (2024)/Test Movie (2024).da.stl"
 
 chown -R 1000:1000 /media
 find /media -type f -exec touch -d "10 minutes ago" {} +

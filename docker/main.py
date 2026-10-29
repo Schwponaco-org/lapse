@@ -438,6 +438,15 @@ def file_mtime(path):
         return None
 
 
+def ebu_stl(path):
+    try:
+        with open(path, "rb") as file:
+            head = file.read(1024)
+    except OSError:
+        return False
+    return len(head) == 1024 and head[3:6] == b"STL" and head[8:11] == b".01"
+
+
 def previous_job(conn, video_path, srt_path):
     cur = conn.execute(
         "SELECT status, attempts, srt_mtime FROM sync_jobs WHERE video_path = ? AND srt_path = ?",
@@ -654,7 +663,7 @@ def run_scan(conn, path, verbose=False):
             continue
         remember_tracks(conn, video)
         ext = os.path.splitext(subtitle)[1].lower()
-        if ext not in ENGINE_FORMATS:
+        if ext not in ENGINE_FORMATS or (ext == ".stl" and not ebu_stl(subtitle)):
             unsupported += 1
             continue
         if translate.ours(conn, subtitle):
