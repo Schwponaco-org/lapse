@@ -150,7 +150,7 @@ stl_block() {
     stl_tc $2
     stl_tc $3
     printf "\\024\\002\\$(printf %03o $4)"
-    printf "%-112s" "line $1" | tr ' ' '\217'
+    printf "%-112s" "line $1" | LC_ALL=C tr ' ' '\217'
 }
 {
     printf "850STL25.01%-245s00000000%-760s" "" ""
