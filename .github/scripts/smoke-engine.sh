@@ -155,7 +155,7 @@ stl_block() {
 {
     printf "850STL25.01%-245s00000000%-760s" "" ""
     stl_block 0 0 0 1
-    for i in $(seq 0 19); do
+    for i in $(seq 0 39); do
         stl_block $i $((5000 + i * 7000 + SHIFT)) $((8000 + i * 7000 + SHIFT)) 0
     done
 } > noted.stl
