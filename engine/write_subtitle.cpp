@@ -402,8 +402,10 @@ static void write_stl(const char* input_path, const char* output_path, const Shi
     for (size_t at = 1024; at + 128 <= data.size(); at += 128) {
         unsigned char* b = (unsigned char*)&data[at];
         int sn = b[1] | (b[2] << 8);
-        if (sn != last && !b[15]) cue++;
-        last = sn;
+        if (!b[15] && sn != last) {
+            cue++;
+            last = sn;
+        }
 
         auto [a, e] = shift.both(stl_ms(b + 5, fps) - zero, stl_ms(b + 9, fps) - zero, cue);
         put_tc(b + 5, a + zero, fps);

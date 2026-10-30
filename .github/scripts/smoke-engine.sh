@@ -192,6 +192,33 @@ if [ "$(cat guarded.srt.bak)" != "the original" ]; then
     fail "the first backup was overwritten"
 fi
 
+echo "== an EBU STL that opens with a comment block"
+stl_tc() {
+    local f=$(($1 * 25 / 1000))
+    printf "\\$(printf %03o $((f / 90000)))\\$(printf %03o $((f / 1500 % 60)))\\$(printf %03o $((f / 25 % 60)))\\$(printf %03o $((f % 25)))"
+}
+stl_block() {
+    printf "\\000\\$(printf %03o $(($1 % 256)))\\$(printf %03o $(($1 / 256)))\\377\\000"
+    stl_tc $2
+    stl_tc $3
+    printf "\\024\\002\\$(printf %03o $4)"
+    printf "%-112s" "line $1" | LC_ALL=C tr ' ' '\217'
+}
+{
+    printf "850STL25.01%-245s00000000%-760s" "" ""
+    stl_block 0 0 0 1
+    for i in $(seq 0 39); do
+        stl_block $i $((5000 + i * 7000 + SHIFT)) $((8000 + i * 7000 + SHIFT)) 0
+    done
+} > noted.stl
+run reference.srt noted.stl --force --no-backup
+if [ "$status" != "$SOLID" ]; then
+    fail "expected exit $SOLID for an STL with a comment first, got $status"
+fi
+if [ "$(od -An -tu1 -j $((1024 + 128 + 5)) -N4 noted.stl | xargs)" != "0 0 5 0" ]; then
+    fail "the first line of the STL did not land at 00:00:05:00"
+fi
+
 cd /
 rm -rf "$WORK"
 echo "engine looks good"
