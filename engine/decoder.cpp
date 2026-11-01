@@ -636,6 +636,9 @@ static SwrContext* open_mix(const AVCodecContext* dec, int kind, int centre, int
                             &in, dec->sample_fmt, dec->sample_rate, 0, nullptr) < 0)
         return nullptr;
 
+    av_opt_set_int(swr, "filter_size", 16, 0);
+    av_opt_set_int(swr, "phase_shift", 8, 0);
+
     if (kind != 1) {
         std::vector<double> matrix(in.nb_channels, 0.0);
         if (kind == 0 && centre >= 0 && centre < in.nb_channels) {
