@@ -32,7 +32,7 @@ Every release ships a self-contained archive per platform. Unpack it and run the
 
 | Platform | Archive | Runs on |
 |---|---|---|
-| Linux x86-64 | `lapse-linux-amd64.tar.gz` | glibc 2.31 and newer (Ubuntu 20.04+, Debian 11+) |
+| Linux x86-64 | `lapse-linux-amd64.tar.gz` | any x86-64 CPU, glibc 2.35 and newer (Ubuntu 22.04+, Debian 12+) |
 | Linux ARM64 | `lapse-linux-arm64.tar.gz` | Raspberry Pi 4/5, ARM servers, Apple silicon VMs |
 | macOS Apple silicon | `lapse-macos-arm64.tar.gz` | macOS 11 Big Sur and newer |
 | macOS Intel | `lapse-macos-x86_64.tar.gz` | macOS 10.15 Catalina and newer |
