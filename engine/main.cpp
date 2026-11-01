@@ -1160,6 +1160,7 @@ int run(int argc, const char *argv[]) {
 
         std::string choice;
         double ratio = 1.0;
+        double seen = 0;
 
         bool drifts = sloped >= MIN_AGREEING + 1 && std::abs(drift) > 1e-5;
         bool distant = second_part(slices, offset);
@@ -1173,7 +1174,8 @@ int run(int argc, const char *argv[]) {
             choice = "shifted";
         } else if (drifts) {
             choice = "drifting";
-            ratio = snap_ratio(1.0 + drift);
+            seen = 1.0 + drift;
+            ratio = snap_ratio(seen);
             auto [searched, unused, searched_sigma] = search_ratio(spans, ref_spans, ref_weights, ref_coverage, 1.0 + drift - 0.003, 1.0 + drift + 0.003);
             if (searched_sigma > best_offset(stretch(spans, ratio), ref_spans, ref_weights, ref_coverage).sigma + 1.0) ratio = searched;
         } else if (groups >= 2 || distant) {
@@ -1186,7 +1188,7 @@ int run(int argc, const char *argv[]) {
 
             if (r != 1.0 && sigma2 >= sure_sigma && sigma2 > sigma + 2.0) {
                 choice = "drifting";
-                ratio = r;
+                ratio = seen = r;
             } else {
                 if (look_far()) {
                     choice = "recut";
@@ -1245,6 +1247,24 @@ int run(int argc, const char *argv[]) {
         if (choice == "shifted") return shifted();
 
         if (choice == "drifting") {
+            auto fit = [&](double r) {
+                std::vector<std::pair<int,int>> scaled = stretch(spans, r);
+                int at = best_offset(scaled, ref_spans, ref_weights, ref_coverage).offset;
+                std::vector<int> tidied = split_alignment(scaled, ref_spans, ref_weights, p, at, REFINE_WINDOW_MS, REFINE_STEP_MS);
+                return sigma_after(scaled, tidied, ref_spans, ref_weights, ref_coverage);
+            };
+            if (seen > 0) {
+                double best = fit(ratio);
+                for (double r : FRAMERATE_RATIOS) {
+                    if (r == ratio || std::abs(r - seen) > 0.004) continue;
+                    double got = fit(r);
+                    if (got > best) {
+                        say() << "auto: " << r << " fits better than " << ratio << " once the file is cut\n";
+                        best = got;
+                        ratio = r;
+                    }
+                }
+            }
             std::vector<std::pair<int,int>> scaled = stretch(spans, ratio);
 
             auto [shift, conf2, margin2, sigma2] = best_offset(scaled, ref_spans, ref_weights, ref_coverage);
