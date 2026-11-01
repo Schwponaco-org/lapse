@@ -340,6 +340,27 @@ static bool worth_splitting(const std::vector<int>& offsets, int base) {
     return high - low >= 120;
 }
 
+static double sigma_after(const std::vector<std::pair<int,int>>& spans, const std::vector<int>& offsets,
+                          const std::vector<std::pair<int,int>>& ref_spans, const std::vector<float>& ref_weights, double coverage) {
+    std::vector<std::pair<int,int>> moved;
+    for (size_t i = 0; i < spans.size(); i++) moved.push_back({spans[i].first + offsets[i], spans[i].second + offsets[i]});
+    std::sort(moved.begin(), moved.end());
+    return best_offset(moved, ref_spans, ref_weights, coverage).sigma;
+}
+
+static bool contradicted(const std::vector<Chunk>& chunks, const std::vector<int>& offsets) {
+    for (auto& c : chunks) {
+        if (c.sigma < 4.0) continue;
+        bool seen = false, close = false;
+        for (int o : offsets) {
+            seen = seen || std::abs(c.offset - o) <= 2000;
+            close = close || std::abs(c.offset - o) <= REFINE_WINDOW_MS;
+        }
+        if (!seen && (close || c.sigma >= 5.0)) return true;
+    }
+    return false;
+}
+
 static int agree_count(const std::vector<Chunk>& chunks, const std::vector<double>& expected) {
     int agreed = 0;
     for (size_t i = 0; i < chunks.size() && i < expected.size(); i++)
@@ -912,6 +933,23 @@ int run(int argc, const char *argv[]) {
         for (auto& c : slices) want.push_back(c.time * (ratio - 1.0) + offset);
         return want;
     };
+    auto expected_from = [&](const std::vector<int>& offsets, const std::vector<std::pair<int,int>>& in) {
+        std::vector<double> want;
+        for (auto& c : slices) {
+            int at = 0;
+            while (at + 1 < (int)in.size() && (in[at].first + in[at].second) / 2.0 < c.time) at++;
+            want.push_back(offsets[at]);
+        }
+        return want;
+    };
+    auto judge_parts = [&](const std::vector<int>& offsets, const std::vector<std::pair<int,int>>& in, double margin) {
+        std::vector<double> want = expected_from(offsets, in);
+        card.sigma = sigma_after(in, offsets, ref_spans, ref_weights, ref_coverage);
+        card.agreement = agreement_of(slices, want);
+        Verdict verdict = judge(card.sigma, margin, agree_count(slices, want));
+        if (verdict == Verdict::Solid && contradicted(slices, offsets)) verdict = Verdict::Unsure;
+        return verdict;
+    };
 
     std::vector<int> cuts;
     if (snap_window > 0) {
@@ -1085,10 +1123,8 @@ int run(int argc, const char *argv[]) {
         card.confidence = confidence;
         card.margin = margin;
         card.sigma = sigma;
-        std::vector<double> want = expected_at(offset, 1.0);
-        card.agreement = agreement_of(slices, want);
         std::vector<int> offsets = split_alignment(spans, ref_spans, ref_weights, p, offset);
-        return save(offsets, mapping, judge(sigma, margin, agree_count(slices, want)));
+        return save(offsets, mapping, judge_parts(offsets, spans, margin));
 
     } else if (mode == "auto") {
         auto [order_spans, order_mapping] = process_spans(timestamps, true, false);
@@ -1193,13 +1229,14 @@ int run(int argc, const char *argv[]) {
             Verdict verdict = judge(sigma, margin, flat);
 
             std::vector<int> offsets(spans.size(), offset);
-            if (verdict == Verdict::Solid) {
+            if (verdict != Verdict::Nothing) {
                 std::vector<int> tidied = split_alignment(spans, ref_spans, ref_weights, p, offset,
                 REFINE_WINDOW_MS, REFINE_STEP_MS);
                 if (worth_splitting(tidied, offset)) {
                     say() << "auto: one offset does not fit the whole file, splitting it\n";
                     offsets = tidied;
                     card.mode = "auto/shifted+split";
+                    if (verdict == Verdict::Unsure) verdict = judge_parts(offsets, spans, margin);
                 }
             }
             return save(offsets, mapping, verdict);
@@ -1251,15 +1288,7 @@ int run(int argc, const char *argv[]) {
             auto [file_spans, file_mapping] = process_spans(timestamps, true, false);
             card.mode = "auto/recut";
             std::vector<int> offsets = split_alignment(file_spans, ref_spans, ref_weights, p, offset);
-
-            std::vector<double> want;
-            for (auto& c : slices) {
-                int at = 0;
-                while (at + 1 < (int)file_spans.size() && (file_spans[at].first + file_spans[at].second) / 2.0 < c.time) at++;
-                want.push_back(offsets[at]);
-            }
-            card.agreement = agreement_of(slices, want);
-            return save(offsets, file_mapping, judge(sigma, margin, agree_count(slices, want)));
+            return save(offsets, file_mapping, judge_parts(offsets, file_spans, margin));
         }
 
     } else {
