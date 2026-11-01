@@ -340,9 +340,29 @@ static void put_tc(unsigned char* tc, int ms, int fps) {
     tc[0] = frames / fps / 3600;
 }
 
+static std::string spruce_tc(int ms, int fps) {
+    int frames = (int)std::lround(std::max(ms, 0) * fps / 1000.0);
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d:%02d", frames / fps / 3600, frames / fps / 60 % 60, frames / fps % 60, frames % fps);
+    return buf;
+}
+
+static void write_spruce(const char* input_path, const char* output_path, const Shift& shift) {
+    std::string text = load_file(input_path);
+    int fps = spruce_fps(text);
+    int cue = 0;
+    rewrite_lines(text, output_path, [&](std::string& line) {
+        SpruceLine got;
+        if (!spruce_line(line, got)) return;
+        auto [a, b] = shift.both(spruce_ms(got, 0, fps), spruce_ms(got, 1, fps), cue++);
+        line.replace(got.at[1], got.len[1], spruce_tc(b, fps));
+        line.replace(got.at[0], got.len[0], spruce_tc(a, fps));
+    });
+}
+
 static void write_stl(const char* input_path, const char* output_path, const Shift& shift) {
     std::string data = load_bytes(input_path);
-    if (!ebu_stl(data)) throw std::runtime_error("Not an EBU STL file: " + std::string(input_path));
+    if (!ebu_stl(data)) return write_spruce(input_path, output_path, shift);
 
     int fps = stl_fps(data), zero = stl_zero(data, fps), last = -1, cue = -1;
     for (size_t at = 1024; at + 128 <= data.size(); at += 128) {

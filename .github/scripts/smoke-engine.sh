@@ -219,6 +219,24 @@ if [ "$(od -An -tu1 -j $((1024 + 128 + 5)) -N4 noted.stl | xargs)" != "0 0 5 0" 
     fail "the first line of the STL did not land at 00:00:05:00"
 fi
 
+echo "== a text STL the way DVD Studio Pro writes it"
+spruce_tc() {
+    printf "%02d:%02d:%02d:%02d" $(($1 / 3600000)) $(($1 % 3600000 / 60000)) $(($1 % 60000 / 1000)) $(($1 % 1000 / 40))
+}
+{
+    printf '$FontName = Arial\n//made up for the test\n\n'
+    for i in $(seq 0 39); do
+        printf "%s , %s , line %d\n" "$(spruce_tc $((5000 + i * 7000 + SHIFT)))" "$(spruce_tc $((8000 + i * 7000 + SHIFT)))" $i
+    done
+} > studio.stl
+run reference.srt studio.stl --force --no-backup
+if [ "$status" != "$SOLID" ]; then
+    fail "expected exit $SOLID for a text STL, got $status"
+fi
+if [ "$(grep -m1 , studio.stl)" != "00:00:05:00 , 00:00:08:00 , line 0" ]; then
+    fail "the first line of the text STL did not land at 00:00:05:00"
+fi
+
 cd /
 rm -rf "$WORK"
 echo "engine looks good"

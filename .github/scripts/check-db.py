@@ -23,6 +23,8 @@ TOLERANCE = 250
 expected = {
     "/media/Movies/Test Movie (2024)/Test Movie (2024).en.srt":
         "/media/Movies/Test Movie (2024)/Test Movie (2024).mkv",
+    "/media/Movies/Test Movie (2024)/Test Movie (2024).da.stl":
+        "/media/Movies/Test Movie (2024)/Test Movie (2024).mkv",
     "/media/Movies/Scene.Release.2024.1080p.BluRay.x264-GRP/Subs/2_English.srt":
         "/media/Movies/Scene.Release.2024.1080p.BluRay.x264-GRP/Scene.Release.2024.1080p.BluRay.x264-GRP.mkv",
     "/media/TV/Show/Season 01/Show.S01E01.en.srt":

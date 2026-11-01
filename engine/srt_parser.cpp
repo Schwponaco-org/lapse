@@ -578,9 +578,51 @@ int stl_zero(const std::string& data, int fps) {
     return zero;
 }
 
+bool spruce_line(const std::string& line, SpruceLine& got) {
+    int h[2], m[2], s[2], p[5] = {0, 0, 0, 0, 0};
+    if (sscanf(line.c_str(), " %n%d:%d:%d:%d%n , %n%d:%d:%d:%d%n ,%n", &p[0], &h[0], &m[0], &s[0], &got.frames[0], &p[1],
+               &p[2], &h[1], &m[1], &s[1], &got.frames[1], &p[3], &p[4]) != 8 || !p[4]) return false;
+    for (int i = 0; i < 2; i++) {
+        if (h[i] < 0 || h[i] > 23 || m[i] < 0 || m[i] > 59 || s[i] < 0 || s[i] > 59 || got.frames[i] < 0 || got.frames[i] > 59) return false;
+        got.seconds[i] = (h[i] * 60 + m[i]) * 60 + s[i];
+        got.at[i] = p[2 * i];
+        got.len[i] = p[2 * i + 1] - p[2 * i];
+    }
+    got.text = p[4];
+    return true;
+}
+
+int spruce_fps(const std::string& text) {
+    std::istringstream ss(text);
+    std::string line;
+    SpruceLine got;
+    int most = 0;
+    while (getline(ss, line))
+        if (spruce_line(line, got)) most = std::max({most, got.frames[0], got.frames[1]});
+    return most >= 25 ? 30 : 25;
+}
+
+int spruce_ms(const SpruceLine& got, int which, int fps) {
+    return got.seconds[which] * 1000 + got.frames[which] * 1000 / fps;
+}
+
+static std::vector<std::pair<int,int>> read_spruce(const std::string& text) {
+    std::vector<std::pair<int,int>> timestamps;
+    std::istringstream ss(text);
+    std::string line;
+    SpruceLine got;
+    int fps = spruce_fps(text);
+    while (getline(ss, line)) {
+        if (!spruce_line(line, got)) continue;
+        if (!room(timestamps.size())) break;
+        keep(timestamps, spruce_ms(got, 0, fps), spruce_ms(got, 1, fps));
+    }
+    return timestamps;
+}
+
 std::vector<std::pair<int,int>> read_stl(const char* filename) {
     std::string data = load_bytes(filename);
-    if (!ebu_stl(data)) throw std::runtime_error("Not an EBU STL file: " + std::string(filename));
+    if (!ebu_stl(data)) return read_spruce(load_text(filename));
 
     int fps = stl_fps(data), zero = stl_zero(data, fps), last = -1;
     std::vector<std::pair<int,int>> timestamps;

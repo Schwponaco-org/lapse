@@ -59,6 +59,14 @@ int stl_ms(const unsigned char* tc, int fps);
 int stl_zero(const std::string& data, int fps);
 std::vector<std::pair<int,int>> read_stl(const char* filename);
 
+struct SpruceLine {
+    int seconds[2] = {0, 0}, frames[2] = {0, 0};
+    size_t at[2] = {0, 0}, len[2] = {0, 0}, text = 0;
+};
+bool spruce_line(const std::string& line, SpruceLine& got);
+int spruce_fps(const std::string& text);
+int spruce_ms(const SpruceLine& got, int which, int fps);
+
 struct SccLine {
     size_t at = 0, len = 0;
     int ms = 0;

@@ -249,8 +249,26 @@ static std::vector<std::string> ttml_cue_text(const std::string& path) {
     return out;
 }
 
+static std::vector<std::string> spruce_cue_text(const std::string& path) {
+    std::vector<std::string> out;
+    std::istringstream file(load_text(path));
+    std::string line;
+    SpruceLine got;
+    while (getline(file, line)) {
+        if (!spruce_line(line, got)) continue;
+        std::string body;
+        for (size_t i = got.text; i < line.size(); i++) {
+            if (line[i] == '^' && i + 1 < line.size()) i++;
+            else body += line[i] == '|' ? '\n' : line[i];
+        }
+        out.push_back(body);
+    }
+    return out;
+}
+
 static std::vector<std::string> stl_cue_text(const std::string& path) {
     std::string data = load_bytes(path);
+    if (!ebu_stl(data)) return spruce_cue_text(path);
     std::vector<std::string> out;
     int last = -1;
     for (size_t at = 1024; ebu_stl(data) && at + 128 <= data.size(); at += 128) {
