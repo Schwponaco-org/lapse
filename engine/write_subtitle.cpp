@@ -468,12 +468,12 @@ static void write_ttml(const char* input_path, const char* output_path, const Sh
             if (start_ms >= 0 && (!has_end || end_ms >= 0)) {
                 auto [a, b] = shift.both(start_ms, has_end ? end_ms : start_ms, cue);
                 out += text.substr(written, bf - written);
-                out += ms_to_ts(a, '.');
+                out += ttml_time(a, text.substr(bf, bl));
                 written = bf + bl;
 
                 if (has_end) {
                     out += text.substr(written, ef - written);
-                    out += ms_to_ts(b, '.');
+                    out += ttml_time(b, text.substr(ef, el));
                     written = ef + el;
                 }
             }

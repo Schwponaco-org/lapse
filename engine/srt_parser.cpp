@@ -16,6 +16,7 @@
 #include "srt_parser.h"
 #include "charset.h"
 #include "log.h"
+#include <cmath>
 
 // A utf-8 BOM sits in front of the very first line and would otherwise trip up
 // whatever we try to read out of it
@@ -192,6 +193,7 @@ static std::string looks_like(const std::string& text) {
         looked++;
 
         if (only.rfind("WEBVTT", 0) == 0) return ".vtt";
+        if (only.find("<tt ") != std::string::npos || only.find("<tt:tt ") != std::string::npos) return ".ttml";
         if (only.rfind("Dialogue:", 0) == 0 || only.rfind("[Script Info]", 0) == 0) return ".ass";
         if (line.find("-->") != std::string::npos && parse_timestamp(line, 0) >= 0) return ".srt";
 
@@ -216,16 +218,17 @@ static bool worth_reading(const std::string& path) {
 // The formats the parsers and the writers both handle. Callers can ask for the
 // list with --formats so they know what is safe to hand us
 const std::vector<std::string> SUBTITLE_FORMATS = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2", ".sup", ".sbv",
-                                                   ".idx", ".smi", ".sami", ".ttml", ".dfxp", ".stl", ".scc"};
+                                                   ".idx", ".smi", ".sami", ".ttml", ".dfxp", ".itt", ".stl", ".scc"};
 
 std::string subtitle_kind(const std::string& path) {
     std::string ext = std::filesystem::path(path).extension().string();
     for (char& c : ext) c = (char)tolower((unsigned char)c);
     if (ext == ".sami") return ".smi";
+    if (ext == ".itt") return ".ttml";
     for (auto& one : SUBTITLE_FORMATS)
         if (ext == one) return ext;
 
-    if ((!ext.empty() && ext != ".txt") || !worth_reading(path)) return "";
+    if ((!ext.empty() && ext != ".txt" && ext != ".xml") || !worth_reading(path)) return "";
     try {
         return looks_like(load_text(path));
     } catch (const std::exception&) {
@@ -975,6 +978,19 @@ int ttml_time_ms(const std::string& v) {
 
     if (ms < 0 || ms > MAX_TIME_MS) return -1;
     return (int)(ms + 0.5);
+}
+
+std::string ttml_time(int ms, const std::string& like) {
+    if (ms < 0) ms = 0;
+    char buf[32];
+    if (std::count(like.begin(), like.end(), ':') == 3) {
+        int s = ms / 1000;
+        int f = std::min((int)std::ceil(frame_rate) - 1, (int)std::lround(ms % 1000 * frame_rate / 1000.0));
+        snprintf(buf, sizeof(buf), "%02d:%02d:%02d:%02d", s / 3600, s / 60 % 60, s % 60, f);
+    } else {
+        snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%03d", ms / 3600000, ms / 60000 % 60, ms / 1000 % 60, ms % 1000);
+    }
+    return buf;
 }
 
 size_t ttml_p(const std::string& text, size_t from) {

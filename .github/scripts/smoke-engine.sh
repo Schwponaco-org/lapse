@@ -237,6 +237,22 @@ if [ "$(grep -m1 , studio.stl)" != "00:00:05:00 , 00:00:08:00 , line 0" ]; then
     fail "the first line of the text STL did not land at 00:00:05:00"
 fi
 
+echo "== iTunes Timed Text keeps its times in frames"
+{
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter" ttp:timeBase="smpte" ttp:frameRate="25">\n<body><div>\n'
+    for i in $(seq 0 39); do
+        printf '<p begin="%s" end="%s">line %d</p>\n' "$(spruce_tc $((5000 + i * 7000 + SHIFT)))" "$(spruce_tc $((8000 + i * 7000 + SHIFT)))" $i
+    done
+    printf '</div></body>\n</tt>\n'
+} > apple.itt
+run reference.srt apple.itt --force --no-backup
+if [ "$status" != "$SOLID" ]; then
+    fail "expected exit $SOLID for an .itt, got $status"
+fi
+if ! grep -q '<p begin="00:00:05:00" end="00:00:08:00">line 0</p>' apple.itt; then
+    fail "the first line of the .itt did not land at 00:00:05:00 in frames"
+fi
+
 cd /
 rm -rf "$WORK"
 echo "engine looks good"
