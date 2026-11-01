@@ -36,10 +36,6 @@
 #include "log.h"
 #include "transcribe.h"
 
-// The formats the parsers and the writers both handle. Callers can ask for the
-// list with --formats so they know what is safe to hand us
-const char* subtitle_formats[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2", ".sup", ".sbv", ".idx", ".smi", ".sami", ".ttml", ".dfxp", ".stl", ".scc"};
-
 bool is_subtitle(const std::string& path) {
     return !subtitle_kind(path).empty();
 }
@@ -75,33 +71,6 @@ static double fps_from_length(const std::string& sub_path, const std::string& ot
 
     if (std::fabs(best - got) > best * 0.08) return 0;
     return best;
-}
-
-// The format follows the file we read, the destination is wherever the caller asked us to put it
-void write_offsets(const std::string& in_path, const std::string& out_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    std::string kind = subtitle_kind(in_path);
-    if (kind == ".srt")
-        write_srt_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".ass" || kind == ".ssa")
-        write_ass_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".vtt")
-        write_vtt_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".sub" || kind == ".mpl2")
-        write_sub_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".sup")
-        write_sup_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".sbv")
-        write_sbv_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".idx")
-        write_idx_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".smi")
-        write_smi_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".ttml" || kind == ".dfxp")
-        write_ttml_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".stl")
-        write_stl_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".scc")
-        write_scc_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
 }
 
 static int nearest_cut(const std::vector<int>& cuts, int at) {
@@ -631,7 +600,7 @@ int run(int argc, const char *argv[]) {
             std::cout << LAPSE_VERSION << '\n';
             return 0;
         } else if (arg == "--formats") {
-            for (auto& ext : subtitle_formats)
+            for (auto& ext : SUBTITLE_FORMATS)
                 std::cout << ext << '\n';
             return 0;
         } else if (arg == "--vad") {
@@ -988,7 +957,7 @@ int run(int argc, const char *argv[]) {
 
         if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
-            write_offsets(input_path, output_path, slope, offsets, mapping);
+            write_subtitle(input_path, output_path, slope, 0, offsets, mapping);
         }
         report(card);
         return (verdict != Verdict::Solid && !force) ? 3 : 0;
@@ -1009,33 +978,10 @@ int run(int argc, const char *argv[]) {
         end_moves(ends);
         card.unchanged = ends.empty() && still(offsets, slope);
 
-        std::string kind = subtitle_kind(input_path);
         if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
-            if (card.snapped)
-                write_offsets(input_path, output_path, slope, offsets, mapping);
-            else if (kind == ".srt")
-                write_srt_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".ass" || kind == ".ssa")
-                write_ass_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".vtt")
-                write_vtt_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".sub" || kind == ".mpl2")
-                write_sub_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".sup")
-                write_sup_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".sbv")
-                write_sbv_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".idx")
-                write_idx_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".smi")
-                write_smi_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".ttml" || kind == ".dfxp")
-                write_ttml_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".stl")
-                write_stl_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".scc")
-                write_scc_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
+            if (card.snapped) write_subtitle(input_path, output_path, slope, 0, offsets, mapping);
+            else write_subtitle(input_path, output_path, slope, intercept);
         }
         report(card);
         return (verdict != Verdict::Solid && !force) ? 3 : 0;

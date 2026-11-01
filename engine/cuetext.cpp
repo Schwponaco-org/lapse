@@ -160,30 +160,7 @@ static std::vector<std::string> srt_cue_text(const std::string& path) {
 }
 
 static std::vector<std::string> sbv_cue_text(const std::string& path) {
-    std::vector<std::string> out;
-    std::istringstream file(load_text(path));
-    std::string line, blob;
-    bool inside = false;
-
-    while (getline(file, line)) {
-        if (sbv_time_line(trim(line))) {
-            if (inside) out.push_back(blob);
-            blob.clear();
-            inside = true;
-            continue;
-        }
-        if (!inside) continue;
-        if (trim(line).empty()) {
-            out.push_back(blob);
-            blob.clear();
-            inside = false;
-            continue;
-        }
-        if (!blob.empty()) blob += '\n';
-        blob += line;
-    }
-    if (inside) out.push_back(blob);
-    return out;
+    return block_cue_text(load_text(path), [](const std::string& line) { return sbv_time_line(trim(line)); });
 }
 
 // the text is the tail behind the last field the Format line named

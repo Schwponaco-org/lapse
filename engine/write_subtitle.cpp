@@ -16,6 +16,7 @@
 #include "write_subtitle.h"
 #include "srt_parser.h"
 #include <cmath>
+#include <functional>
 
 
 void backup_file(const char* path) {
@@ -133,22 +134,26 @@ static std::string ms_to_centis(int ms) {
 // srt and vtt are the same file with a different character in front of the
 // milliseconds, so they go through here together. We write to a temp file and
 // move it into place at the end if something throws halfway the subtitle the user already had is still whole
-static void write_cues(const char* input_path, const char* output_path, char ms_sep, const Shift& shift) {
-    std::string text = load_file(input_path);
+static void rewrite_lines(const std::string& text, const char* output_path, const std::function<void(std::string&)>& change) {
     bool ends_clean = !text.empty() && text.back() == '\n';
     std::istringstream ss(text);
-
-    std::string out;
-
-    std::string line;
-    int cue = 0;
+    std::string out, line;
     const char* eol = "\n";
     while (std::getline(ss, line)) {
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
             eol = "\r\n";
         }
+        change(line);
+        out += line;
+        if (ends_clean || !ss.eof()) out += eol;
+    }
+    save_file(output_path, out);
+}
 
+static void write_cues(const char* input_path, const char* output_path, char ms_sep, const Shift& shift) {
+    int cue = 0;
+    rewrite_lines(load_file(input_path), output_path, [&](std::string& line) {
         size_t arrow = line.find("-->");
         if (arrow != std::string::npos) {
             int start_ms = parse_timestamp(line, 0);
@@ -174,30 +179,12 @@ static void write_cues(const char* input_path, const char* output_path, char ms_
                 if (ms >= 0) line.replace(at + 1, close - at - 1, ms_to_ts(shift.apply(ms, cue - 1), '.'));
             }
         }
-
-        out += line;
-        if (ends_clean || !ss.eof()) out += eol;
-    }
-
-    save_file(output_path, out);
+    });
 }
 
 static void write_sbv(const char* input_path, const char* output_path, const Shift& shift) {
-    std::string text = load_file(input_path);
-    bool ends_clean = !text.empty() && text.back() == '\n';
-    std::istringstream ss(text);
-
-    std::string out;
-
-    std::string line;
     int cue = 0;
-    const char* eol = "\n";
-    while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-            eol = "\r\n";
-        }
-
+    rewrite_lines(load_file(input_path), output_path, [&](std::string& line) {
         std::string t = trim(line);
         if (sbv_time_line(t)) {
             size_t comma = t.find(',');
@@ -212,33 +199,14 @@ static void write_sbv(const char* input_path, const char* output_path, const Shi
             }
             cue++;
         }
-
-        out += line;
-        if (ends_clean || !ss.eof()) out += eol;
-    }
-
-    save_file(output_path, out);
+    });
 }
 
 static void write_dialogue(const char* input_path, const char* output_path, const Shift& shift) {
-    std::string text = load_file(input_path);
-    bool ends_clean = !text.empty() && text.back() == '\n';
-    std::istringstream ss(text);
-
-    std::string out;
-
-    std::string line;
     int cue = 0;
     int start_col = 1;
     int end_col = 2;
-    const char* eol = "\n";
-
-    while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-            eol = "\r\n";
-        }
-
+    rewrite_lines(load_file(input_path), output_path, [&](std::string& line) {
         if (line.rfind("Format:", 0) == 0) {
             auto [s, e] = ass_time_columns(line);
             if (s >= 0 && e >= 0) { start_col = s; end_col = e; }
@@ -269,12 +237,7 @@ static void write_dialogue(const char* input_path, const char* output_path, cons
             }
             cue++;
         }
-
-        out += line;
-        if (ends_clean || !ss.eof()) out += eol;
-    }
-
-    save_file(output_path, out);
+    });
 }
 
 // Three formats share .sub. MicroDVD lines get counted in frames, so the times
@@ -285,20 +248,8 @@ static void write_sub_lines(const char* input_path, const char* output_path, con
     bool subviewer = is_subviewer(text);
     bool tenths = !subviewer && is_mpl2(text);
     double fps = (subviewer || tenths) ? 0 : sub_fps(text);
-    bool ends_clean = !text.empty() && text.back() == '\n';
-    std::istringstream ss(text);
-
-    std::string out;
-
-    std::string line;
     int cue = 0;
-    const char* eol = "\n";
-    while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-            eol = "\r\n";
-        }
-
+    rewrite_lines(text, output_path, [&](std::string& line) {
         long long a, b;
         size_t text_from;
         size_t comma;
@@ -336,12 +287,7 @@ static void write_sub_lines(const char* input_path, const char* output_path, con
             }
             cue++;
         }
-
-        out += line;
-        if (ends_clean || !ss.eof()) out += eol;
-    }
-
-    save_file(output_path, out);
+    });
 }
 
 static void save_bytes(const char* output_path, const std::string& data) {
@@ -425,22 +371,9 @@ static std::string ms_to_idx_ts(int ms) {
 }
 
 static void write_idx(const char* input_path, const char* output_path, const Shift& shift) {
-    std::string text = load_file(input_path);
-    bool ends_clean = !text.empty() && text.back() == '\n';
-    std::istringstream ss(text);
-
-    std::string out;
-
-    std::string line;
     int cue = 0;
     int delay = 0;
-    const char* eol = "\n";
-    while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-            eol = "\r\n";
-        }
-
+    rewrite_lines(load_file(input_path), output_path, [&](std::string& line) {
         size_t vf, vl;
         if (!idx_delay_line(line, delay) && idx_time_line(line, vf, vl)) {
             int ms = idx_time_ms(line.substr(vf, vl));
@@ -448,12 +381,7 @@ static void write_idx(const char* input_path, const char* output_path, const Shi
                 line = line.substr(0, vf) + ms_to_idx_ts(shift.apply(ms + delay, cue) - delay) + line.substr(vf + vl);
             cue++;
         }
-
-        out += line;
-        if (ends_clean || !ss.eof()) out += eol;
-    }
-
-    save_file(output_path, out);
+    });
 }
 
 static void write_smi(const char* input_path, const char* output_path, const Shift& shift) {
@@ -568,106 +496,26 @@ static void write_scc(const char* input_path, const char* output_path, const Shi
     save_file(output_path, out);
 }
 
-static Shift one_line(double slope, double intercept_s) {
+void write_subtitle(const std::string& input_path, const std::string& output_path, double slope, double intercept_s, const std::vector<int>& offsets, const std::vector<int>& mapping) {
     Shift shift;
     shift.slope = slope;
     shift.intercept_s = intercept_s;
-    return shift;
-}
-
-static Shift per_cue(double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    Shift shift;
-    shift.slope = slope;
     shift.offsets = offsets;
     shift.mapping = mapping;
     shift.ends = moved_ends;
-    return shift;
-}
 
-void write_srt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    write_cues(input_path, output_path, ',', one_line(slope, intercept_s));
-}
-
-void write_vtt_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    write_cues(input_path, output_path, '.', one_line(slope, intercept_s));
-}
-
-void write_ass_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    write_dialogue(input_path, output_path, one_line(slope, intercept_s));
-}
-
-void write_sub_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    write_sub_lines(input_path, output_path, one_line(slope, intercept_s));
-}
-
-void write_sup_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    write_sup(input_path, output_path, one_line(slope, intercept_s));
-}
-
-void write_sbv_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    write_sbv(input_path, output_path, one_line(slope, intercept_s));
-}
-
-void write_idx_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    write_idx(input_path, output_path, one_line(slope, intercept_s));
-}
-
-void write_smi_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    write_smi(input_path, output_path, one_line(slope, intercept_s));
-}
-
-void write_ttml_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    write_ttml(input_path, output_path, one_line(slope, intercept_s));
-}
-
-void write_stl_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    write_stl(input_path, output_path, one_line(slope, intercept_s));
-}
-
-void write_scc_OLS(const char* input_path, const char* output_path, double slope, double intercept_s) {
-    write_scc(input_path, output_path, one_line(slope, intercept_s));
-}
-
-void write_srt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    write_cues(input_path, output_path, ',', per_cue(slope, offsets, mapping));
-}
-
-void write_vtt_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    write_cues(input_path, output_path, '.', per_cue(slope, offsets, mapping));
-}
-
-void write_ass_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    write_dialogue(input_path, output_path, per_cue(slope, offsets, mapping));
-}
-
-void write_sub_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    write_sub_lines(input_path, output_path, per_cue(slope, offsets, mapping));
-}
-
-void write_sup_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    write_sup(input_path, output_path, per_cue(slope, offsets, mapping));
-}
-
-void write_sbv_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    write_sbv(input_path, output_path, per_cue(slope, offsets, mapping));
-}
-
-void write_idx_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    write_idx(input_path, output_path, per_cue(slope, offsets, mapping));
-}
-
-void write_smi_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    write_smi(input_path, output_path, per_cue(slope, offsets, mapping));
-}
-
-void write_ttml_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    write_ttml(input_path, output_path, per_cue(slope, offsets, mapping));
-}
-
-void write_stl_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    write_stl(input_path, output_path, per_cue(slope, offsets, mapping));
-}
-
-void write_scc_split(const char* input_path, const char* output_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    write_scc(input_path, output_path, per_cue(slope, offsets, mapping));
+    const char* in = input_path.c_str();
+    const char* out = output_path.c_str();
+    std::string kind = subtitle_kind(input_path);
+    if (kind == ".srt") write_cues(in, out, ',', shift);
+    else if (kind == ".vtt") write_cues(in, out, '.', shift);
+    else if (kind == ".ass" || kind == ".ssa") write_dialogue(in, out, shift);
+    else if (kind == ".sub" || kind == ".mpl2") write_sub_lines(in, out, shift);
+    else if (kind == ".sup") write_sup(in, out, shift);
+    else if (kind == ".sbv") write_sbv(in, out, shift);
+    else if (kind == ".idx") write_idx(in, out, shift);
+    else if (kind == ".smi") write_smi(in, out, shift);
+    else if (kind == ".ttml" || kind == ".dfxp") write_ttml(in, out, shift);
+    else if (kind == ".stl") write_stl(in, out, shift);
+    else if (kind == ".scc") write_scc(in, out, shift);
 }

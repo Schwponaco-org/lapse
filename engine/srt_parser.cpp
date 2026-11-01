@@ -27,6 +27,17 @@ static void strip_bom(std::string& line) {
         line.erase(0, 3);
 }
 
+static bool room(size_t have) {
+    if (have < (size_t)MAX_CUES) return true;
+    say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+    return false;
+}
+
+static void keep(std::vector<std::pair<int,int>>& timestamps, int start_ms, int end_ms) {
+    if (start_ms < 0 || end_ms < 0) timestamps.push_back({0, 0});
+    else timestamps.push_back({start_ms, end_ms});
+}
+
 std::string load_text(const std::string& path, Charset* was) {
     std::ifstream in(path, std::ios::binary);
     if (!in) throw std::runtime_error("Cannot open subtitle: " + path);
@@ -202,13 +213,16 @@ static bool worth_reading(const std::string& path) {
     return !ec && bytes > 0 && bytes < 4u * 1024 * 1024;
 }
 
+// The formats the parsers and the writers both handle. Callers can ask for the
+// list with --formats so they know what is safe to hand us
+const std::vector<std::string> SUBTITLE_FORMATS = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2", ".sup", ".sbv",
+                                                   ".idx", ".smi", ".sami", ".ttml", ".dfxp", ".stl", ".scc"};
+
 std::string subtitle_kind(const std::string& path) {
-    static const char* known[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2",
-                                  ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp", ".stl", ".scc"};
     std::string ext = std::filesystem::path(path).extension().string();
     for (char& c : ext) c = (char)tolower((unsigned char)c);
     if (ext == ".sami") return ".smi";
-    for (auto one : known)
+    for (auto& one : SUBTITLE_FORMATS)
         if (ext == one) return ext;
 
     if ((!ext.empty() && ext != ".txt") || !worth_reading(path)) return "";
@@ -259,18 +273,12 @@ std::vector<std::pair<int, int>> read_srt(const char* filename) {
         size_t arrow = line.find("-->");
         if (arrow == std::string::npos) continue;
 
-        if ((int)timestamps.size() >= MAX_CUES) {
-            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
-            break;
-        }
+        if (!room(timestamps.size())) break;
 
         int start_ms = parse_timestamp(line, 0);
         int end_ms   = parse_timestamp(line, arrow + 3);
 
-        if (start_ms < 0 || end_ms < 0)
-            timestamps.push_back({0, 0});   // dropped later, keeps the count right
-        else
-            timestamps.push_back(std::make_pair(start_ms, end_ms));
+        keep(timestamps, start_ms, end_ms);
     }
     return timestamps;
 }
@@ -331,10 +339,7 @@ std::vector<std::pair<int, int>> read_ass(const char* filename) {
         }
         if (line.rfind("Dialogue:", 0) != 0) continue;
 
-        if ((int)timestamps.size() >= MAX_CUES) {
-            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
-            break;
-        }
+        if (!room(timestamps.size())) break;
 
         std::vector<size_t> commas = ass_commas(line);
         size_t from, len;
@@ -346,10 +351,7 @@ std::vector<std::pair<int, int>> read_ass(const char* filename) {
         if (ass_field(line, commas, end_col, from, len))
             end_ms = parse_timestamp(line.substr(from, len), 0);
 
-        if (start_ms < 0 || end_ms < 0)
-            timestamps.push_back({0, 0});
-        else
-            timestamps.push_back({start_ms, end_ms});
+        keep(timestamps, start_ms, end_ms);
     }
     return timestamps;
 }
@@ -421,18 +423,12 @@ static std::vector<std::pair<int,int>> read_mpl2(const std::string& text) {
         size_t text_from;
         if (!mpl2_times(line, a, b, text_from)) continue;
 
-        if ((int)timestamps.size() >= MAX_CUES) {
-            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
-            break;
-        }
+        if (!room(timestamps.size())) break;
 
         int start_ms = tenths_to_ms(a);
         int end_ms   = tenths_to_ms(b);
 
-        if (start_ms < 0 || end_ms < 0)
-            timestamps.push_back({0, 0});
-        else
-            timestamps.push_back({start_ms, end_ms});
+        keep(timestamps, start_ms, end_ms);
     }
     return timestamps;
 }
@@ -485,18 +481,12 @@ static std::vector<std::pair<int,int>> read_subviewer(const std::string& text) {
         size_t comma;
         if (!subviewer_times(line, comma)) continue;
 
-        if ((int)timestamps.size() >= MAX_CUES) {
-            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
-            break;
-        }
+        if (!room(timestamps.size())) break;
 
         int start_ms = parse_timestamp(line.substr(0, comma), 0);
         int end_ms   = parse_timestamp(line, comma + 1);
 
-        if (start_ms < 0 || end_ms < 0)
-            timestamps.push_back({0, 0});
-        else
-            timestamps.push_back({start_ms, end_ms});
+        keep(timestamps, start_ms, end_ms);
     }
     return timestamps;
 }
@@ -519,18 +509,26 @@ std::vector<std::pair<int,int>> read_sub(const char* filename) {
         size_t text_from;
         if (!sub_frames(line, a, b, text_from)) continue;
 
-        if ((int)timestamps.size() >= MAX_CUES) {
-            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
-            break;
-        }
+        if (!room(timestamps.size())) break;
 
         int start_ms = frames_to_ms(a, fps);
         int end_ms   = frames_to_ms(b, fps);
 
-        if (start_ms < 0 || end_ms < 0)
-            timestamps.push_back({0, 0});
-        else
-            timestamps.push_back({start_ms, end_ms});
+        keep(timestamps, start_ms, end_ms);
+    }
+    return timestamps;
+}
+
+static std::vector<std::pair<int,int>> shown_spans(const std::vector<std::pair<int,bool>>& marks) {
+    std::vector<std::pair<int,int>> timestamps;
+    for (size_t i = 0; i < marks.size(); i++) {
+        if (!marks[i].second) continue;
+        if (!room(timestamps.size())) break;
+        int start = marks[i].first;
+        int end = (i + 1 < marks.size()) ? marks[i + 1].first : start + 2000;
+        if (end <= start) end = start + 2000;
+        if (end - start > MAX_CUE_MS) end = start + MAX_CUE_MS;
+        timestamps.push_back({start, end});
     }
     return timestamps;
 }
@@ -557,20 +555,7 @@ std::vector<std::pair<int,int>> read_sup(const char* filename) {
         pos = payload + size;
     }
 
-    std::vector<std::pair<int,int>> timestamps;
-    for (size_t i = 0; i < marks.size(); i++) {
-        if (!marks[i].second) continue;
-        if ((int)timestamps.size() >= MAX_CUES) {
-            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
-            break;
-        }
-        int start = marks[i].first;
-        int end = (i + 1 < marks.size()) ? marks[i + 1].first : start + 2000;
-        if (end <= start) end = start + 2000;
-        if (end - start > MAX_CUE_MS) end = start + MAX_CUE_MS;
-        timestamps.push_back({start, end});
-    }
-    return timestamps;
+    return shown_spans(marks);
 }
 
 bool ebu_stl(const std::string& data) {
@@ -604,10 +589,7 @@ std::vector<std::pair<int,int>> read_stl(const char* filename) {
         int sn = b[1] | (b[2] << 8);
         if (b[15] || sn == last) continue;
         last = sn;
-        if ((int)timestamps.size() >= MAX_CUES) {
-            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
-            break;
-        }
+        if (!room(timestamps.size())) break;
         timestamps.push_back({stl_ms(b + 5, fps) - zero, stl_ms(b + 9, fps) - zero});
     }
     return timestamps;
@@ -665,10 +647,7 @@ std::vector<std::pair<int,int>> read_scc(const char* filename) {
 
     for (size_t i = 0; i < lines.size(); i++) {
         if (!lines[i].show) continue;
-        if ((int)timestamps.size() >= MAX_CUES) {
-            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
-            break;
-        }
+        if (!room(timestamps.size())) break;
         int start = lines[i].ms;
         int end = start + 2000;
         for (size_t j = i + 1; j < lines.size(); j++)
@@ -704,10 +683,7 @@ std::vector<std::pair<int, int>> read_sbv(const char* filename) {
         std::string t = trim(line);
         if (!sbv_time_line(t)) continue;
 
-        if ((int)timestamps.size() >= MAX_CUES) {
-            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
-            break;
-        }
+        if (!room(timestamps.size())) break;
 
         size_t comma = t.find(',');
         std::string left = t.substr(0, comma);
@@ -715,10 +691,7 @@ std::vector<std::pair<int, int>> read_sbv(const char* filename) {
         int start_ms = parse_timestamp(left, 0);
         int end_ms   = parse_timestamp(right, 0);
 
-        if (start_ms < 0 || end_ms < 0)
-            timestamps.push_back({0, 0});
-        else
-            timestamps.push_back({start_ms, end_ms});
+        keep(timestamps, start_ms, end_ms);
     }
     return timestamps;
 }
@@ -818,10 +791,7 @@ std::vector<std::pair<int,int>> read_idx(const char* filename) {
         size_t vf, vl;
         if (idx_delay_line(line, delay) || !idx_time_line(line, vf, vl)) continue;
 
-        if ((int)starts.size() >= MAX_CUES) {
-            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
-            break;
-        }
+        if (!room(starts.size())) break;
 
         int at = idx_time_ms(line.substr(vf, vl));
         starts.push_back(at < 0 ? -1 : at + delay);
@@ -905,20 +875,7 @@ std::vector<std::pair<int,int>> read_smi(const char* filename) {
         pos = tag_end + 1;
     }
 
-    std::vector<std::pair<int,int>> timestamps;
-    for (size_t i = 0; i < marks.size(); i++) {
-        if (!marks[i].second) continue;
-        if ((int)timestamps.size() >= MAX_CUES) {
-            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
-            break;
-        }
-        int start = marks[i].first;
-        int end = (i + 1 < marks.size()) ? marks[i + 1].first : start + 2000;
-        if (end <= start) end = start + 2000;
-        if (end - start > MAX_CUE_MS) end = start + MAX_CUE_MS;
-        timestamps.push_back({start, end});
-    }
-    return timestamps;
+    return shown_spans(marks);
 }
 
 bool ttml_attr(const std::string& text, size_t from, size_t to, const char* name, size_t& val_from, size_t& val_len) {
@@ -1000,10 +957,7 @@ std::vector<std::pair<int,int>> read_ttml(const char* filename) {
         if (tag_end == std::string::npos) break;
         pos = tag_end + 1;
 
-        if ((int)timestamps.size() >= MAX_CUES) {
-            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
-            break;
-        }
+        if (!room(timestamps.size())) break;
 
         size_t bf, bl, ef, el, df, dl;
         int start_ms = ttml_attr(text, open, tag_end, "begin", bf, bl) ? ttml_time_ms(text.substr(bf, bl)) : -1;
@@ -1014,10 +968,7 @@ std::vector<std::pair<int,int>> read_ttml(const char* filename) {
             if (start_ms >= 0 && dur >= 0) end_ms = start_ms + dur;
         }
 
-        if (start_ms < 0 || end_ms < 0)
-            timestamps.push_back({0, 0});
-        else
-            timestamps.push_back({start_ms, end_ms});
+        keep(timestamps, start_ms, end_ms);
     }
     return timestamps;
 }

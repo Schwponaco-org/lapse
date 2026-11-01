@@ -43,6 +43,7 @@ double sub_fps(const std::string& text);
 void set_sub_fps(double fps);
 int frames_to_ms(long long frame, double fps);
 
+extern const std::vector<std::string> SUBTITLE_FORMATS;
 std::string subtitle_kind(const std::string& path);
 std::vector<std::pair<int,int>> read_subtitle(const std::string& path);
 std::vector<std::pair<int, int>> read_srt(const char* filename);
