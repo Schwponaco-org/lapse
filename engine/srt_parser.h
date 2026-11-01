@@ -86,9 +86,11 @@ const float SPEECH_THRESHOLD = 0.25f;
 const int MIN_CUES = 10;
 const int MIN_SPEECH_MS = 200;
 const int MAX_CUE_MS = 10000;
+const int LEAD_IN_MS = 150;
 
 const int MAX_TIME_MS = 24 * 3600 * 1000;
 const int MAX_CUES = 100000;
 const size_t MAX_SUBTITLE_BYTES = 64u * 1024 * 1024;
 
 std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(const std::vector<float>& probability);
+void lead_in(std::vector<std::pair<int,int>>& spans);
