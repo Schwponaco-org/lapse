@@ -185,10 +185,11 @@ The options can go anywhere on the line.
 | `--json` | Print one line of JSON on stdout and everything else on stderr |
 | `--quiet` | Print only errors |
 
-And a few that answer a question and stop:
+And a few that do one thing and stop:
 
 | Command | What it does |
 |---|---|
+| `lapse --shift <ms> <subtitle>` | Move every line by `ms`, earlier when it is negative. No video is needed, and `--output`, `--no-backup`, `--encoding`, `--fps` and `--dry-run` work as usual |
 | `lapse --undo <subtitle>` | Put the `.bak` back and delete it |
 | `lapse --version` | Print the version |
 | `lapse --formats` | List the subtitle extensions this copy reads and writes |

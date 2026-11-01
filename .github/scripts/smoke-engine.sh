@@ -253,6 +253,16 @@ if ! grep -q '<p begin="00:00:05:00" end="00:00:08:00">line 0</p>' apple.itt; th
     fail "the first line of the .itt did not land at 00:00:05:00 in frames"
 fi
 
+echo "== --shift moves every line by hand"
+cp pristine.srt byhand.srt
+run --shift -$SHIFT byhand.srt --no-backup
+if [ "$status" != "$SOLID" ]; then
+    fail "expected exit $SOLID for --shift, got $status"
+fi
+if ! cmp -s byhand.srt reference.srt; then
+    fail "--shift -$SHIFT did not put the file back on the reference"
+fi
+
 cd /
 rm -rf "$WORK"
 echo "engine looks good"

@@ -424,6 +424,10 @@ static std::string escaped(const std::string& s) {
 }
 
 static void report(const Report& r) {
+    if (!as_json && r.mode == "shift") {
+        say() << "Moved every line by " << r.offset << "ms -> " << r.output << '\n';
+        return;
+    }
     if (!as_json) {
         say() << "Done (" << r.mode << "): offset=" << r.offset << "ms";
         if (r.ratio != 1.0) say() << " ratio=" << r.ratio;
@@ -481,6 +485,7 @@ void usage() {
     std::cerr << "       lapse --formats\n";
     std::cerr << "       lapse --vad\n";
     std::cerr << "       lapse --undo <subtitle>\n";
+    std::cerr << "       lapse --shift <ms> <subtitle>   move every line by ms, earlier when it is negative\n";
     std::cerr << "       lapse --batch   read one job per line from stdin, same arguments as above, one json reply per line\n";
 }
 
@@ -555,6 +560,8 @@ int run(int argc, const char *argv[]) {
     int min_shift = 1;
     std::string whisper_model;
     double fps = 0;
+    double shift_ms = 0;
+    bool shifting = false;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -645,11 +652,48 @@ int run(int argc, const char *argv[]) {
         } else if (arg == "--whisper") {
             if (i + 1 >= argc) { usage(); return -1; }
             whisper_model = argv[++i];
+        } else if (arg == "--shift") {
+            if (i + 1 >= argc || !number(argv[++i], shift_ms) || std::fabs(shift_ms) > MAX_TIME_MS) {
+                std::cerr << "--shift wants a number of ms\n";
+                return -1;
+            }
+            shifting = true;
         } else if (arg == "--force") {
             force = true;
         } else {
             args.push_back(arg);
         }
+    }
+
+    if (shifting) {
+        if (args.size() != 1 || !is_subtitle(args[0])) {
+            std::cerr << "--shift wants one subtitle to move\n";
+            return -1;
+        }
+        std::string input_path = args[0];
+        if (output_path.empty()) output_path = input_path;
+        set_sub_fps(fps);
+        if (is_microdvd(input_path) && sub_fps(load_text(input_path)) <= 0) {
+            std::cerr << "Cannot tell what frame rate " << input_path << " counts in, pass --fps N\n";
+            return 1;
+        }
+
+        Report card;
+        card.mode = "shift";
+        card.reference = "none";
+        card.offset = (int)std::lround(shift_ms);
+        card.offsets.assign(1, card.offset);
+        card.cues = (int)read_subtitle(input_path).size();
+        card.verdict = "solid";
+        card.written = true;
+        card.unchanged = card.offset == 0 && output_path == input_path;
+        card.output = output_path;
+        if (!dry_run && !card.unchanged) {
+            if (make_backup) backup_file(input_path.c_str());
+            write_subtitle(input_path, output_path, 0, shift_ms / 1000.0);
+        }
+        report(card);
+        return 0;
     }
 
     if (args.size() == 1 && !is_subtitle(args[0])) {
