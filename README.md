@@ -2,25 +2,55 @@
 
 **Language-Agnostic Playback Synchronization Engine**
 
-Automatically fixes subtitle sync in your media library. Detects how far off your subtitles are and corrects them, including linear drift caused by framerate mismatches between the video and the subtitle file.
+LAPSE fixes subtitles that are out of sync with the video. It listens to the film, finds where people are talking, and moves the subtitle so every line comes up with the speech it belongs to. Nothing in it depends on the language, so it works the same for a Danish subtitle on a Danish film as for an English one on a Japanese film.
 
-The `lapse` binary is a C++ engine built on FFmpeg, libfvad and FFTW3. It syncs one file at a time by default, or a whole stack of them in one process with `--batch`. The Docker image wraps that engine with a Python watcher that scans your library, matches subtitles to video and keeps a SQLite record so nothing gets processed twice. Run the binary by hand for a single file, or run the container to keep a whole library synced on its own.
+It fixes a subtitle that is early or late by the same amount all the way through, one that slowly drifts further out because it was made for a different frame rate, and one that was made for a different cut of the film, with scenes or ad breaks in other places.
 
-## Try it in the browser
+You can run it three ways:
 
-This is the same engine compiled to WebAssembly, not a separate implementation. It runs in the tab, so a video never leaves the machine it is on.
+- **`lapse`**, a single program you run on one file at a time, or on a whole list of them with `--batch`.
+- **The Docker image**, which watches your media library, pairs every subtitle with its video and keeps the lot in sync, with a web page to see and undo what it did.
+- **The [Jellyfin plugin](https://github.com/Schwponaco-org/lapse-jellyfin-plugin)**, which runs the same engine from inside Jellyfin.
 
-### [schwponaco.org/lapse](https://schwponaco.org/lapse/)
-
-Good for a file or two. A library still wants the binary or the Docker image above, since neither of those forgets what it already synced.
-
-A Jellyfin plugin is available at [Schwponaco-org/lapse-jellyfin-plugin](https://github.com/Schwponaco-org/lapse-jellyfin-plugin) for direct integration with your media server.
+There is also a copy in the browser at [schwponaco.org/lapse](https://schwponaco.org/lapse/). It is the same engine built for WebAssembly and runs in the tab, so the video never leaves your machine. It is handy for a file or two. For a whole library the Docker image fits better, since it keeps track of what it already synced.
 
 ---
 
-## Docs
+## Quick start
 
-[docs/benchmarks.md](docs/benchmarks.md) covers testing against alass and ffsubsync on 39 feature films picked to be hard to sync, with methodology and per-film results. Passed 36 of 39 in normal mode, 32 of 39 with splitting on, and median sync time on a cached film is 0.66 seconds.
+```bash
+./lapse movie.mkv movie.en.srt
+```
+
+LAPSE works out what is wrong with `movie.en.srt`, fixes it, and keeps the original next to it as `movie.en.srt.bak`. When it cannot prove its answer, it leaves your file alone and writes the guess to `movie.en.lapse-unsure.srt` so you can look at it.
+
+```bash
+./lapse movie.mkv
+```
+
+With no subtitle given, LAPSE takes the subtitle track out of the video, syncs it to the sound, and writes it next to the video as `movie.lapse.srt`.
+
+---
+
+## What it can fix
+
+| Problem | What it looks like | What LAPSE does |
+|---|---|---|
+| Shifted | Every line is early or late by the same amount | Finds the one offset, up to 15 minutes either way |
+| Drifting | The lines start fine and get further out, because the subtitle was timed to 25 fps and the video runs at 23.976, or the other way round | Stretches the subtitle back. The usual frame rate pairs are tried first, and anything else between 0.94 and 1.06 is searched for |
+| Cut differently | Part of the film was cut out or added, the subtitle was made for a TV broadcast with ad breaks, or for the director's cut | Splits the subtitle into parts and gives each part its own offset |
+| Starts over | Two episodes in one file, or a subtitle that restarts part way through | Lines each part up on its own |
+| Another release | You have the release the subtitle was made for, and want it on a different one | Compares the sound of the two videos, which is more to go on than the subtitle itself (`--from`) |
+
+It can sync against the sound of the video, against a subtitle track inside the video, or against another subtitle file that is already right. Sound effects in brackets, music notes, and the credit lines subtitle sites add, such as `Synced and corrected by`, are left out of the measuring. They still move with everything around them.
+
+### How it works
+
+1. **Listening.** The audio is decoded in pieces, several at once, and run through [Silero VAD](https://github.com/snakers4/silero-vad), a small speech detection model, through onnxruntime. If onnxruntime is missing, LAPSE uses libfvad instead. On a 5.1 track it tries the centre channel, the front pair and a plain downmix, and keeps whichever sounds most like speech.
+2. **Lining up.** The subtitle and the speech are turned into two signals each, one for where talking is and one for where it starts, and cross correlated with FFTW. A film that talks a lot in one half and very little in the other would pull the answer towards the busy half, so slow changes in how much talking there is are taken out of both signals first.
+3. **Deciding what is wrong.** The subtitle is also checked in eight slices. When they all agree, it is a shift. When they lie on a line, it drifts. When they land in groups, it was cut, and a dynamic programming search finds where the cuts are. Every split has to pay a price that grows with the size of the file, so a file is only cut up when that is clearly better.
+4. **Judging the answer.** The answer gets a sigma, which says how far it stands out from the noise. It is only written over your file when it stands out clearly and enough of the slices back it up.
+5. **Remembering.** The speech found in a video is cached. The next subtitle for the same video starts from it and takes about a second.
 
 ---
 
@@ -28,19 +58,19 @@ A Jellyfin plugin is available at [Schwponaco-org/lapse-jellyfin-plugin](https:/
 
 ### Download
 
-Every release ships a self-contained archive per platform. Unpack it and run the binary, there is nothing to install:
+Every release has a ready to run archive for each platform. Unpack it and run the program. There is nothing to install.
 
 | Platform | Archive | Runs on |
 |---|---|---|
-| Linux x86-64 | `lapse-linux-amd64.tar.gz` | glibc 2.31 and newer (Ubuntu 20.04+, Debian 11+) |
+| Linux x86-64 | `lapse-linux-amd64.tar.gz` | any x86-64 CPU, glibc 2.35 and newer (Ubuntu 22.04+, Debian 12+) |
 | Linux ARM64 | `lapse-linux-arm64.tar.gz` | Raspberry Pi 4/5, ARM servers, Apple silicon VMs |
 | macOS Apple silicon | `lapse-macos-arm64.tar.gz` | macOS 11 Big Sur and newer |
 | macOS Intel | `lapse-macos-x86_64.tar.gz` | macOS 10.15 Catalina and newer |
 | Windows x64 | `lapse-windows-x64.zip` | Windows 10 and newer |
 
-Each archive holds the binary, `libonnxruntime` (`onnxruntime.dll` on Windows), `silero_vad.onnx` and the licence. FFmpeg, libfvad and FFTW3 are linked into the binary, so nothing else has to be on the machine. `SHA256SUMS` covers every asset.
+Each archive holds the program, `libonnxruntime` (`onnxruntime.dll` on Windows), `silero_vad.onnx` and the licence. FFmpeg, libfvad and FFTW3 are built into the program. `SHA256SUMS` covers every file in the release.
 
-On Linux and macOS the binary needs the executable bit after unpacking:
+On Linux and macOS the program needs to be made executable after unpacking:
 
 ```bash
 tar xf lapse-linux-amd64.tar.gz
@@ -49,20 +79,20 @@ chmod +x lapse
 ./lapse --vad
 ```
 
-`--vad` prints which detector it found (`silero` or `libfvad`) and is the quickest way to tell that the archive landed intact.
+`--vad` prints `silero` or `libfvad`, depending on which speech detector it found, and is a quick way to check the archive is complete.
 
-The Windows x64 build also runs on Windows on ARM under emulation if the ARM64 one gives you trouble. Loading `onnxruntime.dll` on Windows needs the Microsoft Visual C++ 2015-2022 Redistributable, which most machines already have. Without it LAPSE says so and carries on with libfvad.
+The Windows x64 build also runs on Windows on ARM, under emulation. Loading `onnxruntime.dll` needs the Microsoft Visual C++ 2015-2022 Redistributable, which most machines already have. Without it LAPSE says so and uses libfvad.
 
-### Build
+### Build from source
 
 ```bash
 cmake -B build
 cmake --build build -j
 ```
 
-The binary lands in `build/lapse`. FFmpeg has to come from the system, everything else is used if it is installed and built inside `build/` if it is not, so on a machine that only has FFmpeg the two commands above are the whole story. Nothing is written outside the build directory.
+The program ends up in `build/lapse`. FFmpeg has to come from the system. FFTW3 and libfvad are used if they are installed and built inside `build/` if they are not, so on a machine with FFmpeg those two commands are all it takes. Nothing is written outside the build folder.
 
-| | |
+| System | FFmpeg and the build tools |
 | --- | --- |
 | macOS | `brew install cmake ffmpeg pkg-config` |
 | Debian, Ubuntu | `sudo apt install cmake pkg-config libavformat-dev libavcodec-dev libavutil-dev libswresample-dev` |
@@ -70,11 +100,19 @@ The binary lands in `build/lapse`. FFmpeg has to come from the system, everythin
 | Arch | `sudo pacman -S cmake ffmpeg pkgconf` |
 | MSYS2 | `pacman -S $MINGW_PACKAGE_PREFIX-{cmake,ffmpeg,pkgconf,toolchain}` |
 
-Installing libfftw3 and libfvad as well is fine and slightly faster, the build picks them up instead. `cmake --build build` prints where each dependency came from. `ctest --test-dir build` runs the same smoke test CI runs, and `cmake --install build` puts the binary in `/usr/local/bin` and nothing else anywhere.
+`cmake --build build` prints where each dependency came from. `ctest --test-dir build` runs the same smoke test as CI, and `cmake --install build` puts the program in `/usr/local/bin`.
 
-Useful options: `-DLAPSE_FETCH_MISSING=OFF` to fail instead of downloading anything, `-DLAPSE_STATIC_DEPS=ON` to link the dependencies statically, `-DLAPSE_DEPS_PREFIX=<prefix>` to build against a prefix from the scripts below, `-DCMAKE_BUILD_TYPE=Debug` for a build worth stepping through.
+Build options:
 
-To reproduce a release build instead, where FFmpeg, FFTW3 and libfvad are all static and minimal and the binary depends on nothing outside the platform itself:
+| Option | What it does |
+| --- | --- |
+| `-DLAPSE_FETCH_MISSING=OFF` | Stop with an error instead of downloading a missing dependency |
+| `-DLAPSE_STATIC_DEPS=ON` | Link the dependencies statically |
+| `-DLAPSE_DEPS_PREFIX=<prefix>` | Build against a prefix made by the scripts below |
+| `-DLAPSE_LTO=OFF` | Skip link time optimisation, for a quicker build |
+| `-DCMAKE_BUILD_TYPE=Debug` | A build you can step through in a debugger |
+
+To build the way the releases are built, with FFmpeg, FFTW3 and libfvad static and cut down to what LAPSE uses:
 
 ```bash
 .github/scripts/build-ffmpeg.sh "$HOME/deps"
@@ -84,15 +122,204 @@ cmake -B build-release -DLAPSE_DEPS_PREFIX="$HOME/deps"
 cmake --build build-release -j
 ```
 
-That is what CI does, on Linux, on macOS with the Xcode command line tools, and on Windows inside an MSYS2 MINGW64 shell. Set `MACOSX_DEPLOYMENT_TARGET` on macOS to pick the oldest system the binary should run on. `$HOME/deps` is a throwaway prefix -- delete it when the build is done.
+CI does this on Linux, on macOS with the Xcode command line tools, and on Windows in an MSYS2 MINGW64 shell. On macOS, `MACOSX_DEPLOYMENT_TARGET` sets the oldest system the program will run on. `$HOME/deps` can be deleted when the build is done.
 
-ONNX Runtime is not needed to build. LAPSE looks for it when it runs (`LAPSE_ONNXRUNTIME` env var, then next to the binary, then the usual library paths) and falls back to libfvad if it is missing.
+onnxruntime is not needed to build. LAPSE looks for it when it runs, first where `LAPSE_ONNXRUNTIME` points, then next to the program, then in the usual library paths. The model is looked for where `LAPSE_VAD_MODEL` points, next to the program, in `/usr/local/share/lapse` and `/usr/share/lapse`, and in the current folder.
+
+---
+
+## Command line
+
+```
+lapse <video or reference subtitle> [subtitle] [mode] [penalty] [options]
+```
+
+The first argument is what the subtitle should be lined up against. A video is listened to, or its own subtitle track is used when it has a usable one. A subtitle file that is already right works as well, and is quicker and more exact than the sound:
+
+```bash
+./lapse movie.mkv movie.da.srt
+./lapse movie.en.srt movie.da.srt
+```
+
+### Modes
+
+Without a mode LAPSE uses `auto` and works out for itself whether the file is shifted, drifting, cut, or a mix of those. The other modes are there for when you already know:
+
+| Mode | What it does |
+|---|---|
+| `auto` | Works out what the file needs. The default |
+| `nosplit` | One offset for the whole file |
+| `ols` | One offset and a stretch, for frame rate drift |
+| `split` | Lets the file be cut into parts with their own offsets |
+
+```bash
+./lapse movie.mkv movie.srt split 6
+```
+
+The number after `split` is the split penalty, the price every cut has to pay. Higher means fewer cuts. Without it LAPSE picks one from the size of the file. When the video has chapters, a cut that lands on a chapter mark costs half as much, because broadcasters put chapter marks where the ad breaks were.
+
+### Options
+
+The options can go anywhere on the line.
+
+| Option | What it does |
+|---|---|
+| `--output <path>` | Write the result to `<path>` and leave the input alone |
+| `--no-backup` | Do not keep a `.bak` of the file that was overwritten |
+| `--no-sidecar` | Write nothing when the answer is not solid, instead of a `.lapse-unsure` file |
+| `--strict` | Same as `--no-sidecar` |
+| `--force` | Write over the input whatever the verdict, and sync files with very few lines |
+| `--dry-run` | Work everything out and write nothing |
+| `--confidence N` | The sigma an answer needs before the original is overwritten. Default 8 |
+| `--min-shift ms` | Leave the file alone unless some line would move by at least this much |
+| `--no-embedded` | Ignore subtitle tracks inside the video and listen to the sound |
+| `--no-cache` | Do not read or write the cache |
+| `--full-scan` | Accepted for older scripts. The whole film is always listened to |
+| `--audio-track N` | Listen to audio track N, counting from 0, instead of the default one |
+| `--sub-track N` | Use subtitle track N inside the video as the reference |
+| `--fps N` | The frame rate to read a MicroDVD file at, instead of asking the video or the file |
+| `--encoding NAME` | Write the result as `utf8`, `utf8-bom`, `utf16le`, `utf16be` or `latin1` |
+| `--snap [ms]` | Move line starts and ends onto picture cuts close by. Default 120 ms |
+| `--from <video>` | The subtitle fits this video. Move it to the first one by their sound |
+| `--whisper <model>` | Only trust the speech whisper.cpp hears words in |
+| `--json` | Print one line of JSON on stdout and everything else on stderr |
+| `--quiet` | Print only errors |
+
+And a few that answer a question and stop:
+
+| Command | What it does |
+|---|---|
+| `lapse --undo <subtitle>` | Put the `.bak` back and delete it |
+| `lapse --version` | Print the version |
+| `lapse --formats` | List the subtitle extensions this copy reads and writes |
+| `lapse --vad` | Print `silero` or `libfvad`, and exit non-zero for `libfvad` |
+| `lapse --batch` | Read jobs from stdin, see [Batch mode](#batch-mode) |
+
+### Where the result goes
+
+| Result | Options |
+|---|---|
+| Overwrite, keep a backup (default) | none |
+| Overwrite, no backup | `--no-backup` |
+| New file, original left alone | `--output out.srt --no-backup` |
+| New file, and a backup of the original | `--output out.srt` |
+
+An existing `.bak` is never overwritten, so the first backup is always the file as it was before LAPSE ever touched it.
+
+A subtitle that is already in sync is not written again. The file keeps its modified time and no `.bak` is made, and `unchanged` in the `--json` line says so. Measuring speech is good to a few hundredths of a second, so syncing a file that is already right can still nudge it by 30 or 40 ms, and doing that again and again walks it about. `--min-shift 80` leaves it alone unless something would move by 80 ms or more. A file that drifts, or a result written to another path with `--output`, is always written.
+
+### Verdicts
+
+Every run ends with a verdict, and the verdict decides what happens to your file.
+
+| Verdict | What it means | What happens | Exit code |
+|---|---|---|---|
+| `solid` | The answer stands out clearly and the slices of the file back it up | Your subtitle is overwritten and a `.bak` kept | 0 |
+| `unsure` | There is an answer, but it is not proven | Your file is left alone and the answer goes to `name.lapse-unsure.srt` | 3 |
+| `nothing` | Nothing in the sound backs up any offset | Your file is left alone and the best guess goes to `name.lapse-unsure.srt` | 3 |
+
+`--confidence` moves the line for `solid`. `--force` writes over your file whatever the verdict. `--strict` and `--no-sidecar` write nothing when the verdict is not `solid`. The exit code follows the verdict either way, so an `unsure` that was not written still exits 3, with `written` set to `false` in the `--json` line.
+
+The other exit codes: 2 for a subtitle with fewer than 10 lines to go on (it still gets a `--json` line saying so), 1 when something could not be read or written, and 255 for options it does not understand.
+
+### Output for scripts
+
+`--json` prints one line on stdout and sends every other message to stderr:
+
+```json
+{"mode":"auto/shifted","reference":"vad","offset_ms":22,"ratio":1,"confidence":0.455,
+ "margin":0.12,"sigma":12.3,"agreement":0.75,"verdict":"solid","coverage":1,
+ "cues":1578,"ignored_cues":1,"parts":1,"snapped":0,"written":true,"unchanged":false,"output":"...","splits":[],"offsets":[22]}
+```
+
+`mode` says what LAPSE decided the file needed. `ols`, `nosplit` and `split` mean you asked for that mode. Everything under `auto` is what it worked out by itself:
+
+| `mode` | What it found | What moved |
+|---|---|---|
+| `auto/shifted` | One offset fits the whole file | `offset_ms` |
+| `auto/shifted+split` | One offset nearly fits, with cuts in it | `offset_ms`, then `splits` |
+| `auto/drifting` | The file drifts, usually a frame rate mismatch | `ratio` and `offset_ms` |
+| `auto/drifting+split` | It drifts and was cut as well | `ratio`, then `splits` |
+| `auto/recut` | The offset changes through the file | `splits` |
+| `auto/joined` | Two parts in one video | `splits` |
+| `auto/restart` | The subtitle starts over part way through | `splits` |
+
+| Field | Meaning |
+|---|---|
+| `reference` | What the subtitle was lined up against: `vad` (the sound), `vad+whisper`, `embedded` (a track in the video), `subtitle` (a subtitle file), or `none` when there were too few lines to try |
+| `offset_ms` | The main offset in milliseconds |
+| `ratio` | The stretch, `1` unless the file drifted |
+| `sigma` | How far the answer stands out from the noise. This is the number the verdict uses |
+| `confidence`, `margin` | How much of the subtitle landed on speech, and how far ahead of the next best answer it is |
+| `agreement` | The share of the eight slices that agree with the answer |
+| `coverage` | How much of the film was listened to |
+| `cues`, `ignored_cues` | How many lines the file has, and how many were left out of the measuring |
+| `parts`, `splits`, `offsets` | How many parts the file ended up in, the line each new part starts at, counting from 0 in file order, and the offset each part got |
+| `snapped` | How many line starts or ends `--snap` moved onto a picture cut |
+| `written`, `unchanged`, `output`, `why` | Whether a file was written, whether it was left as it was because nothing moved, where the result went, and why it was not written when it was not |
+
+### Batch mode
+
+Starting LAPSE loads onnxruntime and the Silero model from disk. That is fine for one file and slow for a library. `--batch` reads jobs from stdin instead, one per line, with the same arguments you would give on the command line, and keeps the model loaded for as long as stdin is open:
+
+```bash
+echo 'video1.mkv subs1.srt' >> jobs.txt
+echo 'video2.mkv subs2.srt ols' >> jobs.txt
+./lapse --batch < jobs.txt
+```
+
+Every line gets exactly one line of JSON back, in the order the jobs came in, whether the job worked or not. A job that failed before it could report gets `{"error":true}`. `--json` is implied. Paths with spaces in them need double quotes.
+
+### Moving a subtitle to another release
+
+A subtitle that is right for one copy of a film is often wrong for another: the TV broadcast against the Blu-ray, PAL against NTSC, a copy with a scene missing. If you still have the copy the subtitle was made for, the two soundtracks show exactly how the copies differ. `--from` names that copy:
+
+```bash
+./lapse bluray.mkv tv.srt --from tv-recording.ts
+```
+
+Both videos are listened to, and the speech of the old one is lined up against the speech of the new one with everything LAPSE does for a subtitle: one offset, a frame rate stretch, parts cut out or put in. Every line of the subtitle then moves the way the speech around it moved. Both videos are cached, so a second subtitle for the same pair is quick. On a test film played 4.27% faster, every line landed within 10 ms, where syncing the same subtitle against the speech directly was 145 ms out.
+
+### Listening for words
+
+The speech detector hears voices. It cannot tell whether a voice is saying anything, so singing, a crowd, or shouting over gunfire all count as speech, and in a film with a lot of that the answer stands out less. `--whisper` also runs the audio through [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and keeps only the stretches of speech it heard words in:
+
+```bash
+./lapse video.mkv subtitles.srt --whisper ~/models/ggml-base.en.bin
+```
+
+whisper.cpp is not included. LAPSE runs `whisper-cli` from the `PATH`, or wherever `LAPSE_WHISPER_CLI` points. The model is any ggml file from the whisper.cpp project, with the name they gave it, so LAPSE can tell which one it is. `ggml-base.en.bin` is plenty for English and `ggml-base.bin` for other languages. The words are cached with the speech, so only the first run on a film pays for the transcription. That is about two minutes for a two hour film on a recent laptop, and a lot longer on a small server without a GPU.
+
+The timing of each line still comes from the speech detector. Whisper only decides which speech counts, so a good answer does not move. It stands out more on a busy soundtrack: with music under the speech at the same level, sigma went from 18 to 19. It is off unless you ask for it, and when `whisper-cli` cannot be found or hears fewer than 50 words, LAPSE says so and uses all the speech.
+
+### Snapping to picture cuts
+
+Subtitlers who time to picture put a line up on the cut. Moving the whole file by one number keeps every line the same distance from the cut it was timed against, so a sync that is right to within a few frames can still look a little late.
+
+`--snap` takes that last step. Once the offset is settled, a line that starts within 120 ms of a picture cut is moved onto it, and its end moves with it so it stays on screen as long as before. An end that then sits within the same distance of a cut is moved onto that cut too, so a line does not hang over into the next shot. An end is never pulled in to less than half a second after its start, and never pushed past the start of the next line:
+
+```bash
+./lapse video.mkv subtitles.srt --snap
+./lapse video.mkv subtitles.srt --snap 60
+```
+
+The cuts come from the keyframes the encoder already put in the file, so finding them only means reading the video packets, with no decoding. Encoders put a keyframe where the picture changes, and also on a timer when it does not. The timer ones sit exactly the encoder's longest gap after the one before, so they are left out. A file where every keyframe is evenly spaced was encoded without scene detection, so there is nothing to snap to, and LAPSE says so and leaves it. It also does nothing when the reference is a subtitle file.
+
+### Encodings
+
+A subtitle is written back in the encoding it came in, whether that is UTF-8, UTF-8 with a BOM, UTF-16 or an old codepage. `--encoding` writes it in the one you name instead, which is a quick way to get a library of mixed files down to one encoding. `utf16` is taken as `utf16le`, and `iso-8859-1` and `cp1252` as `latin1`.
+
+LAPSE cannot tell one old codepage from another, so a codepage file converted to UTF-8 is read as ISO-8859-1. That is right for Western European languages. Cyrillic and CJK files come out as valid UTF-8 with the wrong letters. A character ISO-8859-1 does not have becomes `?`. `.sup` files have no text, so `--encoding` does nothing to them.
+
+### The cache
+
+The speech found in a video, and the timings of its subtitle tracks, are saved so the next run on the same video skips the decoding. The cache lives in `$LAPSE_CACHE` if that is set, otherwise in `$XDG_CACHE_HOME/lapse` or `~/.cache/lapse`, and in `%LOCALAPPDATA%\lapse\cache` on Windows. An entry belongs to one video file, so changing the file starts over. `--no-cache` skips it.
 
 ---
 
 ## Docker
 
-The Docker image includes the C++ binary and the Python file watcher. Point it at your media library and it will scan on startup then watch for new files.
+The Docker image has the `lapse` program and a watcher written in Python. Point it at your media library and it scans everything on start, then picks up new files as they arrive.
 
 ```yaml
 services:
@@ -113,7 +340,7 @@ services:
 docker compose up -d
 ```
 
-Everything you mount gets scanned. To use more than one library, add another volume and list both paths:
+Everything you mount gets scanned. For more than one library, mount each one and list them all:
 
 ```yaml
     volumes:
@@ -123,11 +350,13 @@ Everything you mount gets scanned. To use more than one library, add another vol
       - MEDIA_ROOT=/movies,/tv
 ```
 
-Set `PUID` and `PGID` to the user that owns your media. Without them the container runs as root and the files it writes end up owned by root.
+Set `PUID` and `PGID` to the user that owns your media. Without them the container runs as root, and the files it writes are owned by root.
+
+The first run is worth watching with `docker compose logs -f lapse` to check that subtitles were paired with the right videos.
 
 ### Web interface
 
-Publish port `8080` and open `http://your-host:8080`. There is no login, so keep it on your own network or behind whatever you already put in front of the rest of your stack.
+Publish port `8080` and open `http://your-host:8080`. There is no login, so keep it on your own network or behind whatever already protects the rest of your setup.
 
 ```yaml
     ports:
@@ -136,22 +365,22 @@ Publish port `8080` and open `http://your-host:8080`. There is no login, so keep
 
 From there you can:
 
-- **Pause and resume.** Pause stops it there and then. The file being synced right now is dropped part way through rather than left to finish, and it is not counted as a failed attempt, so it starts over cleanly when you resume. A paused container still watches for new files and keeps a note of them, it just does not sync anything until you let it go again. The setting survives a restart.
-- **Undo.** Puts the original subtitle back from its `.bak` and leaves that file alone from then on. Select several and undo them in one go.
-- **Sync again.** Forget what is on record for the files you picked and let them run through again, or do the whole library at once.
+- **Pause and resume.** Pausing stops straight away. The file being synced at that moment is dropped and starts over when you resume, and it does not count as a failed attempt. While paused, new files are still noticed and noted down, they just wait. The setting survives a restart.
+- **Undo.** Put the original subtitle back from its `.bak`, and leave that file alone from then on. Select several to undo them in one go.
+- **Sync again.** Forget what is on record for the files you pick, or the whole library, and run them through again.
 - **Set the rescan interval** without editing the compose file.
-- **Leave folders out.** Everything you mounted is listed, one level down. Untick what you do not want touched and the scanner walks past it. Paths deeper than that can be typed in.
-- **Translate.** Select subtitles, give a language code and send them off. See `Translation` below.
-- **Light or dark.** The button in the corner follows whatever your system is set to until you press it, and then it stays on what you picked. The choice is kept in the browser, so each device has its own.
-- **Shift.** Move a subtitle by hand, in milliseconds, for when a sync came out close but not quite right. The first cues are shown before and after as you type, and you pick whether the result lands beside the original or over it. Nothing is decoded and the engine is not involved, so it is instant. `.srt`, `.vtt`, `.ass` and `.ssa`.
-- **Sync subtitles to reference.** For items with several subtitle tracks where one is already correct. Lines every other track up against it, or just the one track you pick. Skips the audio entirely, so it is fast and usually more accurate than syncing each track on its own.
-- **Convert.** Write a subtitle out as `.srt`, `.vtt`, `.ass` or `.ssa`, leaving the original where it is unless you tick the box. An existing file at the new name is kept as `.bak` first.
-- **Film counts.** The line under the tiles says how many films are fully synced, partly synced or untouched. Subtitle tracks inside the video are left out of that sum by default, so a film with two external subtitles that are both synced counts as fully synced even when the container holds eight more. Tick `Count embedded tracks too` to have them count against it instead.
-- **Change the engine settings.** Mode, file output, confidence and every switch the CLI takes, under Settings. See `Engine settings` below.
+- **Leave folders out.** Everything you mounted is listed, one level down. Untick what should not be touched and the scanner walks past it. Deeper paths can be typed in.
+- **Translate.** Pick subtitles, give a language code and send them off. See [Translation](#translation).
+- **Shift.** Move a subtitle by hand, in milliseconds, for when a sync came out close but not quite right. The first lines are shown before and after as you type, and you choose whether the result goes next to the original or over it. Nothing is decoded, so it is instant. Works on `.srt`, `.vtt`, `.ass` and `.ssa`.
+- **Sync subtitles to a reference.** For a film with several subtitle tracks where one is already right. Lines every other track up against it, or just the one you pick. The sound is not used, so it is quick, and usually more exact than syncing each track on its own.
+- **Convert.** Write a subtitle out as `.srt`, `.vtt`, `.ass` or `.ssa`. The original stays unless you tick the box. A file already at the new name is kept as `.bak` first.
+- **Film counts.** The line under the tiles says how many films are fully synced, partly synced or untouched. Subtitle tracks inside the video are left out of the count unless you tick `Count embedded tracks too`.
+- **Change the engine settings.** Mode, where results go, confidence and every switch the command line has, under Settings. See [Engine settings](#engine-settings).
+- **Light or dark.** The button in the corner follows your system until you press it, then stays on your choice. Each browser remembers its own.
 
-The library list filters by status, by name and by confidence, so `Confidence under 5` is a quick way to find the results that did not stand out much and are worth looking at.
+The library list can be filtered by status, name and confidence, so `Confidence under 5` quickly finds the results worth a second look.
 
-What you change here is kept in the database and wins over the environment variables it overlaps with, so `SCAN_INTERVAL` is the starting point rather than the last word.
+What you change in the web interface is saved in the database and wins over the environment variables it overlaps with, so `SCAN_INTERVAL` is where it starts.
 
 | Variable | Default | What it does |
 |---|---|---|
@@ -169,61 +398,61 @@ What you change here is kept in the database and wins over the environment varia
 | `PENALTY` | `6` | Split penalty, only used in split mode |
 | `SCAN_INTERVAL` | `900` | Seconds between full rescans. `0` turns them off |
 | `MIN_CONFIDENCE` | `0` | Put the original back when a result stands out less than this, on the same scale as `CONFIDENCE`. `0` keeps everything |
-| `MAX_ATTEMPTS` | `3` | How many times a failing pair is retried before it is left alone |
+| `MAX_ATTEMPTS` | `3` | How many times a failing pair is tried before it is left alone |
 | `TIMEOUT` | `1800` | Seconds a single sync may take |
 | `POLLING` | `0` | Set to `1` on network shares where file events do not arrive |
-| `CACHE_DAYS` | `30` | Days a cached scan of a video is kept before it is deleted. `0` keeps them forever |
+| `CACHE_DAYS` | `30` | Days a cached scan of a video is kept after it was last used. `0` keeps them forever |
 
 ### Engine settings
 
-Everything the CLI takes is available in the container. Switches are `0` or `1`, the rest are left empty to use the engine default.
+Every option the command line takes is available in the container. Switches are `0` or `1`. The rest are left empty to use the engine's default.
 
-| Variable | Flag | What it does |
+| Variable | Option | What it does |
 |---|---|---|
 | `OUTPUT_SUFFIX` | `--output` | Write to `name<suffix>.srt` and never touch the original. `.synced` gives `movie.synced.srt` |
-| `NO_BACKUP` | `--no-backup` | Do not leave a `.bak` beside the file that was overwritten |
+| `NO_BACKUP` | `--no-backup` | Do not keep a `.bak` of the file that was overwritten |
 | `NO_SIDECAR` | `--no-sidecar` | Do not write a `.lapse-unsure` guess when the result is uncertain |
-| `NO_EMBEDDED` | `--no-embedded` | Ignore subtitle tracks inside the video when picking a reference |
-| `NO_CACHE` | `--no-cache` | Listen to the video and read its subtitle tracks every time instead of reusing a cached scan |
+| `NO_EMBEDDED` | `--no-embedded` | Ignore subtitle tracks inside the video |
+| `NO_CACHE` | `--no-cache` | Listen to the video and read its subtitle tracks every time |
 | `FULL_SCAN` | `--full-scan` | Accepted and ignored, the whole film is always listened to |
 | `FORCE` | `--force` | Sync even when there is little to go on |
 | `STRICT` | `--strict` | Only overwrite when the result is clearly right |
 | `DRY_RUN` | `--dry-run` | Work out every offset and write nothing, not even to the database |
 | `CONFIDENCE` | `--confidence` | How far the answer has to stand out before the original is overwritten |
 | `AUDIO_TRACK` | `--audio-track` | Which audio track to listen to |
-| `SUB_TRACK` | `--sub-track` | Which embedded subtitle track to use as reference |
+| `SUB_TRACK` | `--sub-track` | Which embedded subtitle track to use as the reference |
 | `FPS` | `--fps` | Frame rate for frame based subtitles that do not carry one |
-| `SNAP` | `--snap` | Milliseconds a cue start may be moved to land on a picture cut. Empty leaves it off |
-| `MIN_SHIFT` | `--min-shift` | Leave a subtitle alone when nothing in it would move by this many milliseconds. Empty only skips a result that changes nothing at all |
-| `ENCODING` | `--encoding` | Write every result as `utf8`, `utf8-bom`, `utf16le`, `utf16be` or `latin1`. Empty keeps whatever the file came in as |
-| `WHISPER` | `--whisper` | Path inside the container to a whisper.cpp model such as `ggml-base.en.bin`. Needs `whisper-cli` mounted in too, see `Listening for words` below |
+| `SNAP` | `--snap` | Milliseconds a line may be moved to land on a picture cut. Empty leaves it off |
+| `MIN_SHIFT` | `--min-shift` | Leave a subtitle alone when nothing in it would move by this many milliseconds |
+| `ENCODING` | `--encoding` | Write every result as `utf8`, `utf8-bom`, `utf16le`, `utf16be` or `latin1`. Empty keeps the encoding each file came in |
+| `WHISPER` | `--whisper` | Path inside the container to a whisper.cpp model such as `ggml-base.en.bin`. Needs `whisper-cli` mounted in too, see [Listening for words](#listening-for-words) |
 
-All of it is in the web interface as well, under Settings, and what you save there is used from the next scan onwards. `OUTPUT_SUFFIX` and `NO_BACKUP` are the two halves of the file output picker there:
+All of these are also under Settings in the web interface, and what you save there is used from the next scan on. `OUTPUT_SUFFIX` and `NO_BACKUP` together make the file output choice there:
 
 | File output | What happens |
 |---|---|
-| Write a new file | The original is left alone. `Movie.en.srt` gets `Movie.en.synced.srt` beside it |
-| Write a new file, keep a backup | Same, and a copy of the original is kept as `.bak` as well |
-| Overwrite, keep a backup | The subtitle is replaced and the old one is kept as `.bak`. Default |
+| Write a new file | The original is left alone. `Movie.en.srt` gets `Movie.en.synced.srt` next to it |
+| Write a new file, keep a backup | The same, and a copy of the original is kept as `.bak` |
+| Overwrite, keep a backup | The subtitle is replaced and the old one kept as `.bak`. The default |
 | Overwrite, no backup | The subtitle is replaced and nothing is kept |
 
-`OUTPUT_SUFFIX` is the way to keep a library untouched. The original stays as it is, the synced copy lands beside it, and files the container wrote itself are skipped on later scans. Pair it with `NO_BACKUP=1` if you would rather not collect `.bak` files as well.
+`OUTPUT_SUFFIX` keeps your library exactly as it is. The synced copy goes next to each original, and files the container wrote itself are skipped on later scans. Add `NO_BACKUP=1` if you do not want `.bak` files as well.
 
-`DRY_RUN=1` is worth a first pass over a large library. The log shows what every file would get without anything being written or recorded, so a second run with it off starts from scratch.
+`DRY_RUN=1` is a good first pass over a big library. The log shows what every file would get, and since nothing is written or recorded, the next run with it off starts from scratch.
 
-Cached scans are kept in a `cache` folder next to the database so they survive a restart, and anything unused for `CACHE_DAYS` is deleted. Set `LAPSE_CACHE` to put them somewhere else.
+Cached scans are kept in a `cache` folder next to the database, so they survive a restart, and anything not used for `CACHE_DAYS` is deleted. Set `LAPSE_CACHE` to keep them somewhere else.
 
 ### Translation
 
-A synced subtitle can be sent off for translation and written back beside the original as `name.<language>.srt`. Nothing is translated until you set a provider, and the engine itself is not involved.
+A synced subtitle can be sent off to be translated and written back next to the original as `name.<language>.srt`. Nothing is translated until you set a provider.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `TRANSLATE_PROVIDER` | `deepl` | `deepl`, `google` or `libretranslate` |
-| `TRANSLATE_KEY` | unset | API key. Not needed for a LibreTranslate that does not ask for one |
+| `TRANSLATE_KEY` | unset | API key. Not needed for a LibreTranslate server that does not ask for one |
 | `TRANSLATE_URL` | unset | Address of your own LibreTranslate, such as `http://libretranslate:5000` |
-| `TRANSLATE_TO` | unset | Languages every synced subtitle is translated into, comma separated. Leave empty to only translate what you pick in the interface |
-| `TRANSLATE_FROM` | unset | Source language. Left to the provider to work out when empty |
+| `TRANSLATE_TO` | unset | Languages every synced subtitle is translated into, comma separated. Leave it empty to only translate what you pick in the web interface |
+| `TRANSLATE_FROM` | unset | Source language. The provider works it out when this is empty |
 | `TRANSLATE_BATCH` | `40` | Lines per request |
 
 ```yaml
@@ -233,223 +462,46 @@ A synced subtitle can be sent off for translation and written back beside the or
       - TRANSLATE_TO=da
 ```
 
-A DeepL key ending in `:fx` is a free one and is sent to the free endpoint on its own.
+A DeepL key ending in `:fx` is a free key and goes to the free endpoint by itself.
 
-`.srt`, `.vtt`, `.ass` and `.ssa` can be translated. Timings, cue numbers and script headers are left alone, and for `.ass` only the `Dialogue:` lines are sent. A file that already exists is never overwritten, and the translations the container wrote are not synced again on the next scan.
+`.srt`, `.vtt`, `.ass` and `.ssa` can be translated. Timings, line numbers and headers stay as they are, and in `.ass` only the `Dialogue:` lines are sent. An existing file is never overwritten, and the translations the container wrote are not synced again on the next scan.
 
-If you already run [Lingarr](https://github.com/lingarr-translate/lingarr) or something like it, leave `TRANSLATE_TO` empty and keep using that. Nothing here runs unless a provider is set.
+If you already use [Lingarr](https://github.com/lingarr-translate/lingarr) or something like it, leave `TRANSLATE_TO` empty and carry on with that.
 
-### Matching
+### How subtitles are paired with videos
 
-Subtitles are matched to video by filename inside the same folder. If the subtitles sit in their own folder, like the `Subs` folder a lot of releases ship with, the folder above is checked as well.
+Subtitles are paired with videos by file name, inside the same folder. If the subtitles sit in a folder of their own, like the `Subs` folder many releases have, the folder above is checked too.
 
-Language and tag words such as `en`, `danish`, `forced` and `sdh` are ignored when names are compared, so a video can have several subtitle files matched to it at once. Episode numbers have to agree, so `S01E01` never picks up the subtitle for `S01E02`. When a folder holds one video, any subtitle in it belongs to that video.
+Language and tag words such as `en`, `danish`, `forced` and `sdh` are ignored when names are compared, so one video can have several subtitles. Episode numbers have to match, so `S01E01` never gets the subtitle for `S01E02`. When a folder has only one video, every subtitle in it belongs to that video.
 
-New files are picked up as they arrive. A file is left alone until it stops changing, so a download that is still being written is not touched. Full rescans catch anything the file events missed, which is what `SCAN_INTERVAL` and `POLLING` are for on network storage.
+A new file is left alone until it stops changing, so a download that is still being written is not touched. Full rescans catch anything the file events missed, which is what `SCAN_INTERVAL` and `POLLING` are for on network storage.
 
-Every sync is written to the database, so the same file is never done twice. Replacing a subtitle file with a new one gets it synced again.
-
-The first run is worth watching with `docker compose logs -f lapse` to check that the matches look right.
+Every sync is recorded in the database, so the same file is never done twice. Replacing a subtitle with a new file gets it synced again.
 
 ---
 
-## CLI usage
+## Subtitle formats
 
-Sync subtitles to a video file (no-split, default):
-
-```bash
-./lapse video.mkv subtitles.srt
-```
-
-Take the subtitles out of the video, sync them, and leave them next to it as `video.lapse.srt`:
-
-```bash
-./lapse video.mkv
-```
-
-Sync subtitles to another subtitle file (faster, more accurate):
-
-```bash
-./lapse reference.srt subtitles.srt
-```
-
-Sync with OLS mode for gradual framerate drift:
-
-```bash
-./lapse video.mkv subtitles.srt ols
-```
-
-The usual framerate pairs are tried first, 23.976, 24, 25, 29.97 and 30 against each other. A drift that is none of those, a capture that ran a hair fast or a cut that was sped up by some odd amount, is searched for between 0.94 and 1.06, so a file running 0.07% or 1.2% fast still lands where it should. That search only runs when the usual pairs do not fit, and costs a few seconds when it does.
-
-Sync with split mode for director's cuts or ad-break versions:
-
-```bash
-./lapse video.mkv subtitles.srt split 6
-```
-
-The fourth argument is the split penalty. A value of 6 is a good default. Higher values produce fewer splits. When the video has chapters, a split that lands on one is half the price, and a boundary in a quiet stretch goes on the chapter mark. Broadcasters put chapters where the ad breaks were, which is where the cuts usually are. Leave the mode off and LAPSE decides for itself whether the file needs shifting, drifting, splitting, or some combination (`auto` mode)
-
-### Output options
-
-By default LAPSE overwrites the subtitle file it was given and leaves a `.bak` next to it. Two flags change that:
-
-```
---output <path>     write the corrected subtitle to <path> instead of overwriting the input
---no-backup         do not create the .bak file
---no-embedded       ignore subtitle tracks inside the video and use the audio
---full-scan         accepted and ignored, the whole film is always listened to
---no-sidecar        write nothing at all rather than an unsure file beside the original
---no-cache          do not read or write the saved speech profile or subtitle track timings
---force             overwrite the input whatever the verdict is
---strict            refuse instead of writing an unsure result beside the original
---dry-run           work out the answer but write nothing
---confidence N      how far the answer has to stand out before the original is overwritten, default 8
---json              one machine readable line on stdout, everything else on stderr
---quiet             say nothing but errors
---audio-track N     use the Nth audio track instead of the default one
---sub-track N       use the Nth embedded subtitle track as the reference
---snap [ms]         pull cue starts onto the picture cuts they land next to, default window 120 ms
---encoding NAME     write the result as utf8, utf8-bom, utf16le, utf16be or latin1
---from VIDEO        the subtitle fits this video, move it to the first one by comparing their sound
---min-shift ms      leave the file alone when no cue would move by this much
---whisper MODEL     only trust the stretches of speech whisper-cli hears words in
-```
-
-A subtitle that is already right is not written again. When the answer would move nothing, the file is left as it is, with no `.bak` and the same modified time, and `unchanged` in the `--json` line says so. Listening to the film is only good to a few hundredths of a second though, so syncing a file that is already in sync can still nudge it by 30 or 40 milliseconds, and doing that over and over walks it about. `--min-shift 80` leaves it alone unless something would move by at least 80 milliseconds. A file that drifts, or a result written somewhere else with `--output`, is always written.
-
-Without `--encoding` a subtitle goes back out in whatever it came in as, which is what you want almost every time. Give it a name and the output is written that way instead, which is the quick way to get a library of mixed UTF-16 and codepage files down to one encoding. `utf16` is taken as `utf16le`, and `iso-8859-1` and `cp1252` are taken as `latin1`.
-
-The engine cannot tell one ASCII compatible codepage from another, so converting one to UTF-8 always reads it as ISO-8859-1. This works fine for Western European subtitles. Cyrillic and CJK files come out as valid UTF-8 with the wrong letters in them. A character with no ISO-8859-1 equivalent becomes `?`. `.sup` has no text in it, so `--encoding` does nothing to it.
-
-`--undo <subtitle>` puts the `.bak` back and removes it.
-
-Three flags answer a question and exit instead of syncing anything. `--version` prints the version number, `--formats` lists the subtitle extensions the engine reads and writes, and `--vad` prints `silero` or `libfvad` depending on which detector this copy can reach, exiting non-zero on the fallback.
-
-Together they cover the four ways a caller may want the output handled:
-
-| Result | Flags |
-|---|---|
-| Overwrite, keep a backup (default) | *neither flag* |
-| Overwrite, no backup | `--no-backup` |
-| Write a sidecar, leave the original alone | `--output out.srt --no-backup` |
-| Write a sidecar and back up the original | `--output out.srt` |
-
-```bash
-./lapse reference.srt danish.srt --output danish.synced.srt --no-backup
-```
-
-The flags may appear anywhere on the command line. An existing `.bak` is never overwritten, so the first backup stays the untouched original no matter how many times you run LAPSE on a file.
-
-### Batch mode
-
-Starting the binary loads onnxruntime and the Silero model from disk, which is fine for a single file and wasteful for a whole library. `--batch` reads jobs from stdin instead, one line per file with the same arguments you would otherwise put on the command line, and keeps that model loaded for as long as stdin stays open:
-
-```bash
-echo 'video1.mkv subs1.srt' >> jobs.txt
-echo 'video2.mkv subs2.srt ols' >> jobs.txt
-./lapse --batch < jobs.txt
-```
-
-Each line gets exactly one line of JSON back on stdout, in the order the jobs came in, whether or not that job worked. `--json` is implied and does not need to be added to the lines. Paths with spaces in them need double quotes.
-
-### Moving a subtitle to another release
-
-A subtitle that is right for one copy of a film is often wrong for another: the TV broadcast against the Blu-ray, PAL against NTSC, a cut with a scene missing. When you still have the copy it was right for, the two soundtracks say exactly how the copies differ, which is far more to go on than a subtitle against speech. `--from` names the copy the subtitle already fits:
-
-```bash
-./lapse bluray.mkv tv.srt --from tv-recording.ts
-```
-
-Both films are listened to, and the speech of the old one is lined up against the speech of the new one with everything LAPSE does for a subtitle: one offset, a framerate stretch, parts cut out or put in. Each line of the subtitle then moves the way the speech around it moved. Both speech profiles are cached, so doing a second subtitle for the same pair is quick. On a test film played back 4.27% faster every line landed within 10 milliseconds, where syncing the same subtitle straight against the speech was 145 milliseconds out.
-
-### Listening for words
-
-Voice detection hears a voice. It does not know whether that voice is saying anything, so a song, a crowd or someone shouting over gunfire all count as speech, and in a film with a lot of that the answer stands out less than it should. `--whisper` runs the audio through [whisper.cpp](https://github.com/ggml-org/whisper.cpp) as well and keeps only the stretches of speech it heard words in:
-
-```bash
-./lapse video.mkv subtitles.srt --whisper ~/models/ggml-base.en.bin
-```
-
-LAPSE does not ship whisper.cpp. It runs `whisper-cli` from the `PATH`, or wherever `LAPSE_WHISPER_CLI` points, and the model is any ggml file from the whisper.cpp project, named the way they name them so LAPSE can tell which one it is. `ggml-base.en.bin` is plenty for English and the multilingual `ggml-base.bin` for anything else. The words come with timings to the hundredth from whisper's own alignment, and they are cached next to the speech profile, so only the first run on a film pays for the transcription. That is about two minutes for a two hour film on a recent laptop, and a lot more on a small server with no GPU.
-
-The timings still come from voice detection, which is sharper about where a line starts than whisper is, so this does not move a good answer. What it does is make a good answer stand out more when the soundtrack is busy. With music laid under the speech at the same level, sigma went from 18 to 19 and the worst cue landed a few milliseconds closer. It is off unless you ask for it, and when whisper-cli cannot be found or hears fewer than 50 words, LAPSE says so and carries on with all the speech.
-
-### Snapping to picture cuts
-
-A subtitler writing to picture puts a line up on the cut, not three frames after it. Moving the whole file by one number keeps every line the same distance from the cut it was written against, so a sync that is right to within a few frames still reads as slightly late all the way through.
-
-`--snap` takes that last step. Once the offset is settled, any cue start sitting within 120 milliseconds of a picture cut is moved onto it, and the end of that cue moves with it so the line stays on screen just as long. An end that then sits within the same distance of a cut is moved onto that cut too, so a line does not hang over into the next shot or vanish a few frames before it. An end is never pulled in under half a second after its start, and never pushed out over the start of the next line:
-
-```bash
-./lapse video.mkv subtitles.srt --snap
-./lapse video.mkv subtitles.srt --snap 60
-```
-
-The cuts come from the keyframes the encoder already wrote into the file, which costs a read of the video packets and no decoding. Encoders start a keyframe when the picture changes and then again on a timer when it does not. The ones the timer put there sit exactly the encoder's longest gap after the keyframe before them, so they are left out and only the ones that came from a change in the picture count. A file where every keyframe sits on the same even spacing has had scene detection turned off. There is nothing in a file like that to line anything up against, so LAPSE leaves it alone and says so. It also does nothing when the reference is another subtitle file, and it never moves a cue far enough to outlast itself.
-
-`snapped` in the `--json` line says how many cues had their start or their end moved onto a cut. The flag is off unless you ask for it, and it changes nothing about how the offset itself is worked out.
-
-### Verdicts
-
-Every run reports a verdict, and it decides what happens to your file:
-
-| Verdict | What it means | What happens | Exit |
-|---|---|---|---|
-| `solid` | the answer clears the bar | the subtitle is overwritten, `.bak` kept | 0 |
-| `unsure` | there is an answer, it is just not proven | original untouched, answer written to `name.lapse-unsure.srt` | 3 |
-| `nothing` | the audio does not support any offset | original untouched, best guess written to `name.lapse-unsure.srt` | 3 |
-
-LAPSE never simply refuses. If it cannot prove an answer it still writes one, it just puts it in a sidecar file and leaves yours alone. `--no-sidecar` writes nothing at all instead. `--confidence` moves the bar for what counts as `solid`; `--force` overwrites regardless; `--strict` writes nothing rather than a sidecar. The exit code follows the verdict either way, so an `unsure` or `nothing` that `--strict` or `--no-sidecar` kept back still exits 3, with `written` set to `false` in the `--json` line. Exit 2 is only for a subtitle with too few cues to try at all.
-
-### Machine readable output
-
-`--json` puts one line on stdout and moves every other message to stderr:
-
-```json
-{"mode":"auto/shifted","reference":"vad","offset_ms":22,"ratio":1,"confidence":0.455,
- "margin":0.12,"sigma":12.3,"agreement":0.75,"verdict":"solid","coverage":1,
- "cues":1578,"ignored_cues":1,"parts":1,"snapped":0,"written":true,"unchanged":false,"output":"...","splits":[],"offsets":[22]}
-```
-
-`mode` says what LAPSE decided the file needed. `ols`, `nosplit` and `split` mean you asked for that yourself. Everything under `auto` is what it worked out on its own:
-
-| `mode` | What it found | What moved |
+| Extension | Format | Notes |
 |---|---|---|
-| `auto/shifted` | one offset fits the whole file | `offset_ms` |
-| `auto/shifted+split` | one offset nearly fits, with cuts in it | `offset_ms`, then `splits` |
-| `auto/drifting` | the file drifts, usually a framerate mismatch | `ratio` and `offset_ms` |
-| `auto/drifting+split` | it drifts and was cut about as well | `ratio`, then `splits` |
-| `auto/recut` | the offset changes throughout | `splits` |
-| `auto/joined` | two parts in one video | `splits` |
-| `auto/restart` | the subtitle starts over partway through | `splits` |
+| `.srt` | SubRip | |
+| `.vtt` | WebVTT | Cue settings and inline timestamps are kept and moved |
+| `.ass`, `.ssa` | Advanced SubStation Alpha, SubStation Alpha | Reads the `Format:` line, so the time columns can be anywhere |
+| `.sub` | MicroDVD, MPL2 or SubViewer 2 | Told apart by what is inside, see below |
+| `.mpl2` | MPL2 | |
+| `.sbv` | YouTube SubViewer | |
+| `.smi`, `.sami` | SAMI | |
+| `.ttml`, `.dfxp` | TTML | Clock, offset, tick and frame times. Frame times are written back as frames, the others as clock times |
+| `.itt` | iTunes Timed Text | TTML with the times in frames |
+| `.xml` | TTML saved as `.xml` | Read when the file is TTML inside |
+| `.stl` | EBU STL, or the text STL from DVD Studio Pro and Spruce | Told apart by what is inside |
+| `.scc` | Scenarist closed captions | |
+| `.sup` | PGS, Blu-ray bitmap subtitles | Timing only, there is no text |
+| `.idx` | VobSub, DVD bitmap subtitles | Point it at the `.idx`. `delay:` lines are read and kept |
 
-`parts` is how many pieces the file ended up in and `splits` holds the cue index each new piece starts at, so `parts` is always `splits` plus one. The index counts from 0 in the order the cues sit in the file and `cues` is how many the file holds, so every split is below `cues`. `offsets` holds the offset each of those pieces got, in milliseconds and in the same order, so a file cut about shows where it moved and by how much. `ratio` is `1` unless the file was stretched. `snapped` is how many cues `--snap` moved onto a picture cut, at either end, and is `0` when the flag was not used.
+Every format is written back the way it came in, down to its own resolution, so an MPL2 result lands on the nearest tenth of a second and an STL on the nearest frame. Everything around the times, such as styles, headers, comments and line endings, is left as it was. Upper case extensions work too, and `lapse --formats` lists what your copy reads.
 
-A subtitle with too few cues to be worth trying still gets its line, with `reference` set to `none`, `written` set to `false` and `why` saying how many cues there were, and exits 2.
-
-`ignored_cues` counts the lines that were kept out of the measuring: sound effects in brackets, music notes, and the credit and advert lines subtitle sites slip in, like `Downloaded from www.OpenSubtitles.org` or `Synced and corrected by`. They are still moved along with everything else, they just do not get a say in where to.
-
----
-
-## Repo structure
-
-```
-lapse/
-├── engine/       C++ source for the CLI binary
-├── docker/       Python orchestrator, web interface, Dockerfile, compose file
-├── docs/         Benchmarks and other reference docs
-└── .github/      CI workflows, and the scripts that build a release binary
-```
-
----
-
-## Supported formats
-
-**Video:** All formats supported by FFmpeg (`.mp4`, `.mkv`, `.avi`, `.mov`, `.ts`, `.webm` and more)
-
-**Subtitles:** `.srt`, `.ass`, `.ssa`, `.vtt`, `.sub` (MicroDVD, MPL2 and SubViewer 2), `.mpl2`, `.sup` (PGS), `.sbv`, `.idx` (VobSub, point it at the `.idx` file), `.smi` or `.sami`, `.ttml`, `.dfxp`, `.itt` (iTunes Timed Text), TTML saved as `.xml`, `.stl` (EBU STL, the binary broadcast format, and the text kind DVD Studio Pro and Spruce write), `.scc` (Scenarist closed captions). Upper case extensions are fine too
-
-Three formats share `.sub` and the name says nothing about which one you have, so LAPSE reads the file instead:
+Three formats share `.sub` and the name does not say which one you have, so LAPSE looks inside:
 
 | | Looks like | Needs a frame rate |
 |---|---|---|
@@ -457,14 +509,35 @@ Three formats share `.sub` and the name says nothing about which one you have, s
 | MPL2 | `[180][195]text` | No, the numbers are tenths of a second |
 | SubViewer 2 | `00:03:00.00,00:03:01.50` on its own line | No |
 
-So a `.sub` holding MPL2 or SubViewer syncs with no video and no `--fps`, which MicroDVD cannot do. `.mpl2` is taken as a name for MPL2 as well. Each format is written back the way it came in, down to its own resolution, so a result in MPL2 lands on the nearest tenth of a second and one in SubViewer on the nearest hundredth. SubViewer's `[INFORMATION]` block and style line are left where they are.
+So an MPL2 or SubViewer `.sub` syncs with no video and no `--fps`. A MicroDVD file gets its frame rate from the video, then from a `{1}{1}25.000` line at the top, then from how long the two subtitles run when the reference is a subtitle. When none of those work, LAPSE stops and asks for `--fps`.
 
-**Embedded tracks:** `lapse video.mkv` on its own pulls the default subtitle track out of the container and syncs it, see [CLI usage](#cli-usage) above. This covers text tracks, including `mov_text`. PGS and VobSub tracks are bitmap subtitles with no text to pull out, but when one is present LAPSE reads its timing and uses it as a fast, accurate sync reference instead of falling back to decoding the audio. Reading a track means reading the whole file, since its packets are spread from one end of it to the other, so the timings are cached next to the speech profile. A second subtitle for the same video starts from them, and a video whose tracks turned out to be no use goes straight to its speech profile. `--sub-track` gets its own entry, and changing the video starts over.
+The text STL has no frame rate in it either. A file with a frame number of 25 or more is read at 30 frames a second, and anything else at 25.
 
-Run `lapse --formats` to print the subtitle extensions your binary can read, one per line
+A file named `.txt`, or with no extension, is opened and read before it is turned away. Subtitles come out of archives named like that often enough to be worth it. SubRip, WebVTT, SubStation, MicroDVD, MPL2, SubViewer and TTML all show what they are in the first few lines, and the file is written back as whatever it turned out to be. Anything over 4 MB, or with an extension LAPSE does not know, is left alone, so pointing it at a video by mistake fails straight away. The container only picks up the extensions `lapse --formats` lists, which leaves out `.txt` and `.xml`.
 
-A file named `.txt`, or with no extension at all, is opened and read before it is turned away. Subtitles come out of archives named that often enough to be worth the look, and SubRip, WebVTT, SubStation, MicroDVD, MPL2 and SubViewer all give themselves away in the first few lines. It is written back out in whatever it turned out to be. Anything carrying an extension we do not know is left alone, and so is anything over 4MB, so pointing LAPSE at a video is still an error rather than a long wait. The container only picks up the extensions above, so a library full of `.txt` files is not suddenly in scope.
+**Video:** anything FFmpeg can read, such as `.mkv`, `.mp4`, `.avi`, `.mov`, `.ts` and `.webm`.
+
+**Subtitle tracks inside the video:** `lapse video.mkv` on its own takes out the default text track, `mov_text` included, syncs it to the sound and writes it next to the video. When a video has a usable subtitle track, LAPSE uses that track as the reference instead of listening to the sound, which is quicker and more exact. PGS and VobSub tracks have no text to take out, but their timing works as a reference too. Reading a track means reading the whole file, since its packets are spread all through it, so the timings are cached as well.
 
 ---
 
-Licensed under the GNU General Public License v3.0 -- see [LICENSE](LICENSE) for details
+## More documentation
+
+- [docs/pipeline-integration.md](docs/pipeline-integration.md) is for running `lapse` from Bazarr, Sonarr, Radarr or any other tool that can run a command when a file arrives.
+- [docs/benchmarks.md](docs/benchmarks.md) has the test against alass and ffsubsync on 39 feature films picked to be hard to sync, with the method and the result for every film. That test was run on LAPSE 2.0.0.
+
+---
+
+## Repository
+
+```
+lapse/
+├── engine/       C++ source for the lapse program
+├── docker/       The watcher, the web interface, the Dockerfile and a compose file
+├── docs/         Benchmarks and other documentation
+└── .github/      CI workflows and the scripts that build a release
+```
+
+---
+
+Licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).
