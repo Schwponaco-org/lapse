@@ -98,6 +98,9 @@ the file and the exit code:
 | `unsure` | there is an answer, it is just not proven | original untouched, answer written to `name.lapse-unsure.srt` | `3` |
 | `nothing` | the audio does not support any offset | original untouched, best guess written to `name.lapse-unsure.srt` | `3` |
 
+With `--output out.srt` the sidecar is `out.lapse-unsure.srt`, so a guess is
+never written where a real result would go.
+
 `--strict` or `--no-sidecar` refuse to write anything for `unsure` or
 `nothing` instead of the sidecar file. The exit code is still `3`, and
 `written` is `false` in the JSON line. Exit `2` means the subtitle had too
