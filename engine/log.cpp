@@ -28,6 +28,8 @@
 bool quiet = false;
 
 namespace {
+std::ostream* answers = nullptr;
+
 struct Sink : std::streambuf {
     int overflow(int c) override { return c; }
 };
@@ -51,6 +53,14 @@ std::ostream& say() {
         half_a_line = false;
     }
     return std::cerr;
+}
+
+std::ostream& answer() {
+    return answers ? *answers : std::cout;
+}
+
+void answer_to(std::ostream* to) {
+    answers = to;
 }
 
 void progress(const char* what, int done, int total) {

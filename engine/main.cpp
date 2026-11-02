@@ -35,6 +35,7 @@
 #include "write_subtitle.h"
 #include "log.h"
 #include "transcribe.h"
+#include "cli.h"
 
 bool is_subtitle(const std::string& path) {
     return !subtitle_kind(path).empty();
@@ -466,7 +467,7 @@ static void report(const Report& r) {
         return;
     }
 
-    std::cout << "{\"mode\":\"" << r.mode << "\""
+    answer() << "{\"mode\":\"" << r.mode << "\""
               << ",\"reference\":\"" << r.reference << "\""
               << ",\"offset_ms\":" << r.offset
               << ",\"ratio\":" << r.ratio
@@ -482,16 +483,16 @@ static void report(const Report& r) {
               << ",\"snapped\":" << r.snapped
               << ",\"written\":" << (r.written ? "true" : "false")
               << ",\"unchanged\":" << (r.unchanged ? "true" : "false");
-    if (!r.why.empty()) std::cout << ",\"why\":\"" << escaped(r.why) << "\"";
-    std::cout << ",\"output\":\"" << escaped(r.output) << "\"";
+    if (!r.why.empty()) answer() << ",\"why\":\"" << escaped(r.why) << "\"";
+    answer() << ",\"output\":\"" << escaped(r.output) << "\"";
 
-    std::cout << ",\"splits\":[";
+    answer() << ",\"splits\":[";
     for (size_t i = 0; i < r.splits.size(); i++)
-        std::cout << (i ? "," : "") << r.splits[i];
-    std::cout << "],\"offsets\":[";
+        answer() << (i ? "," : "") << r.splits[i];
+    answer() << "],\"offsets\":[";
     for (size_t i = 0; i < r.offsets.size(); i++)
-        std::cout << (i ? "," : "") << r.offsets[i];
-    std::cout << "]}\n";
+        answer() << (i ? "," : "") << r.offsets[i];
+    answer() << "]}\n";
 }
 
 void usage() {
@@ -1326,7 +1327,7 @@ static std::vector<std::string> split_job(const std::string& line) {
     return tokens;
 }
 
-static int run_batch() {
+int run_batch() {
     std::string line;
     while (std::getline(std::cin, line)) {
         std::vector<std::string> tokens = split_job(line);
@@ -1350,19 +1351,4 @@ static int run_batch() {
         std::cout.flush();
     }
     return 0;
-}
-
-int main(int argc, const char *argv[]) {
-#ifdef _WIN32
-    SetConsoleOutputCP(CP_UTF8);
-#endif
-    try {
-        bool batch = argc > 1 && std::string(argv[1]) == "--batch";
-        int result = batch ? run_batch() : run(argc, argv);
-        silero_close();
-        return result;
-    } catch (const std::exception& e) {
-        std::cerr << e.what() << '\n';
-        return 1;
-    }
 }

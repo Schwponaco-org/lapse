@@ -208,7 +208,8 @@ else()
 endif()
 
 
-add_executable(lapse
+# Everything but main() is built once and linked into both programs
+add_library(lapse_engine OBJECT
     engine/main.cpp
     engine/correlate.cpp
     engine/align.cpp
@@ -221,16 +222,16 @@ add_executable(lapse
     engine/log.cpp
     engine/transcribe.cpp)
 
-target_compile_features(lapse PRIVATE cxx_std_20)
-target_include_directories(lapse PRIVATE engine)
-target_compile_definitions(lapse PRIVATE LAPSE_VERSION="${PROJECT_VERSION}")
-target_link_libraries(lapse PRIVATE lapse_ffmpeg lapse_fftw3 lapse_fvad)
+target_compile_features(lapse_engine PUBLIC cxx_std_20)
+target_include_directories(lapse_engine PUBLIC engine)
+target_compile_definitions(lapse_engine PUBLIC LAPSE_VERSION="${PROJECT_VERSION}")
+target_link_libraries(lapse_engine PUBLIC lapse_ffmpeg lapse_fftw3 lapse_fvad)
 
 find_package(Threads REQUIRED)
-target_link_libraries(lapse PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(lapse_engine PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 
 if(UNIX AND NOT APPLE)
-    target_link_libraries(lapse PRIVATE m)
+    target_link_libraries(lapse_engine PUBLIC m)
 endif()
 
 
@@ -243,39 +244,51 @@ if(LAPSE_STATIC_DEPS)
     set(CMAKE_FIND_LIBRARY_SUFFIXES "${lapse_suffixes_was}")
 endif()
 if(ZLIB_FOUND)
-    target_link_libraries(lapse PRIVATE ZLIB::ZLIB)
+    target_link_libraries(lapse_engine PUBLIC ZLIB::ZLIB)
 endif()
 
 if(NOT MSVC)
-    target_compile_options(lapse PRIVATE -fno-math-errno)
+    target_compile_options(lapse_engine PUBLIC -fno-math-errno)
 endif()
 
 if(APPLE)
-    target_link_libraries(lapse PRIVATE
+    target_link_libraries(lapse_engine PUBLIC
         "-framework CoreFoundation" "-framework CoreServices" "-framework Security")
 elseif(WIN32)
     enable_language(RC)
-    target_sources(lapse PRIVATE engine/lapse.rc)
-    target_link_libraries(lapse PRIVATE ws2_32 bcrypt secur32 ole32 user32)
-endif()
-
-if(LAPSE_STATIC_DEPS)
-    if(MINGW)
-        target_link_options(lapse PRIVATE -static)
-    elseif(NOT APPLE AND NOT MSVC)
-        target_link_options(lapse PRIVATE -static-libgcc -static-libstdc++)
-    endif()
+    target_link_libraries(lapse_engine PUBLIC ws2_32 bcrypt secur32 ole32 user32)
 endif()
 
 if(LAPSE_LTO)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT lapse_ipo OUTPUT lapse_ipo_why)
     if(lapse_ipo)
-        set_property(TARGET lapse PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+        set_property(TARGET lapse_engine PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     else()
         message(STATUS "link time optimisation unavailable: ${lapse_ipo_why}")
     endif()
 endif()
+
+# what each program built on the engine needs on top of it
+function(lapse_program target)
+    target_link_libraries(${target} PRIVATE lapse_engine)
+    if(WIN32)
+        target_sources(${target} PRIVATE engine/lapse.rc)
+    endif()
+    if(LAPSE_STATIC_DEPS)
+        if(MINGW)
+            target_link_options(${target} PRIVATE -static)
+        elseif(NOT APPLE AND NOT MSVC)
+            target_link_options(${target} PRIVATE -static-libgcc -static-libstdc++)
+        endif()
+    endif()
+    if(lapse_ipo)
+        set_property(TARGET ${target} PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+endfunction()
+
+add_executable(lapse engine/entry.cpp)
+lapse_program(lapse)
 
 foreach(runtime_file libonnxruntime.dylib libonnxruntime.so onnxruntime.dll silero_vad.onnx)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/engine/${runtime_file}")

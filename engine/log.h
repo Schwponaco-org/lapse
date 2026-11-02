@@ -21,5 +21,10 @@ extern bool quiet;
 
 std::ostream& say();
 
+// where the --json line goes, std::cout unless somebody running the engine
+// in their own process wants it elsewhere
+std::ostream& answer();
+void answer_to(std::ostream* to);
+
 void progress(const char* what, int done, int total);
 void progress_done();
