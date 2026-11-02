@@ -496,7 +496,8 @@ static void report(const Report& r) {
 }
 
 void usage() {
-    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME] [--from video] [--min-shift ms] [--whisper model]\n";
+    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--progress] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME] [--from video] [--min-shift ms] [--whisper model]\n";
+    std::cerr << "       --progress       with --json, keep printing the steps and messages on stderr\n";
     std::cerr << "       --confidence N   how far the answer has to stand out before the original is overwritten (default " << sure_sigma << ")\n";
     std::cerr << "       --encoding NAME  write the result as utf8, utf8-bom, utf16le, utf16be or latin1 instead of whatever came in\n";
     std::cerr << "       --snap [ms]      pull a cue start onto the picture cut it lands next to, within ms (default " << SNAP_WINDOW_MS << ")\n";
@@ -585,11 +586,19 @@ int run(int argc, const char *argv[]) {
     double shift_ms = 0;
     bool shifting = false;
 
+    // --json keeps stderr quiet unless --progress asks for the steps too,
+    // and the two can come in either order
+    bool progress_too = false;
+    for (int i = 1; i < argc; i++)
+        if (std::string(argv[i]) == "--progress") progress_too = true;
+
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--json") {
             as_json = true;
-            quiet = true;
+            if (!progress_too) quiet = true;
+        } else if (arg == "--progress") {
+            continue;
         } else if (arg == "--quiet") {
             quiet = true;
         } else if (arg == "--dry-run") {

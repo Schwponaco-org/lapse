@@ -182,7 +182,7 @@ The options can go anywhere on the line.
 | `--snap [ms]` | Move line starts and ends onto picture cuts close by. Default 120 ms |
 | `--from <video>` | The subtitle fits this video. Move it to the first one by their sound |
 | `--whisper <model>` | Only trust the speech whisper.cpp hears words in |
-| `--json` | Print one line of JSON on stdout and everything else on stderr |
+| `--json` | Print one line of JSON on stdout and nothing but errors on stderr. Add `--progress` to keep the steps and the other messages coming on stderr |
 | `--quiet` | Print only errors |
 
 And a few that do one thing and stop:
