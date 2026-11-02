@@ -91,6 +91,8 @@ write_wav("concat_audio.wav", joined)
 write_srt("concat_truth.srt", jcues)
 # a segment the video does not have, so the second half sits later than the film
 write_srt("concat_gap.srt", [(a + GAP, b + GAP) if a >= EP else (a, b) for a, b in jcues])
+# the last five minutes sit further out than the auto refinement looks around the offset
+write_srt("concat_long.srt", [(a + 52000, b + 52000) if a >= 19 * 60 * 1000 else (a, b) for a, b in jcues])
 # two per episode subtitles stuck together, the second one starting over at zero
 write_srt("concat_ep.srt", [(a - EP, b - EP) if a >= EP else (a, b) for a, b in jcues])
 
