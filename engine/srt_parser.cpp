@@ -582,6 +582,7 @@ int stl_fps(const std::string& data) {
 }
 
 int stl_ms(const unsigned char* tc, int fps) {
+    if (tc[0] > 23 || tc[1] > 59 || tc[2] > 59 || tc[3] >= fps) return -1;
     return ((tc[0] * 60 + tc[1]) * 60 + tc[2]) * 1000 + tc[3] * 1000 / fps;
 }
 
@@ -608,7 +609,8 @@ std::vector<std::pair<int,int>> read_stl(const char* filename) {
             say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
             break;
         }
-        timestamps.push_back({stl_ms(b + 5, fps) - zero, stl_ms(b + 9, fps) - zero});
+        int in = stl_ms(b + 5, fps), out = stl_ms(b + 9, fps);
+        timestamps.push_back(in < 0 || out < 0 ? std::make_pair(0, 0) : std::make_pair(in - zero, out - zero));
     }
     return timestamps;
 }
