@@ -825,13 +825,29 @@ static std::string spu_at(const std::string& sub, size_t at) {
     return spu;
 }
 
+// One subtitle picture is at most 64KB, spread over packs of 2KB with their
+// headers, so this much read from where the .idx points is always the whole
+// of it. Reading the .sub in one go took a file of hundreds of megabytes
+// into memory for the few bytes per line that say when it leaves the screen
+static std::string sub_chunk(std::ifstream& bin, unsigned long long at) {
+    static const size_t CHUNK = 256 * 1024;
+    std::string chunk;
+    if (!bin) return chunk;
+    bin.clear();
+    bin.seekg((std::streamoff)at);
+    if (!bin) return chunk;
+    chunk.resize(CHUNK);
+    bin.read(&chunk[0], CHUNK);
+    chunk.resize((size_t)bin.gcount());
+    return chunk;
+}
+
 std::vector<std::pair<int,int>> read_idx(const char* filename) {
     std::vector<int> starts, shown;
     std::string line {};
     std::istringstream read_file(load_text(filename));
 
     std::ifstream bin(std::filesystem::path(filename).replace_extension(".sub"), std::ios::binary);
-    std::string sub((std::istreambuf_iterator<char>(bin)), {});
     int delay = 0;
 
     while (getline(read_file, line)) {
@@ -844,7 +860,7 @@ std::vector<std::pair<int,int>> read_idx(const char* filename) {
         starts.push_back(at < 0 ? -1 : at + delay);
 
         size_t pos = line.find("filepos:");
-        std::string spu = (pos == std::string::npos || sub.empty()) ? "" : spu_at(sub, strtoull(line.c_str() + pos + 8, nullptr, 16));
+        std::string spu = (pos == std::string::npos || !bin) ? "" : spu_at(sub_chunk(bin, strtoull(line.c_str() + pos + 8, nullptr, 16)), 0);
         shown.push_back(spu_stop_ms((const unsigned char*)spu.data(), spu.size()));
     }
 
@@ -1116,7 +1132,7 @@ std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(
         }
         if ((!speech && check) || (i == (int)probability.size() - 1 && check)) {
             check = false;
-            raw.push_back({start_ms, i * 10});
+            raw.push_back({start_ms, speech ? (i + 1) * 10 : i * 10});
             raw_weight.push_back(frames > 0 ? (float)(total / frames) : 0.0f);
         }
     }
