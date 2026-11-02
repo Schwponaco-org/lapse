@@ -387,13 +387,15 @@ static double sigmas(double got, double mean, double sd) {
 
 static size_t base_len = 0;
 static int base_edge = 0;
+static int base_start = 0;
 static double bunch_mean = 0, bunch_sd = 1, over_mean = 0, over_sd = 1;
 
 static void baseline(const std::vector<std::pair<int,int>>& cues) {
-    if (base_key == cues.data() && base_len == cues.size() && base_edge == cues.back().second) return;
+    if (base_key == cues.data() && base_len == cues.size() && base_edge == cues.back().second && base_start == cues.front().first) return;
     base_key = cues.data();
     base_len = cues.size();
     base_edge = cues.back().second;
+    base_start = cues.front().first;
 
     std::mt19937 rng(12345);
     std::uniform_int_distribution<int> pick(-900000, 900000);
