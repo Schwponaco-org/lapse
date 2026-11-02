@@ -95,6 +95,16 @@ write_srt("concat_gap.srt", [(a + GAP, b + GAP) if a >= EP else (a, b) for a, b 
 write_srt("concat_long.srt", [(a + 52000, b + 52000) if a >= 19 * 60 * 1000 else (a, b) for a, b in jcues])
 # two per episode subtitles stuck together, the second one starting over at zero
 write_srt("concat_ep.srt", [(a - EP, b - EP) if a >= EP else (a, b) for a, b in jcues])
+# a scene taken out after eight minutes and another after sixteen, so three parts
+write_srt("concat_three.srt", [(a + (30000 if a >= 8 * 60 * 1000 else 0) + (20000 if a >= 16 * 60 * 1000 else 0),
+                                b + (30000 if a >= 8 * 60 * 1000 else 0) + (20000 if a >= 16 * 60 * 1000 else 0)) for a, b in jcues])
+
+# timed for 24 fps and played at 25, with a cut on top of the drift
+RATIO = 25 / 24
+write_srt("drift_cut.srt", [(round(a * RATIO) + (4000 if a >= EP else 0), round(b * RATIO) + (4000 if a >= EP else 0)) for a, b in jcues])
+# the same drift, with the last five minutes sitting further out than the refinement looks
+write_srt("drift_long.srt", [(round(a * RATIO) + (52000 if a >= 19 * 60 * 1000 else 0),
+                              round(b * RATIO) + (52000 if a >= 19 * 60 * 1000 else 0)) for a, b in jcues])
 
 # cues that match nothing in either video, so there is no right answer to find
 random.seed(99)
