@@ -36,10 +36,6 @@
 #include "log.h"
 #include "transcribe.h"
 
-// The formats the parsers and the writers both handle. Callers can ask for the
-// list with --formats so they know what is safe to hand us
-const char* subtitle_formats[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2", ".sup", ".sbv", ".idx", ".smi", ".sami", ".ttml", ".dfxp", ".stl", ".scc"};
-
 bool is_subtitle(const std::string& path) {
     return !subtitle_kind(path).empty();
 }
@@ -75,33 +71,6 @@ static double fps_from_length(const std::string& sub_path, const std::string& ot
 
     if (std::fabs(best - got) > best * 0.08) return 0;
     return best;
-}
-
-// The format follows the file we read, the destination is wherever the caller asked us to put it
-void write_offsets(const std::string& in_path, const std::string& out_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    std::string kind = subtitle_kind(in_path);
-    if (kind == ".srt")
-        write_srt_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".ass" || kind == ".ssa")
-        write_ass_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".vtt")
-        write_vtt_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".sub" || kind == ".mpl2")
-        write_sub_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".sup")
-        write_sup_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".sbv")
-        write_sbv_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".idx")
-        write_idx_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".smi")
-        write_smi_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".ttml" || kind == ".dfxp")
-        write_ttml_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".stl")
-        write_stl_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".scc")
-        write_scc_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
 }
 
 static int nearest_cut(const std::vector<int>& cuts, int at) {
@@ -455,6 +424,10 @@ static std::string escaped(const std::string& s) {
 }
 
 static void report(const Report& r) {
+    if (!as_json && r.mode == "shift") {
+        say() << "Moved every line by " << r.offset << "ms -> " << r.output << '\n';
+        return;
+    }
     if (!as_json) {
         say() << "Done (" << r.mode << "): offset=" << r.offset << "ms";
         if (r.ratio != 1.0) say() << " ratio=" << r.ratio;
@@ -512,6 +485,7 @@ void usage() {
     std::cerr << "       lapse --formats\n";
     std::cerr << "       lapse --vad\n";
     std::cerr << "       lapse --undo <subtitle>\n";
+    std::cerr << "       lapse --shift <ms> <subtitle>   move every line by ms, earlier when it is negative\n";
     std::cerr << "       lapse --batch   read one job per line from stdin, same arguments as above, one json reply per line\n";
 }
 
@@ -586,6 +560,8 @@ int run(int argc, const char *argv[]) {
     int min_shift = 1;
     std::string whisper_model;
     double fps = 0;
+    double shift_ms = 0;
+    bool shifting = false;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -631,7 +607,7 @@ int run(int argc, const char *argv[]) {
             std::cout << LAPSE_VERSION << '\n';
             return 0;
         } else if (arg == "--formats") {
-            for (auto& ext : subtitle_formats)
+            for (auto& ext : SUBTITLE_FORMATS)
                 std::cout << ext << '\n';
             return 0;
         } else if (arg == "--vad") {
@@ -676,11 +652,48 @@ int run(int argc, const char *argv[]) {
         } else if (arg == "--whisper") {
             if (i + 1 >= argc) { usage(); return -1; }
             whisper_model = argv[++i];
+        } else if (arg == "--shift") {
+            if (i + 1 >= argc || !number(argv[++i], shift_ms) || std::fabs(shift_ms) > MAX_TIME_MS) {
+                std::cerr << "--shift wants a number of ms\n";
+                return -1;
+            }
+            shifting = true;
         } else if (arg == "--force") {
             force = true;
         } else {
             args.push_back(arg);
         }
+    }
+
+    if (shifting) {
+        if (args.size() != 1 || !is_subtitle(args[0])) {
+            std::cerr << "--shift wants one subtitle to move\n";
+            return -1;
+        }
+        std::string input_path = args[0];
+        if (output_path.empty()) output_path = input_path;
+        set_sub_fps(fps);
+        if (is_microdvd(input_path) && sub_fps(load_text(input_path)) <= 0) {
+            std::cerr << "Cannot tell what frame rate " << input_path << " counts in, pass --fps N\n";
+            return 1;
+        }
+
+        Report card;
+        card.mode = "shift";
+        card.reference = "none";
+        card.offset = (int)std::lround(shift_ms);
+        card.offsets.assign(1, card.offset);
+        card.cues = (int)read_subtitle(input_path).size();
+        card.verdict = "solid";
+        card.written = true;
+        card.unchanged = card.offset == 0 && output_path == input_path;
+        card.output = output_path;
+        if (!dry_run && !card.unchanged) {
+            if (make_backup) backup_file(input_path.c_str());
+            write_subtitle(input_path, output_path, 0, shift_ms / 1000.0);
+        }
+        report(card);
+        return 0;
     }
 
     if (args.size() == 1 && !is_subtitle(args[0])) {
@@ -989,7 +1002,7 @@ int run(int argc, const char *argv[]) {
 
         if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
-            write_offsets(input_path, output_path, slope, offsets, mapping);
+            write_subtitle(input_path, output_path, slope, 0, offsets, mapping);
         }
         report(card);
         return (verdict != Verdict::Solid && !force) ? 3 : 0;
@@ -1010,33 +1023,10 @@ int run(int argc, const char *argv[]) {
         end_moves(ends);
         card.unchanged = ends.empty() && still(offsets, slope);
 
-        std::string kind = subtitle_kind(input_path);
         if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
-            if (card.snapped)
-                write_offsets(input_path, output_path, slope, offsets, mapping);
-            else if (kind == ".srt")
-                write_srt_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".ass" || kind == ".ssa")
-                write_ass_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".vtt")
-                write_vtt_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".sub" || kind == ".mpl2")
-                write_sub_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".sup")
-                write_sup_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".sbv")
-                write_sbv_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".idx")
-                write_idx_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".smi")
-                write_smi_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".ttml" || kind == ".dfxp")
-                write_ttml_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".stl")
-                write_stl_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".scc")
-                write_scc_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
+            if (card.snapped) write_subtitle(input_path, output_path, slope, 0, offsets, mapping);
+            else write_subtitle(input_path, output_path, slope, intercept);
         }
         report(card);
         return (verdict != Verdict::Solid && !force) ? 3 : 0;
