@@ -374,7 +374,7 @@ From there you can:
 - **Set the rescan interval** without editing the compose file.
 - **Leave folders out.** Everything you mounted is listed, one level down. Untick what should not be touched and the scanner walks past it. Deeper paths can be typed in.
 - **Translate.** Pick subtitles, give a language code and send them off. See [Translation](#translation).
-- **Shift.** Move a subtitle by hand, in milliseconds, for when a sync came out close but not quite right. The first lines are shown before and after as you type, and you choose whether the result goes next to the original or over it. Nothing is decoded, so it is instant. Works on `.srt`, `.vtt`, `.ass` and `.ssa`.
+- **Shift.** Move a subtitle by hand, in milliseconds, for when a sync came out close but not quite right. The first lines are shown before and after as you type for `.srt`, `.vtt`, `.ass` and `.ssa`, and you choose whether the result goes next to the original or over it. Nothing is decoded, so it is instant, and it works on every format the engine writes.
 - **Sync subtitles to a reference.** For a film with several subtitle tracks where one is already right. Lines every other track up against it, or just the one you pick. The sound is not used, so it is quick, and usually more exact than syncing each track on its own.
 - **Convert.** Write a subtitle out as `.srt`, `.vtt`, `.ass` or `.ssa`. The original stays unless you tick the box. A file already at the new name is kept as `.bak` first.
 - **Film counts.** The line under the tiles says how many films are fully synced, partly synced or untouched. Subtitle tracks inside the video are left out of the count unless you tick `Count embedded tracks too`.
