@@ -769,6 +769,7 @@ int run(int argc, const char *argv[]) {
             return -1;
         }
         timestamps = speech_of(from_video, audio_track, use_cache);
+        lead_in(timestamps);
         if (timestamps.empty()) {
             std::cerr << "No speech found in: " << from_video << '\n';
             return 1;
@@ -884,6 +885,7 @@ int run(int argc, const char *argv[]) {
     else if (ref_weights.empty()) card.reference = "embedded";
     else if (!words.empty()) card.reference = "vad+whisper";
 
+    if (!ref_weights.empty()) lead_in(ref_spans);
     align_setup(ref_spans, ref_weights);
     chapter_hints(AVC ? chapter_marks(AVC) : std::vector<int>());
     if (AVC && AVC->nb_chapters > 1) say() << "Reading " << AVC->nb_chapters << " chapters as places the film may have been cut\n";
@@ -901,6 +903,7 @@ int run(int argc, const char *argv[]) {
 
         if (!cache.empty()) save_spans(cache, ref_spans, ref_weights, ref_coverage);
         if (!words.empty()) keep_spoken(ref_spans, ref_weights, words);
+        lead_in(ref_spans);
         align_setup(ref_spans, ref_weights);
         slices = chunk_offsets(spans, ref_spans, ref_weights, 8, ref_coverage);
         card.coverage = ref_coverage;

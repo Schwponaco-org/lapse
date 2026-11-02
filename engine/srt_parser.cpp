@@ -1135,3 +1135,8 @@ std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(
 
     return {out_spans, out_weights};
 }
+
+void lead_in(std::vector<std::pair<int,int>>& spans) {
+    for (size_t i = 0; i < spans.size(); i++)
+        spans[i].first = std::max(i ? spans[i - 1].second : 0, spans[i].first - LEAD_IN_MS);
+}
