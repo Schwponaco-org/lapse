@@ -193,6 +193,38 @@ jobs:
           name: lapse-${{ matrix.name }}
           path: dist/*
 
+  sanitize:
+    name: Sanitizers and mutated files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config espeak-ng ffmpeg \
+            libavformat-dev libavcodec-dev libavutil-dev libswresample-dev libfftw3-dev
+
+      - name: Build with AddressSanitizer and UBSan
+        run: |
+          cmake -B build -DLAPSE_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build -j
+
+      - name: Run the smoke test under the sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: .github/scripts/smoke-engine.sh build/lapse
+
+      - name: Feed every parser and writer mutated files
+        run: python3 .github/scripts/mutate-formats.py build/lapse work 60
+
+      - name: Sync real audio under the sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: .github/scripts/accuracy.sh build/lapse
+
   image:
     name: Docker image
     runs-on: ubuntu-latest
