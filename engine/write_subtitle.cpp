@@ -387,7 +387,7 @@ static void write_sup(const char* input_path, const char* output_path, const Shi
 }
 
 static void put_tc(unsigned char* tc, int ms, int fps) {
-    int frames = (int)std::lround(std::max(ms, 0) * fps / 1000.0);
+    int frames = (int)std::lround(std::clamp(ms, 0, MAX_TIME_MS - 1) * (double)fps / 1000.0);
     tc[3] = frames % fps;
     tc[2] = frames / fps % 60;
     tc[1] = frames / fps / 60 % 60;
@@ -407,7 +407,9 @@ static void write_stl(const char* input_path, const char* output_path, const Shi
             last = sn;
         }
 
-        auto [a, e] = shift.both(stl_ms(b + 5, fps) - zero, stl_ms(b + 9, fps) - zero, cue);
+        int in = stl_ms(b + 5, fps), out = stl_ms(b + 9, fps);
+        if (in < 0 || out < 0) continue;
+        auto [a, e] = shift.both(in - zero, out - zero, cue);
         put_tc(b + 5, a + zero, fps);
         put_tc(b + 9, e + zero, fps);
     }
