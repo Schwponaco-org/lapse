@@ -291,14 +291,14 @@ static const int MIN_AGREEING = 3;
 enum class Verdict { Solid, Unsure, Nothing };
 
 
-static bool worth_splitting(const std::vector<int>& offsets, int base) {
+static bool worth_splitting(const std::vector<int>& offsets, int base, int reach = 60000) {
     int runs = 0;
     size_t i = 0;
     while (i < offsets.size()) {
         size_t j = i;
         while (j + 1 < offsets.size() && offsets[j + 1] == offsets[i]) j++;
         if (j - i + 1 < 12) return false;
-        if (std::abs(offsets[i] - base) > 60000) return false;
+        if (std::abs(offsets[i] - base) > reach) return false;
         runs++;
         i = j + 1;
     }
@@ -310,6 +310,14 @@ static bool worth_splitting(const std::vector<int>& offsets, int base) {
         high = std::max(high, o);
     }
     return high - low >= 120;
+}
+
+// The refine search only looks a little way around the offset, so a part that
+// really sits further out than that gets pressed against the edge of the window
+static bool on_the_edge(const std::vector<int>& offsets, int base, int window) {
+    for (int o : offsets)
+        if (std::abs(o - base) >= window - window / 10) return true;
+    return false;
 }
 
 static double sigma_after(const std::vector<std::pair<int,int>>& spans, const std::vector<int>& offsets,
@@ -806,7 +814,7 @@ int run(int argc, const char *argv[]) {
             return -1;
         }
         timestamps = speech_of(from_video, audio_track, use_cache);
-        lead_in(timestamps);
+        if (silero_open()) lead_in(timestamps);
         if (timestamps.empty()) {
             std::cerr << "No speech found in: " << from_video << '\n';
             return 1;
@@ -922,7 +930,7 @@ int run(int argc, const char *argv[]) {
     else if (ref_weights.empty()) card.reference = "embedded";
     else if (!words.empty()) card.reference = "vad+whisper";
 
-    if (!ref_weights.empty()) lead_in(ref_spans);
+    if (!ref_weights.empty() && silero_open()) lead_in(ref_spans);
     align_setup(ref_spans, ref_weights);
     chapter_hints(AVC ? chapter_marks(AVC) : std::vector<int>());
     if (AVC && AVC->nb_chapters > 1) say() << "Reading " << AVC->nb_chapters << " chapters as places the film may have been cut\n";
@@ -940,7 +948,7 @@ int run(int argc, const char *argv[]) {
 
         if (!cache.empty()) save_spans(cache, ref_spans, ref_weights, ref_coverage);
         if (!words.empty()) keep_spoken(ref_spans, ref_weights, words);
-        lead_in(ref_spans);
+        if (silero_open()) lead_in(ref_spans);
         align_setup(ref_spans, ref_weights);
         slices = chunk_offsets(spans, ref_spans, ref_weights, 8, ref_coverage);
         card.coverage = ref_coverage;
@@ -952,22 +960,35 @@ int run(int argc, const char *argv[]) {
         for (auto& c : slices) want.push_back(c.time * (ratio - 1.0) + offset);
         return want;
     };
-    auto expected_from = [&](const std::vector<int>& offsets, const std::vector<std::pair<int,int>>& in) {
+    auto expected_from = [&](const std::vector<int>& offsets, const std::vector<std::pair<int,int>>& in, const std::vector<Chunk>& measured) {
         std::vector<double> want;
-        for (auto& c : slices) {
+        for (auto& c : measured) {
             int at = 0;
             while (at + 1 < (int)in.size() && (in[at].first + in[at].second) / 2.0 < c.time) at++;
             want.push_back(offsets[at]);
         }
         return want;
     };
-    auto judge_parts = [&](const std::vector<int>& offsets, const std::vector<std::pair<int,int>>& in, double margin) {
-        std::vector<double> want = expected_from(offsets, in);
+    auto judge_parts = [&](const std::vector<int>& offsets, const std::vector<std::pair<int,int>>& in, double margin, const std::vector<Chunk>& measured) {
+        std::vector<double> want = expected_from(offsets, in, measured);
         card.sigma = sigma_after(in, offsets, ref_spans, ref_weights, ref_coverage);
-        card.agreement = agreement_of(slices, want);
-        Verdict verdict = judge(card.sigma, margin, agree_count(slices, want));
-        if (verdict == Verdict::Solid && contradicted(slices, offsets)) verdict = Verdict::Unsure;
+        card.agreement = agreement_of(measured, want);
+        Verdict verdict = judge(card.sigma, margin, agree_count(measured, want));
+        if (verdict == Verdict::Solid && contradicted(measured, offsets)) verdict = Verdict::Unsure;
         return verdict;
+    };
+
+    // A piece the refine search pressed against the edge of its window, or one
+    // the slices say is somewhere else, gets looked for over the whole range
+    auto reach_further = [&](const std::vector<std::pair<int,int>>& in, std::vector<int>& pieces, int base, const std::vector<Chunk>& measured) {
+        if (!on_the_edge(pieces, base, REFINE_WINDOW_MS) && !contradicted(measured, pieces)) return;
+        std::vector<int> wide = split_alignment(in, ref_spans, ref_weights, p, base);
+        if (!worth_splitting(wide, base, SPLIT_WINDOW_MS)) return;
+        double narrow = sigma_after(in, pieces, ref_spans, ref_weights, ref_coverage);
+        double wider = sigma_after(in, wide, ref_spans, ref_weights, ref_coverage);
+        if (wider <= narrow) return;
+        say() << "auto: a part sits further out than the refine window reaches, taking the wider search (sigma " << wider << " against " << narrow << ")\n";
+        pieces = wide;
     };
 
     std::vector<int> cuts;
@@ -1118,7 +1139,7 @@ int run(int argc, const char *argv[]) {
         card.margin = margin;
         card.sigma = sigma;
         std::vector<int> offsets = split_alignment(spans, ref_spans, ref_weights, p, offset);
-        return save(offsets, mapping, judge_parts(offsets, spans, margin));
+        return save(offsets, mapping, judge_parts(offsets, spans, margin, slices));
 
     } else if (mode == "auto") {
         auto [order_spans, order_mapping] = process_spans(timestamps, true, false);
@@ -1230,9 +1251,10 @@ int run(int argc, const char *argv[]) {
                 REFINE_WINDOW_MS, REFINE_STEP_MS);
                 if (worth_splitting(tidied, offset)) {
                     say() << "auto: one offset does not fit the whole file, splitting it\n";
+                    reach_further(spans, tidied, offset, slices);
                     offsets = tidied;
                     card.mode = "auto/shifted+split";
-                    if (verdict == Verdict::Unsure) verdict = judge_parts(offsets, spans, margin);
+                    verdict = judge_parts(offsets, spans, margin, slices);
                 }
             }
             return save(offsets, mapping, verdict);
@@ -1285,13 +1307,14 @@ int run(int argc, const char *argv[]) {
             Verdict verdict = judge(sigma2, margin2, backing);
 
 
-            if (verdict == Verdict::Solid) {
+            if (verdict != Verdict::Nothing) {
                 std::vector<int> tidied = split_alignment(scaled, ref_spans, ref_weights, p, shift,
                                                           REFINE_WINDOW_MS, REFINE_STEP_MS);
                 if (worth_splitting(tidied, shift)) {
                     say() << "auto: the stretched file still jumps about, splitting it as well\n";
+                    reach_further(scaled, tidied, shift, after);
                     card.mode = "auto/drifting+split";
-                    return save(tidied, mapping, verdict, ratio - 1.0);
+                    return save(tidied, mapping, judge_parts(tidied, scaled, margin2, after), ratio - 1.0);
                 }
             }
 
@@ -1302,7 +1325,7 @@ int run(int argc, const char *argv[]) {
             auto [file_spans, file_mapping] = process_spans(timestamps, true, false);
             card.mode = "auto/recut";
             std::vector<int> offsets = split_alignment(file_spans, ref_spans, ref_weights, p, offset);
-            return save(offsets, file_mapping, judge_parts(offsets, file_spans, margin));
+            return save(offsets, file_mapping, judge_parts(offsets, file_spans, margin, slices));
         }
 
     } else {

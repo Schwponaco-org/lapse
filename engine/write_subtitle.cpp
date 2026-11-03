@@ -341,7 +341,7 @@ static void put_tc(unsigned char* tc, int ms, int fps) {
 }
 
 static std::string spruce_tc(int ms, int fps) {
-    int frames = (int)std::lround(std::max(ms, 0) * fps / 1000.0);
+    int frames = (int)std::lround(std::clamp(ms, 0, MAX_TIME_MS - 1) * (double)fps / 1000.0);
     char buf[24];
     snprintf(buf, sizeof(buf), "%02d:%02d:%02d:%02d", frames / fps / 3600, frames / fps / 60 % 60, frames / fps % 60, frames % fps);
     return buf;

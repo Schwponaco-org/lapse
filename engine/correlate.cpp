@@ -29,12 +29,18 @@ Lock best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::ve
         tops.push_back(stay);
 
 
+        // too few cues to judge a peak by how its cues bunch up on the speech,
+        // and every candidate scores the same, so the height of the peak itself
+        // has to settle it rather than whatever order the sort left them in
         std::vector<std::pair<double, Hit>> ranked;
         for (auto& h : tops) {
             if (std::abs(h.offset) > max_offset) continue;
             ranked.push_back({onset_z(read_srt, h.offset), h});
         }
-        std::sort(ranked.begin(), ranked.end(), [](auto& a, auto& b) { return a.first > b.first; });
+        std::sort(ranked.begin(), ranked.end(), [](auto& a, auto& b) {
+            if (a.first != b.first) return a.first > b.first;
+            return a.second.z > b.second.z;
+        });
 
         Hit best;
         double best_lock = -1;
@@ -47,7 +53,7 @@ Lock best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::ve
             c.score = align_score(read_srt, c.offset);
             double lock = onset_z(read_srt, c.offset);
 
-            if (!have || lock > best_lock) {
+            if (!have || lock > best_lock || (lock == best_lock && c.z > best.z)) {
                 best_lock = lock;
                 best = c;
                 have = true;
