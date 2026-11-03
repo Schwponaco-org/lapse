@@ -265,8 +265,8 @@ elseif(WIN32)
 endif()
 
 if(LAPSE_SANITIZE AND NOT MSVC)
-    target_compile_options(lapse PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer -g)
-    target_link_options(lapse PRIVATE -fsanitize=address,undefined)
+    target_compile_options(lapse_engine PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer -g)
+    target_link_options(lapse_engine PUBLIC -fsanitize=address,undefined)
 endif()
 
 if(LAPSE_LTO AND NOT LAPSE_SANITIZE)
