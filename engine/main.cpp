@@ -981,10 +981,10 @@ int run(int argc, const char *argv[]) {
         if (!on_the_edge(pieces, base, REFINE_WINDOW_MS) && !contradicted(measured, pieces)) return;
         std::vector<int> wide = split_alignment(in, ref_spans, ref_weights, p, base);
         if (!worth_splitting(wide, base, SPLIT_WINDOW_MS)) return;
-        double near = sigma_after(in, pieces, ref_spans, ref_weights, ref_coverage);
-        double far = sigma_after(in, wide, ref_spans, ref_weights, ref_coverage);
-        if (far <= near) return;
-        say() << "auto: a part sits further out than the refine window reaches, taking the wider search (sigma " << far << " against " << near << ")\n";
+        double narrow = sigma_after(in, pieces, ref_spans, ref_weights, ref_coverage);
+        double wider = sigma_after(in, wide, ref_spans, ref_weights, ref_coverage);
+        if (wider <= narrow) return;
+        say() << "auto: a part sits further out than the refine window reaches, taking the wider search (sigma " << wider << " against " << narrow << ")\n";
         pieces = wide;
     };
 
