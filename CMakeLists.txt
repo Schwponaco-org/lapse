@@ -29,6 +29,7 @@ endif()
 option(LAPSE_FETCH_MISSING "download and build the dependencies the system does not have" ON)
 option(LAPSE_STATIC_DEPS   "link the dependencies statically, the way the releases do" OFF)
 option(LAPSE_LTO           "link time optimisation, worth a few percent, costs build time" ON)
+option(LAPSE_TUI           "build lapse-tui, the terminal interface" ON)
 set(LAPSE_DEPS_PREFIX "" CACHE PATH "prefix that .github/scripts/build-*.sh installed into")
 
 
@@ -290,6 +291,47 @@ endfunction()
 add_executable(lapse engine/entry.cpp)
 lapse_program(lapse)
 
+
+if(LAPSE_TUI)
+    find_package(ftxui 6 QUIET CONFIG)
+    if(ftxui_FOUND)
+        set(LAPSE_FTXUI_FROM "system (${ftxui_VERSION})")
+    elseif(LAPSE_FETCH_MISSING)
+        set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(FTXUI_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
+        set(FTXUI_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+        set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+        set(FTXUI_QUIET          ON  CACHE BOOL "" FORCE)
+        set(lapse_shared_was "${BUILD_SHARED_LIBS}")
+        set(BUILD_SHARED_LIBS OFF)
+
+        set(lapse_ftxui_exclude "")
+        if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+            set(lapse_ftxui_exclude EXCLUDE_FROM_ALL)
+        endif()
+        FetchContent_Declare(ftxui
+            GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI.git
+            GIT_TAG        5cfed50702f52d51c1b189b5f97f8beaf5eaa2a6 # v6.1.9
+            GIT_SHALLOW    FALSE
+            ${lapse_ftxui_exclude})
+        message(STATUS "FTXUI not found, building v6.1.9 in the build tree")
+        FetchContent_MakeAvailable(ftxui)
+        set(BUILD_SHARED_LIBS "${lapse_shared_was}")
+        set(LAPSE_FTXUI_FROM "built here (v6.1.9)")
+    else()
+        message(STATUS "FTXUI not found and -DLAPSE_FETCH_MISSING=OFF, leaving lapse-tui out")
+        set(LAPSE_FTXUI_FROM "not found, lapse-tui left out")
+    endif()
+
+    if(TARGET ftxui::component)
+        add_executable(lapse-tui tui/lapse-tui.cpp)
+        target_link_libraries(lapse-tui PRIVATE ftxui::component ftxui::dom ftxui::screen)
+        lapse_program(lapse-tui)
+    endif()
+else()
+    set(LAPSE_FTXUI_FROM "off, lapse-tui left out")
+endif()
+
 foreach(runtime_file libonnxruntime.dylib libonnxruntime.so onnxruntime.dll silero_vad.onnx)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/engine/${runtime_file}")
         add_custom_command(TARGET lapse POST_BUILD
@@ -302,6 +344,9 @@ endforeach()
 
 include(GNUInstallDirs)
 install(TARGETS lapse RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+if(TARGET lapse-tui)
+    install(TARGETS lapse-tui RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()
 
 
 
@@ -320,4 +365,5 @@ message(STATUS "lapse ${PROJECT_VERSION} (${CMAKE_BUILD_TYPE})")
 message(STATUS "  FFmpeg   ${LAPSE_FFMPEG_FROM}")
 message(STATUS "  FFTW3    ${LAPSE_FFTW3_FROM}")
 message(STATUS "  libfvad  ${LAPSE_FVAD_FROM}")
+message(STATUS "  FTXUI    ${LAPSE_FTXUI_FROM}")
 message(STATUS "")

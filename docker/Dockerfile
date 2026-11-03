@@ -25,7 +25,7 @@ WORKDIR /src
 # libfvad is not packaged for Debian, cmake fetches and links it in statically
 COPY CMakeLists.txt ./
 COPY engine ./engine
-RUN cmake -B build && \
+RUN cmake -B build -DLAPSE_TUI=OFF && \
     cmake --build build -j "$(nproc)" && \
     cp build/lapse /lapse
 
