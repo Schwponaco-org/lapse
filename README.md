@@ -90,7 +90,7 @@ cmake -B build
 cmake --build build -j
 ```
 
-The program ends up in `build/lapse`. FFmpeg has to come from the system. FFTW3 and libfvad are used if they are installed and built inside `build/` if they are not, so on a machine with FFmpeg those two commands are all it takes. Nothing is written outside the build folder.
+The program ends up in `build/lapse`, with the terminal interface beside it as `build/lapse-tui`. FFmpeg has to come from the system. FFTW3 and libfvad are used if they are installed and built inside `build/` if they are not, so on a machine with FFmpeg those two commands are all it takes. Nothing is written outside the build folder.
 
 | System | FFmpeg and the build tools |
 | --- | --- |
@@ -110,6 +110,7 @@ Build options:
 | `-DLAPSE_STATIC_DEPS=ON` | Link the dependencies statically |
 | `-DLAPSE_DEPS_PREFIX=<prefix>` | Build against a prefix made by the scripts below |
 | `-DLAPSE_LTO=OFF` | Skip link time optimisation, for a quicker build |
+| `-DLAPSE_TUI=OFF` | Leave out `lapse-tui`, and with it the download of FTXUI |
 | `-DCMAKE_BUILD_TYPE=Debug` | A build you can step through in a debugger |
 
 To build the way the releases are built, with FFmpeg, FFTW3 and libfvad static and cut down to what LAPSE uses:
@@ -317,6 +318,38 @@ LAPSE cannot tell one old codepage from another, so a codepage file converted to
 ### The cache
 
 The speech found in a video, and the timings of its subtitle tracks, are saved so the next run on the same video skips the decoding. The cache lives in `$LAPSE_CACHE` if that is set, otherwise in `$XDG_CACHE_HOME/lapse` or `~/.cache/lapse`, and in `%LOCALAPPDATA%\lapse\cache` on Windows. An entry belongs to one video file, so changing the file starts over. `--no-cache` skips it.
+
+---
+
+## Terminal interface
+
+`lapse-tui` is for a folder of films on a machine you reach over SSH, a NAS for instance, where you want to see what happens to each subtitle without setting up the container. It ships in the release archives beside `lapse` and is the same engine built into a full screen program, so the speech model loads once however many files you go through.
+
+```bash
+./lapse-tui /volume1/video/Films
+```
+
+Without a folder it starts in the current one. It looks through the folder and every folder under it, pairs each subtitle with its video the same way the container does, and lists only the formats the engine reads. The list is on the left with the verdict of each file, and the right side shows the file under the cursor, what the last run said, and the log of the engine for it. Files are synced one at a time, so you can keep moving about while it works. Nothing is kept between runs, but a `•` in the list shows a subtitle that has a `.bak` beside it.
+
+| Key | What it does |
+|---|---|
+| `↑` `↓` `PgUp` `PgDn` `Home` `End` | Move through the list |
+| `Space` | Select or deselect a subtitle |
+| `Enter` | Sync the selected subtitles in order, or the one under the cursor |
+| `a` | Sync every subtitle shown that has not been done yet |
+| `u` | Put the `.bak` back |
+| `s` | Move every line by hand, by a number of milliseconds |
+| `d` | Dry run on or off |
+| `f` | `--force` on or off |
+| `b` | `--no-backup` on or off |
+| `m` | Mode, going round `auto`, `ols`, `nosplit` and `split` |
+| `x` | Empty the queue. The file being synced carries on |
+| `/` | Filter the list by name. `Esc` clears it |
+| `r` | Look through the folder again |
+| `?` | Show the keys |
+| `q` | Quit. It asks first while something is being synced |
+
+The verdicts are coloured the way the table under [Verdicts](#verdicts) reads: `solid` in green, `unsure` in yellow, `nothing` and errors in red. A dry run shows its verdict in brackets and dimmed, since nothing was written. It works at 80 by 24 and shows more, such as the offset of each file, in a bigger window.
 
 ---
 
@@ -536,6 +569,7 @@ A file named `.txt`, or with no extension, is opened and read before it is turne
 ```
 lapse/
 ├── engine/       C++ source for the lapse program
+├── tui/          The terminal interface, lapse-tui
 ├── docker/       The watcher, the web interface, the Dockerfile and a compose file
 ├── docs/         Benchmarks and other documentation
 └── .github/      CI workflows and the scripts that build a release
