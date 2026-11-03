@@ -79,6 +79,12 @@ jobs:
           stage/lapse --formats
           .github/scripts/smoke-engine.sh stage/lapse
 
+      - name: Drive the terminal interface at 80x24
+        if: matrix.name == 'linux-amd64'
+        run: |
+          sudo apt-get install -y espeak-ng ffmpeg
+          .github/scripts/smoke-tui.sh stage/lapse-tui
+
       - name: Check it starts on older CPUs and systems
         if: runner.os == 'Linux'
         run: .github/scripts/check-portable.sh stage/lapse
