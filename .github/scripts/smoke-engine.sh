@@ -24,7 +24,6 @@ WORK=$(mktemp -d)
 cd "$WORK"
 
 SOLID=0
-REFUSED=2
 UNSURE=3
 
 timestamp() {
@@ -53,6 +52,20 @@ for i in $(seq 0 39); do
 done
 cp late.srt pristine.srt
 cp late.srt sidecar.srt
+
+cue=0
+for i in $(seq 0 39); do
+    start=$((5000 + i * 7000))
+    end=$((start + 3000))
+    by=$SHIFT
+    [ $i -ge 20 ] && by=$((SHIFT + 2500))
+    cue=$((cue + 1))
+    printf "%d\n%s --> %s\nline %d\n\n" "$cue" "$(timestamp $((start + by)))" "$(timestamp $((end + by)))" "$i" >> recut.srt
+    if [ $((i % 4)) = 1 ]; then
+        cue=$((cue + 1))
+        printf "%d\n%s --> %s\n- and another\n\n" "$cue" "$(timestamp $((start + by + 300)))" "$(timestamp $((end + by - 200)))" >> recut.srt
+    fi
+done
 
 echo "== a subtitle that is ${SHIFT}ms late"
 cp pristine.srt unsure.srt
@@ -111,17 +124,46 @@ if [ "$(grep -m1 -- '-->' forced.srt)" != "$(grep -m1 -- '-->' reference.srt)" ]
     fail "the corrected file does not line up with the reference"
 fi
 
+echo "== a VobSub .idx with a delay line"
+{
+    printf "# VobSub index file, v7 (do not modify this line!)\n#\t delay: [sign]hh:mm:ss:ms\n\nid: en, index: 0\ndelay: 00:00:01:000\n"
+    for i in $(seq 0 39); do
+        printf "timestamp: %s, filepos: %09x\n" "$(timestamp $((4000 + i * 7000 + SHIFT)) | tr , :)" $((i * 2048))
+    done
+} > delayed.idx
+run reference.srt delayed.idx --force --no-backup
+if [ "$status" != "$SOLID" ]; then
+    fail "expected exit $SOLID for an .idx with a delay, got $status"
+fi
+if ! grep -q "^timestamp: 00:00:04:000, filepos: 000000000$" delayed.idx; then
+    fail "the .idx did not keep its delay out of the timestamps it wrote"
+fi
+
 echo "== --strict refuses instead of writing beside the original"
 cp pristine.srt strict.srt
 run reference.srt strict.srt --strict
-if [ "$status" != "$REFUSED" ]; then
-    fail "expected exit $REFUSED with --strict, got $status"
+if [ "$status" != "$UNSURE" ]; then
+    fail "expected exit $UNSURE with --strict, got $status"
 fi
 if [ -f strict.lapse-unsure.srt ] || [ -f strict.srt.bak ]; then
     fail "--strict wrote something anyway"
 fi
 if ! cmp -s strict.srt pristine.srt; then
     fail "--strict changed the original"
+fi
+
+echo "== two lines on screen at once do not cut the file in pieces"
+run reference.srt recut.srt split --json --dry-run --strict
+cues=$(echo "$output" | sed -n 's/.*"cues":\([0-9]*\).*/\1/p')
+splits=$(echo "$output" | sed -n 's/.*"splits":\[\([0-9,]*\)\].*/\1/p')
+if [ "$cues" != "50" ]; then
+    fail "expected 50 cues in the report, got '$cues'"
+fi
+if [ "$splits" != "25" ]; then
+    fail "expected one split at cue 25, got '$splits'"
+fi
+if ! echo "$output" | grep -q '"offsets":\[-4200,-6700\]'; then
+    fail "expected the two parts to move by -4200 and -6700"
 fi
 
 echo "== writing a sidecar and leaving the original alone"
@@ -146,6 +188,16 @@ if [ "$status" = "$SOLID" ]; then
     fail "an unreadable format should come back as an error"
 fi
 
+echo "== too few cues still answers in json"
+head -8 pristine.srt > two.srt
+run reference.srt two.srt --json
+if [ "$status" != "2" ]; then
+    fail "expected exit 2 for a file with two cues, got $status"
+fi
+if ! echo "$output" | grep -q '"reference":"none".*"written":false'; then
+    fail "expected a json line saying nothing was written"
+fi
+
 echo "== an existing backup is never overwritten"
 echo "the original" > guarded.srt.bak
 cp pristine.srt guarded.srt
@@ -155,6 +207,33 @@ if [ "$status" != "$SOLID" ]; then
 fi
 if [ "$(cat guarded.srt.bak)" != "the original" ]; then
     fail "the first backup was overwritten"
+fi
+
+echo "== an EBU STL that opens with a comment block"
+stl_tc() {
+    local f=$(($1 * 25 / 1000))
+    printf "\\$(printf %03o $((f / 90000)))\\$(printf %03o $((f / 1500 % 60)))\\$(printf %03o $((f / 25 % 60)))\\$(printf %03o $((f % 25)))"
+}
+stl_block() {
+    printf "\\000\\$(printf %03o $(($1 % 256)))\\$(printf %03o $(($1 / 256)))\\377\\000"
+    stl_tc $2
+    stl_tc $3
+    printf "\\024\\002\\$(printf %03o $4)"
+    printf "%-112s" "line $1" | LC_ALL=C tr ' ' '\217'
+}
+{
+    printf "850STL25.01%-245s00000000%-760s" "" ""
+    stl_block 0 0 0 1
+    for i in $(seq 0 39); do
+        stl_block $i $((5000 + i * 7000 + SHIFT)) $((8000 + i * 7000 + SHIFT)) 0
+    done
+} > noted.stl
+run reference.srt noted.stl --force --no-backup
+if [ "$status" != "$SOLID" ]; then
+    fail "expected exit $SOLID for an STL with a comment first, got $status"
+fi
+if [ "$(od -An -tu1 -j $((1024 + 128 + 5)) -N4 noted.stl | xargs)" != "0 0 5 0" ]; then
+    fail "the first line of the STL did not land at 00:00:05:00"
 fi
 
 cd /

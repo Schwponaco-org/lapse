@@ -204,7 +204,7 @@ static bool worth_reading(const std::string& path) {
 
 std::string subtitle_kind(const std::string& path) {
     static const char* known[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2",
-                                  ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp", ".stl"};
+                                  ".sup", ".sbv", ".idx", ".smi", ".ttml", ".dfxp", ".stl", ".scc"};
     std::string ext = std::filesystem::path(path).extension().string();
     for (char& c : ext) c = (char)tolower((unsigned char)c);
     if (ext == ".sami") return ".smi";
@@ -241,6 +241,8 @@ std::vector<std::pair<int,int>> read_subtitle(const std::string& path) {
         return read_ttml(path.c_str());
     if (kind == ".stl")
         return read_stl(path.c_str());
+    if (kind == ".scc")
+        return read_scc(path.c_str());
     throw std::runtime_error("Unsupported subtitle format: " + path);
 }
 
@@ -580,6 +582,7 @@ int stl_fps(const std::string& data) {
 }
 
 int stl_ms(const unsigned char* tc, int fps) {
+    if (tc[0] > 23 || tc[1] > 59 || tc[2] > 59 || tc[3] >= fps) return -1;
     return ((tc[0] * 60 + tc[1]) * 60 + tc[2]) * 1000 + tc[3] * 1000 / fps;
 }
 
@@ -600,16 +603,81 @@ std::vector<std::pair<int,int>> read_stl(const char* filename) {
     for (size_t at = 1024; at + 128 <= data.size(); at += 128) {
         const unsigned char* b = (const unsigned char*)data.data() + at;
         int sn = b[1] | (b[2] << 8);
-        if (sn == last || b[15]) {
-            last = sn;
-            continue;
-        }
+        if (b[15] || sn == last) continue;
         last = sn;
         if ((int)timestamps.size() >= MAX_CUES) {
             say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
             break;
         }
-        timestamps.push_back({stl_ms(b + 5, fps) - zero, stl_ms(b + 9, fps) - zero});
+        int in = stl_ms(b + 5, fps), out = stl_ms(b + 9, fps);
+        timestamps.push_back(in < 0 || out < 0 ? std::make_pair(0, 0) : std::make_pair(in - zero, out - zero));
+    }
+    return timestamps;
+}
+
+std::vector<SccLine> scc_lines(const std::string& text) {
+    std::vector<SccLine> lines;
+    bool popon = true;
+    size_t pos = 0;
+
+    while (pos < text.size()) {
+        size_t end = text.find('\n', pos);
+        if (end == std::string::npos) end = text.size();
+        std::string line = text.substr(pos, end - pos);
+
+        int h, m, s, f;
+        char sep;
+        long long ms = -1;
+        if (sscanf(line.c_str(), "%d:%d:%d%c%d", &h, &m, &s, &sep, &f) == 5 && (sep == ':' || sep == ';'))
+            ms = (h * 3600LL + m * 60LL + s) * 1000 + f * 33LL;
+        if (ms >= 0 && ms <= MAX_TIME_MS) {
+            SccLine got;
+            got.at = pos;
+            got.len = std::min(line.find_first_not_of("0123456789:;"), line.size());
+            got.ms = (int)ms;
+            got.sep = sep;
+
+            std::istringstream words(line.substr(std::min(got.len, line.size())));
+            std::string word;
+            while (words >> word) {
+                unsigned v = (unsigned)strtoul(word.c_str(), nullptr, 16) & 0x7f7f;
+                unsigned code = v & 0xf7ff;
+                if (code == 0x142f) got.show = true;
+                else if (code == 0x142c) got.hide = true;
+                else if (code == 0x1420) popon = true;
+                else if (code == 0x1425 || code == 0x1426 || code == 0x1427 || code == 0x1429) popon = false;
+                else if ((v >> 8) >= 0x20) {
+                    got.text += (char)(v >> 8);
+                    if ((v & 0xff) >= 0x20) got.text += (char)(v & 0xff);
+                }
+            }
+            if (!popon && !got.text.empty()) got.show = true;
+            got.load = popon && !got.show && !got.text.empty();
+            if (got.show) got.hide = false;
+            lines.push_back(got);
+        }
+        pos = end + 1;
+    }
+    return lines;
+}
+
+std::vector<std::pair<int,int>> read_scc(const char* filename) {
+    std::vector<SccLine> lines = scc_lines(load_text(filename));
+    std::vector<std::pair<int,int>> timestamps;
+
+    for (size_t i = 0; i < lines.size(); i++) {
+        if (!lines[i].show) continue;
+        if ((int)timestamps.size() >= MAX_CUES) {
+            say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
+            break;
+        }
+        int start = lines[i].ms;
+        int end = start + 2000;
+        for (size_t j = i + 1; j < lines.size(); j++)
+            if (lines[j].show || lines[j].hide) { end = lines[j].ms; break; }
+        if (end <= start) end = start + 2000;
+        if (end - start > MAX_CUE_MS) end = start + MAX_CUE_MS;
+        timestamps.push_back({start, end});
     }
     return timestamps;
 }
@@ -672,7 +740,23 @@ bool idx_time_line(const std::string& line, size_t& val_from, size_t& val_len) {
 int idx_time_ms(const std::string& v) {
     int h, m, s, ms;
     if (sscanf(v.c_str(), "%d:%d:%d:%d", &h, &m, &s, &ms) != 4) return -1;
-    return h * 3600000 + m * 60000 + s * 1000 + ms;
+    long long at = h * 3600000LL + m * 60000LL + s * 1000LL + ms;
+    return (at < 0 || at > MAX_TIME_MS) ? -1 : (int)at;
+}
+
+bool idx_delay_line(const std::string& line, int& delay) {
+    if (line.rfind("delay:", 0) != 0) return false;
+    size_t at = 6;
+    while (at < line.size() && line[at] == ' ') at++;
+    int sign = 1;
+    if (at < line.size() && (line[at] == '-' || line[at] == '+')) {
+        if (line[at] == '-') sign = -1;
+        at++;
+    }
+    int h = 0, m = 0, s = 0, ms = 0;
+    sscanf(line.c_str() + at, "%d:%d:%d:%d", &h, &m, &s, &ms);
+    delay = sign * (h * 3600000 + m * 60000 + s * 1000 + ms);
+    return true;
 }
 
 int spu_stop_ms(const unsigned char* spu, size_t n) {
@@ -730,17 +814,19 @@ std::vector<std::pair<int,int>> read_idx(const char* filename) {
 
     std::ifstream bin(std::filesystem::path(filename).replace_extension(".sub"), std::ios::binary);
     std::string sub((std::istreambuf_iterator<char>(bin)), {});
+    int delay = 0;
 
     while (getline(read_file, line)) {
         size_t vf, vl;
-        if (!idx_time_line(line, vf, vl)) continue;
+        if (idx_delay_line(line, delay) || !idx_time_line(line, vf, vl)) continue;
 
         if ((int)starts.size() >= MAX_CUES) {
             say() << "Stopping at " << MAX_CUES << " cues, the rest of this file is left where it is\n";
             break;
         }
 
-        starts.push_back(idx_time_ms(line.substr(vf, vl)));
+        int at = idx_time_ms(line.substr(vf, vl));
+        starts.push_back(at < 0 ? -1 : at + delay);
 
         size_t pos = line.find("filepos:");
         std::string spu = (pos == std::string::npos || sub.empty()) ? "" : spu_at(sub, strtoull(line.c_str() + pos + 8, nullptr, 16));
@@ -879,7 +965,8 @@ int ttml_time_ms(const std::string& v) {
     double f;
     if (std::count(v.begin(), v.end(), ':') == 3) {
         if (sscanf(v.c_str(), "%d:%d:%d:%lf", &h, &m, &s, &f) != 4) return -1;
-        return (int)((h * 3600 + m * 60 + s) * 1000 + f * 1000 / frame_rate + 0.5);
+        double ms = (h * 3600.0 + m * 60.0 + s) * 1000 + f * 1000 / frame_rate;
+        return (ms < 0 || ms > MAX_TIME_MS) ? -1 : (int)(ms + 0.5);
     }
     if (v.find(':') != std::string::npos) return parse_timestamp(v, 0);
 
@@ -946,9 +1033,6 @@ std::vector<std::pair<int,int>> read_ttml(const char* filename) {
 
 // Cues that sit on top of each other normally get glued into one span - they
 // are the same moment on screen and counting them twice only skews the score.
-// Split mode asks for them separately though: when a file jumps halfway through
-// the two halves overlap each other once sorted, and merging across that jump
-// welds cues from either side of it together so they can never come apart again
 std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const std::vector<std::pair<int, int>>& timestamps, bool merge, bool sort_by_time) {
     // Sort the cues by time but remember where each one sat in the file the
     // writers go through the file top to bottom and look their span back up
@@ -971,10 +1055,11 @@ std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const
     std::vector<bool> kept(timestamps.size(), false);
 
     for (int i = 0; i < (int)ys.size(); i++) {
-        if (!merge || spans.empty() || ys[i].first.first >= spans.back().second) {
+        auto [start, end] = ys[i].first;
+        if (!merge || spans.empty() || start < spans.back().first || start >= spans.back().second) {
             spans.push_back(ys[i].first);
         } else {
-            spans.back().second = std::max(ys[i].first.second, spans.back().second);
+            spans.back().second = std::max(end, spans.back().second);
         }
         mapping[ys[i].second] = (int)spans.size() - 1;
         kept[ys[i].second] = true;
@@ -997,24 +1082,6 @@ std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const
 }
 
 
-
-// Build some sort of activity profile that checks every 10ms for dialogue
-std::vector<int> activity(const std::vector<std::pair<int, int>>& spans) {
-    if (spans.empty()) return {};
-    std::vector<int> activity_profile = {};
-    int j = 0;
-    for (int i = 0; i <= spans.back().second; i += 10) {
-        while (j < (int)spans.size() && i > spans[j].second) {
-            j++;
-        }
-        if (j < (int)spans.size() && i >= spans[j].first && i <= spans[j].second) {
-            activity_profile.push_back(1);
-        } else {
-            activity_profile.push_back(0);
-        }
-    }
-    return activity_profile;
-}
 
 // Turns the vad output back into spans. One entry is one 10ms frame so the index has to be scaled before anything compares this to subtitle timestamps
 std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(const std::vector<float>& probability) {
