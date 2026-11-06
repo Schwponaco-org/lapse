@@ -57,9 +57,20 @@ int stl_fps(const std::string& data);
 int stl_ms(const unsigned char* tc, int fps);
 int stl_zero(const std::string& data, int fps);
 std::vector<std::pair<int,int>> read_stl(const char* filename);
+
+struct SccLine {
+    size_t at = 0, len = 0;
+    int ms = 0;
+    char sep = ':';
+    bool show = false, hide = false, load = false;
+    std::string text;
+};
+std::vector<SccLine> scc_lines(const std::string& text);
+std::vector<std::pair<int,int>> read_scc(const char* filename);
 std::vector<std::pair<int,int>> read_idx(const char* filename);
 bool idx_time_line(const std::string& line, size_t& val_from, size_t& val_len);
 int idx_time_ms(const std::string& v);
+bool idx_delay_line(const std::string& line, int& delay);
 int spu_stop_ms(const unsigned char* spu, size_t n);
 std::vector<std::pair<int,int>> read_smi(const char* filename);
 size_t ifind(const std::string& text, const std::string& needle, size_t from);
@@ -80,5 +91,4 @@ const int MAX_TIME_MS = 24 * 3600 * 1000;
 const int MAX_CUES = 100000;
 const size_t MAX_SUBTITLE_BYTES = 64u * 1024 * 1024;
 
-std::vector<int> activity(const std::vector<std::pair<int, int>>& spans);
 std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(const std::vector<float>& probability);

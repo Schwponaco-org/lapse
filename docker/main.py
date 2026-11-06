@@ -66,6 +66,7 @@ VALUES = [
     ("SNAP", "--snap"),
     ("ENCODING", "--encoding"),
     ("MIN_SHIFT", "--min-shift"),
+    ("WHISPER", "--whisper"),
 ]
 
 VIDEO_EXTS = {
@@ -140,9 +141,15 @@ def save_engine(conn, options):
     conn.commit()
 
 
+def restorable():
+    return MIN_CONFIDENCE > 0 and not ENGINE.get("suffix")
+
+
 def engine_flags():
     flags = []
     for name, option in SWITCHES:
+        if option == "--no-backup" and restorable():
+            continue
         if ENGINE.get(name.lower()):
             flags.append(option)
     for name, option in VALUES:
@@ -273,6 +280,14 @@ def setting(conn, key, fallback):
 
 def paused(conn):
     return setting(conn, "paused", "0") == "1"
+
+
+def utf8(path):
+    try:
+        path.encode("utf-8")
+        return True
+    except UnicodeEncodeError:
+        return False
 
 
 def blocked(path):
@@ -423,6 +438,15 @@ def file_mtime(path):
         return None
 
 
+def ebu_stl(path):
+    try:
+        with open(path, "rb") as file:
+            head = file.read(1024)
+    except OSError:
+        return False
+    return len(head) == 1024 and head[3:6] == b"STL" and head[8:11] == b".01"
+
+
 def previous_job(conn, video_path, srt_path):
     cur = conn.execute(
         "SELECT status, attempts, srt_mtime FROM sync_jobs WHERE video_path = ? AND srt_path = ?",
@@ -476,6 +500,7 @@ def run_batch(conn, batch):
         try:
             while todo:
                 video, subtitle, attempts = todo[0]
+                had_backup = os.path.exists(subtitle + ".bak")
                 clock = threading.Timer(TIMEOUT, force, [child])
                 clock.start()
                 try:
@@ -497,7 +522,7 @@ def run_batch(conn, batch):
                 if not values or values.get("error"):
                     failed(conn, video, subtitle, attempts)
                 else:
-                    finish(conn, video, subtitle, attempts, values)
+                    finish(conn, video, subtitle, attempts, values, had_backup)
         finally:
             with engine_lock:
                 engine = None
@@ -561,7 +586,7 @@ def remember_tracks(conn, video_path):
     conn.commit()
 
 
-def finish(conn, video_path, srt_path, attempts, values):
+def finish(conn, video_path, srt_path, attempts, values, had_backup=True):
     print("%s: %s offset=%sms sigma=%.1f agree=%.2f reference=%s" % (
         os.path.basename(srt_path), values.get("verdict"), values.get("offset_ms"),
         values.get("sigma", 0), values.get("agreement", 0), values.get("reference")))
@@ -579,7 +604,7 @@ def finish(conn, video_path, srt_path, attempts, values):
         print("Already in sync, left it alone:", srt_path)
         values["offset_ms"] = 0
     elif not values.get("written"):
-        print("Nothing lined up, left it alone:", srt_path)
+        print("Left it alone, %s:" % (values.get("why") or "nothing lined up"), srt_path)
         status = "lowconf"
     elif verdict != "solid":
         # the engine wrote its guess beside the original rather than over it
@@ -599,6 +624,10 @@ def finish(conn, video_path, srt_path, attempts, values):
             shutil.copy2(backup_path, srt_path)
             print("Confidence %.2f is under %.2f, put the original back: %s" % (confidence, MIN_CONFIDENCE, srt_path))
             status = "lowconf"
+
+    if ENGINE.get("no_backup") and restorable() and not had_backup and backup_path:
+        os.remove(backup_path)
+        backup_path = None
 
     save_result(conn, video_path, srt_path, backup_path, values, attempts, status)
 
@@ -628,9 +657,13 @@ def run_scan(conn, path, verbose=False):
         if not running or paused(conn):
             return
 
+        if not utf8(video + subtitle):
+            print("Cannot keep a record of a name that is not UTF-8, rename it to have it synced:",
+                  os.fsencode(subtitle).decode("utf-8", "replace"))
+            continue
         remember_tracks(conn, video)
         ext = os.path.splitext(subtitle)[1].lower()
-        if ext not in ENGINE_FORMATS:
+        if ext not in ENGINE_FORMATS or (ext == ".stl" and not ebu_stl(subtitle)):
             unsupported += 1
             continue
         if translate.ours(conn, subtitle):

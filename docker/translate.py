@@ -52,6 +52,7 @@ def named(path, language):
 
 def pull_lines(lines, dialogue_only):
     wanted = []
+    block = False
     for number, line in enumerate(lines):
         stripped = line.strip()
 
@@ -61,9 +62,16 @@ def pull_lines(lines, dialogue_only):
                 wanted.append((number, match.group(2)))
             continue
 
-        if not stripped or TIMING.search(line) or COUNTER.match(line):
+        if not stripped:
+            block = False
             continue
-        if stripped.startswith(("WEBVTT", "NOTE", "STYLE", "REGION")):
+        if block or TIMING.search(line) or COUNTER.match(line):
+            continue
+        after_gap = number == 0 or not lines[number - 1].strip()
+        if after_gap and re.match(r"(WEBVTT|NOTE|STYLE|REGION)\b", stripped):
+            block = True
+            continue
+        if number + 1 < len(lines) and TIMING.search(lines[number + 1]):
             continue
         wanted.append((number, line.rstrip("\r\n")))
     return wanted

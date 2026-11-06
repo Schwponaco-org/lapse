@@ -29,7 +29,7 @@ void align_drop();
 bool align_ready();
 int align_reach();
 
-std::vector<Hit> align_peaks(const std::vector<std::pair<int,int>>& cues, int want);
+std::vector<Hit> align_peaks(const std::vector<std::pair<int,int>>& cues, int want, int max_offset);
 double align_score(const std::vector<std::pair<int,int>>& cues, int off);
 int align_refine(const std::vector<std::pair<int,int>>& cues, int off, int reach = 400);
 

@@ -141,10 +141,16 @@ cp /tmp/video.mkv "/media/TV/Show/Season 01/Show.S01E02.1080p.WEB-DL.mkv"
 speech_srt "/media/TV/Show/Season 01/Show.S01E01.en.srt" $SHIFT
 speech_srt "/media/TV/Show/Season 01/Show.S01E02.da.srt" $SHIFT
 
+odd=$(printf 'Gammel D\346mon (1999)')
+mkdir -p "/media/Movies/$odd"
+cp /tmp/video.mkv "/media/Movies/$odd/$odd.mkv"
+speech_srt "/media/Movies/$odd/$odd.srt" $SHIFT
+
 # Things that should be left where they are
 mkdir -p "/media/TV/Show/Season 01/@eaDir" "/media/Movies/Orphan"
 speech_srt "/media/TV/Show/Season 01/@eaDir/Show.S01E01.srt" 0
 speech_srt "/media/Movies/Orphan/orphan.srt" 0
+printf '$FontName = Arial\n00:00:05:00 , 00:00:08:00 , Hello there\n' > "/media/Movies/Test Movie (2024)/Test Movie (2024).da.stl"
 
 chown -R 1000:1000 /media
 find /media -type f -exec touch -d "10 minutes ago" {} +

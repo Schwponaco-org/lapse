@@ -30,13 +30,13 @@ jobs:
       matrix:
         include:
           - name: linux-amd64
-            os: ubuntu-latest
+            os: ubuntu-22.04
             ort: linux-x64
           - name: linux-arm64
-            os: ubuntu-24.04-arm
+            os: ubuntu-22.04-arm
             ort: linux-aarch64
           - name: macos-arm64
-            os: macos-14
+            os: macos-15
             ort: osx-arm64
             deployment: '11.0'
           - name: macos-x86_64
@@ -78,6 +78,10 @@ jobs:
         run: |
           stage/lapse --formats
           .github/scripts/smoke-engine.sh stage/lapse
+
+      - name: Check it starts on older CPUs and systems
+        if: runner.os == 'Linux'
+        run: .github/scripts/check-portable.sh stage/lapse
 
       - name: Check it falls back to libfvad when onnxruntime is missing
         if: runner.os == 'Linux'

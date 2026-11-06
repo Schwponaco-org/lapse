@@ -279,15 +279,25 @@ static std::vector<std::string> stl_cue_text(const std::string& path) {
     for (size_t at = 1024; ebu_stl(data) && at + 128 <= data.size(); at += 128) {
         const unsigned char* b = (const unsigned char*)data.data() + at;
         int sn = b[1] | (b[2] << 8);
-        if (b[15]) {
-            last = sn;
-            continue;
-        }
+        if (b[15]) continue;
         if (sn != last) out.push_back("");
         last = sn;
         for (int i = 16; i < 128; i++) {
             if (b[i] == 0x8a) out.back() += '\n';
             else if (b[i] >= 0x20 && b[i] < 0x7f) out.back() += (char)b[i];
+        }
+    }
+    return out;
+}
+
+static std::vector<std::string> scc_cue_text(const std::string& path) {
+    std::vector<std::string> out;
+    std::string pending;
+    for (auto& l : scc_lines(load_text(path))) {
+        if (l.load) pending += l.text + "\n";
+        if (l.show) {
+            out.push_back(pending + l.text);
+            pending.clear();
         }
     }
     return out;
@@ -301,6 +311,7 @@ std::vector<std::string> read_cue_text(const std::string& path) {
     if (kind == ".sbv") return sbv_cue_text(path);
     if (kind == ".ttml" || kind == ".dfxp") return ttml_cue_text(path);
     if (kind == ".stl") return stl_cue_text(path);
+    if (kind == ".scc") return scc_cue_text(path);
     return srt_cue_text(path);
 }
 
