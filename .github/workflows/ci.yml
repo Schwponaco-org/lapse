@@ -36,7 +36,7 @@ jobs:
             os: ubuntu-22.04-arm
             ort: linux-aarch64
           - name: macos-arm64
-            os: macos-14
+            os: macos-15
             ort: osx-arm64
             deployment: '11.0'
           - name: macos-x86_64
