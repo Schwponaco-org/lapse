@@ -105,6 +105,35 @@ jobs:
           name: lapse-${{ matrix.name }}
           path: dist/*
 
+  alpine:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-musl-amd64
+            os: ubuntu-22.04
+          - name: linux-musl-arm64
+            os: ubuntu-22.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ort-musl
+          key: ort-${{ matrix.name }}-${{ env.ORT_VERSION }}-${{ hashFiles('.github/scripts/fetch-onnxruntime.sh') }}
+
+      - name: Build and test inside Alpine
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src alpine:3.20 \
+            .github/scripts/build-alpine.sh ${{ matrix.name }} "$ORT_VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lapse-${{ matrix.name }}
+          path: dist/*
+
   windows:
     name: ${{ matrix.name }}
     strategy:
@@ -194,7 +223,7 @@ jobs:
           path: dist/*
 
   release:
-    needs: [unix, windows]
+    needs: [unix, alpine, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write

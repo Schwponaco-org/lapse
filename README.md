@@ -34,6 +34,8 @@ Every release ships a self-contained archive per platform. Unpack it and run the
 |---|---|---|
 | Linux x86-64 | `lapse-linux-amd64.tar.gz` | any x86-64 CPU, glibc 2.35 and newer (Ubuntu 22.04+, Debian 12+) |
 | Linux ARM64 | `lapse-linux-arm64.tar.gz` | Raspberry Pi 4/5, ARM servers, Apple silicon VMs |
+| Alpine x86-64 | `lapse-linux-musl-amd64.tar.gz` | Alpine 3.20 and newer, and other musl systems |
+| Alpine ARM64 | `lapse-linux-musl-arm64.tar.gz` | Alpine 3.20 and newer, and other musl systems |
 | macOS Apple silicon | `lapse-macos-arm64.tar.gz` | macOS 11 Big Sur and newer |
 | macOS Intel | `lapse-macos-x86_64.tar.gz` | macOS 10.15 Catalina and newer |
 | Windows x64 | `lapse-windows-x64.zip` | Windows 10 and newer |

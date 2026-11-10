@@ -48,6 +48,27 @@ case "$TARGET" in
         tar xf ort.tgz "${DIR}/lib/libonnxruntime.${VERSION}.dylib"
         cp "${DIR}/lib/libonnxruntime.${VERSION}.dylib" "$DEST/libonnxruntime.dylib"
         ;;
+    linux-musl)
+        CACHE=${ORT_CACHE:-$WORK/built}
+        if [ ! -f "$CACHE/libonnxruntime.so.${VERSION}" ]; then
+            curl -fsSL --retry 10 --retry-all-errors --retry-delay 30 --connect-timeout 20 -o ort.tgz \
+                "https://github.com/microsoft/onnxruntime/archive/refs/tags/v${VERSION}.tar.gz"
+            tar xf ort.tgz
+            cmake -S "onnxruntime-${VERSION}/cmake" -B ort-build -G Ninja \
+                -DCMAKE_BUILD_TYPE=MinSizeRel \
+                -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+                -DCMAKE_CXX_FLAGS="-Wno-error -U_FORTIFY_SOURCE" \
+                -DCMAKE_SHARED_LINKER_FLAGS="-static-libgcc -static-libstdc++ -Wl,--strip-all" \
+                -Donnxruntime_BUILD_SHARED_LIB=ON \
+                -Donnxruntime_BUILD_UNIT_TESTS=OFF \
+                -Donnxruntime_ENABLE_PYTHON=OFF \
+                -Donnxruntime_DISABLE_ML_OPS=ON
+            cmake --build ort-build --target onnxruntime
+            mkdir -p "$CACHE"
+            cp "ort-build/libonnxruntime.so.${VERSION}" "$CACHE/"
+        fi
+        cp "$CACHE/libonnxruntime.so.${VERSION}" "$DEST/libonnxruntime.so"
+        ;;
     linux-*)
         curl -fsSL --retry 10 --retry-all-errors --retry-delay 30 --connect-timeout 20 -o ort.tgz "${BASE}/${DIR}.tgz"
         tar xf ort.tgz "${DIR}/lib/libonnxruntime.so.${VERSION}"
