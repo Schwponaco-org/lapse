@@ -178,6 +178,22 @@ else
     fails=$((fails + 1))
 fi
 
+echo "== batch mode"
+# keyframes at uneven times read as picture cuts, so --snap moves the ends of lines
+cuts=$(python3 -c "import random; random.seed(1); t = [round(1 + i * 1.6 + random.random(), 1) for i in range(90)]; print(','.join(map(str, t)))")
+build audio.wav cut.mkv -c:a flac -g 1000 -sc_threshold 0 -force_key_frames "$cuts"
+cp shifted.srt work.srt
+replies=$(printf 'cut.mkv work.srt --snap 1000 --force --no-backup --no-embedded\n--shift 0 truth.srt --output moved.srt\n' | "$LAPSE" --batch 2> /dev/null || true)
+if ! echo "$replies" | grep -q '"snapped":[1-9]'; then
+    echo "  snapping in a batch          FAIL nothing was snapped to the cuts"
+    fails=$((fails + 1))
+elif cmp -s truth.srt moved.srt; then
+    echo "  jobs keep to themselves      ok"
+else
+    echo "  jobs keep to themselves      FAIL --shift 0 moved the ends --snap set in the job before"
+    fails=$((fails + 1))
+fi
+
 cd /
 rm -rf "$WORK"
 
