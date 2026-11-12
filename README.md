@@ -113,6 +113,7 @@ Build options:
 | `-DLAPSE_DEPS_PREFIX=<prefix>` | Build against a prefix made by the scripts below |
 | `-DLAPSE_LTO=OFF` | Skip link time optimisation, for a quicker build |
 | `-DCMAKE_BUILD_TYPE=Debug` | A build you can step through in a debugger |
+| `-DLAPSE_SANITIZE=ON` | A build with AddressSanitizer and UBSan in it, slow, for finding memory bugs. `.github/scripts/mutate-formats.py` feeds one mutated files in every format |
 
 To build the way the releases are built, with FFmpeg, FFTW3 and libfvad static and cut down to what LAPSE uses:
 

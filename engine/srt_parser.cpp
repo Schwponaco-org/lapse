@@ -407,10 +407,8 @@ bool is_mpl2(const std::string& text) {
 }
 
 int tenths_to_ms(long long tenths) {
-    if (tenths < 0) return -1;
-    long long ms = tenths * 100;
-    if (ms > MAX_TIME_MS) return -1;
-    return (int)ms;
+    if (tenths < 0 || tenths > MAX_TIME_MS / 100) return -1;
+    return (int)(tenths * 100);
 }
 
 static std::vector<std::pair<int,int>> read_mpl2(const std::string& text) {
@@ -773,7 +771,9 @@ bool idx_delay_line(const std::string& line, int& delay) {
     }
     int h = 0, m = 0, s = 0, ms = 0;
     sscanf(line.c_str() + at, "%d:%d:%d:%d", &h, &m, &s, &ms);
-    delay = sign * (h * 3600000 + m * 60000 + s * 1000 + ms);
+    long long total = h * 3600000LL + m * 60000LL + s * 1000LL + ms;
+    if (h < 0 || m < 0 || s < 0 || ms < 0 || total > MAX_TIME_MS) total = 0;
+    delay = (int)(sign * total);
     return true;
 }
 
