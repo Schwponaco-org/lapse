@@ -22,6 +22,8 @@ import sys
 def starts(path):
     text = open(path, encoding="utf-8", errors="replace").read()
     found = re.findall(r"(\d+):(\d\d):(\d\d)[,.](\d\d\d)\s*-->", text)
+    if not found:
+        found = re.findall(r"^timestamp: (\d+):(\d\d):(\d\d):(\d\d\d)", text, re.M)
     return [((int(h) * 60 + int(m)) * 60 + int(s)) * 1000 + int(ms) for h, m, s, ms in found]
 
 

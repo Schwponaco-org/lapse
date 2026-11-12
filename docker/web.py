@@ -25,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE = os.path.join(HERE, "index.html")
+TIMEOUT = int(os.environ.get("TIMEOUT", "1800"))
 
 config = {}
 waiting = queue.Queue()
@@ -215,6 +216,10 @@ def inside_library(path):
     return False
 
 
+def subtitle(path):
+    return os.path.splitext(path)[1].lower() in config["formats"]
+
+
 def neighbours(conn, ids):
     found = []
     for job_id in ids:
@@ -229,7 +234,7 @@ def neighbours(conn, ids):
         for name in names:
             if name.startswith("."):
                 continue
-            if os.path.splitext(name)[1].lower() in config["formats"]:
+            if subtitle(name):
                 full = os.path.join(folder, name)
                 if full not in found:
                     found.append(full)
@@ -240,6 +245,10 @@ def neighbours(conn, ids):
 def sync_one(conn, row, reference, mode):
     target = row["srt_path"]
     command = [config["lapse"], reference, target, "--json"]
+    # a video is the copy the subtitle was made for, so it is moved from that
+    # one to its own video by their sound
+    if not subtitle(reference):
+        command = [config["lapse"], row["video_path"], target, "--from", reference, "--json"]
 
     if mode.startswith("new"):
         base, ext = os.path.splitext(target)
@@ -247,7 +256,7 @@ def sync_one(conn, row, reference, mode):
     if mode == "new" or mode == "overwrite":
         command.append("--no-backup")
 
-    result = subprocess.run(command, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT)
     values = engine_json(result.stdout or "")
     if not values:
         raise RuntimeError((result.stderr or "").strip() or "lapse said nothing")
@@ -281,6 +290,8 @@ def reference_sync(conn, ids, reference, everything, mode):
     if not inside_library(reference) or not os.path.isfile(reference):
         raise RuntimeError("No such subtitle in the library: " + reference)
 
+    if everything and not subtitle(reference):
+        raise RuntimeError("Every other track can only be lined up against a subtitle")
     if everything:
         folder = os.path.dirname(reference)
         ids = []

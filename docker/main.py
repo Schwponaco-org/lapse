@@ -78,7 +78,7 @@ VIDEO_EXTS = {
 # The engine tells us that part at startup and the rest is left alone
 SUBTITLE_EXTS = {
     ".srt", ".ass", ".ssa", ".vtt", ".sub", ".idx", ".sup", ".smi", ".sami",
-    ".ttml", ".dfxp", ".sbv", ".mpl2", ".lrc", ".stl", ".scc", ".mcc", ".cap",
+    ".ttml", ".dfxp", ".sbv", ".mpl2", ".lrc", ".stl", ".scc", ".mcc", ".cap", ".xml",
 }
 
 ENGINE_FORMATS = {".srt", ".ass", ".ssa", ".vtt"}
@@ -389,10 +389,23 @@ def scan(path):
                 videos.setdefault(root, []).append((base, full_path))
             elif ext == ".sub" and base in pictures:
                 continue
+            elif ext == ".xml" and not ttml(full_path):
+                continue
             elif ext in SUBTITLE_EXTS and not ours(base):
                 subtitles.setdefault(root, []).append((base, full_path))
 
     return videos, subtitles
+
+
+# TTML is often saved as .xml, and so is plenty that is not a subtitle
+def ttml(path):
+    try:
+        with open(path, "rb") as file:
+            head = file.read(65536)
+    except OSError:
+        return False
+    return any(tag.encode(code) in head for tag in ("<tt ", "<tt:tt ")
+               for code in ("utf-8", "utf-16-le", "utf-16-be"))
 
 
 def videos_in(directory):
@@ -815,6 +828,9 @@ def main():
         print("Dry run, nothing will be written or recorded")
 
     ENGINE_FORMATS = engine_formats()
+    # the engine reads TTML saved as .xml too, but has to look inside to know
+    if ".ttml" in ENGINE_FORMATS:
+        ENGINE_FORMATS.add(".xml")
     SUBTITLE_EXTS = SUBTITLE_EXTS | ENGINE_FORMATS
     print("Engine reads:", " ".join(sorted(ENGINE_FORMATS)))
     print("Library:", ", ".join(MEDIA_ROOTS))

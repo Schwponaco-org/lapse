@@ -17,6 +17,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -36,6 +38,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag a release with its version as well
+        id: tags
+        run: |
+          tags=ghcr.io/schwponaco-org/lapse:latest
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tags="$tags,ghcr.io/schwponaco-org/lapse:${GITHUB_REF_NAME#v}"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
@@ -43,4 +53,4 @@ jobs:
           file: docker/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: ghcr.io/schwponaco-org/lapse:latest
+          tags: ${{ steps.tags.outputs.tags }}

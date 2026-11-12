@@ -412,7 +412,7 @@ matchMedia("(prefers-color-scheme: dark)").onchange = paintTheme;
   <h3>Sync subtitles to reference</h3>
   <p class="hint" id="referenceFile"></p>
   <div class="bar row">
-    <label class="inline" for="reference">Already correct</label>
+    <label class="inline" for="reference">Already correct, or the video it fits</label>
     <input type="text" id="reference" class="grow" list="referenceList">
     <datalist id="referenceList"></datalist>
   </div>
@@ -820,9 +820,10 @@ $("toReference").onclick = async () => {
   $("referenceList").innerHTML = options;
   $("reference").value = got.paths[0] || "";
   $("referenceAll").checked = false;
-  $("referenceFile").textContent = chosen.length === 1
+  $("referenceFile").textContent = (chosen.length === 1
     ? "One subtitle lined up against the one you pick"
-    : chosen.length + " subtitles lined up against the one you pick";
+    : chosen.length + " subtitles lined up against the one you pick")
+    + ". Give a video instead when the subtitle was made for that copy of the film.";
   $("referenceBox").showModal();
 };
 

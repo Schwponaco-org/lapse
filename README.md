@@ -6,11 +6,12 @@ LAPSE fixes subtitles that are out of sync with the video. It listens to the fil
 
 It fixes a subtitle that is early or late by the same amount all the way through, one that slowly drifts further out because it was made for a different frame rate, and one that was made for a different cut of the film, with scenes or ad breaks in other places.
 
-You can run it three ways:
+You can run it four ways:
 
 - **`lapse`**, a single program you run on one file at a time, or on a whole list of them with `--batch`.
 - **The Docker image**, which watches your media library, pairs every subtitle with its video and keeps the lot in sync, with a web page to see and undo what it did.
 - **The [Jellyfin plugin](https://github.com/Schwponaco-org/lapse-jellyfin-plugin)**, which runs the same engine from inside Jellyfin.
+- **The [terminal interface](https://github.com/Schwponaco-org/lapse-tui)**, which runs the `lapse` you have installed, for a server over ssh or anyone who would rather stay in the terminal. It runs on Linux and macOS.
 
 There is also a copy in the browser at [schwponaco.org/lapse](https://schwponaco.org/lapse/). It is the same engine built for WebAssembly and runs in the tab, so the video never leaves your machine. It is handy for a file or two. For a whole library the Docker image fits better, since it keeps track of what it already synced.
 
@@ -360,6 +361,8 @@ Set `PUID` and `PGID` to the user that owns your media. Without them the contain
 
 The first run is worth watching with `docker compose logs -f lapse` to check that subtitles were paired with the right videos.
 
+`latest` is built again whenever something is merged. Every release is also tagged with its version, such as `ghcr.io/schwponaco-org/lapse:2.5.0`, for when you want to stay on one.
+
 ### Web interface
 
 Publish port `8080` and open `http://your-host:8080`. There is no login, so keep it on your own network or behind whatever already protects the rest of your setup.
@@ -378,7 +381,7 @@ From there you can:
 - **Leave folders out.** Everything you mounted is listed, one level down. Untick what should not be touched and the scanner walks past it. Deeper paths can be typed in.
 - **Translate.** Pick subtitles, give a language code and send them off. See [Translation](#translation).
 - **Shift.** Move a subtitle by hand, in milliseconds, for when a sync came out close but not quite right. The first lines are shown before and after as you type for `.srt`, `.vtt`, `.ass` and `.ssa`, and you choose whether the result goes next to the original or over it. Nothing is decoded, so it is instant, and it works on every format the engine writes.
-- **Sync subtitles to a reference.** For a film with several subtitle tracks where one is already right. Lines every other track up against it, or just the one you pick. The sound is not used, so it is quick, and usually more exact than syncing each track on its own.
+- **Sync subtitles to a reference.** For a film with several subtitle tracks where one is already right. Lines every other track up against it, or just the one you pick. The sound is not used, so it is quick, and usually more exact than syncing each track on its own. Give a video instead of a subtitle when the subtitle was made for that copy of the film, and it is moved to its own video by the sound of the two (`--from`).
 - **Convert.** Write a subtitle out as `.srt`, `.vtt`, `.ass` or `.ssa`. The original stays unless you tick the box. A file already at the new name is kept as `.bak` first.
 - **Film counts.** The line under the tiles says how many films are fully synced, partly synced or untouched. Subtitle tracks inside the video are left out of the count unless you tick `Count embedded tracks too`.
 - **Change the engine settings.** Mode, where results go, confidence and every switch the command line has, under Settings. See [Engine settings](#engine-settings).
@@ -519,7 +522,7 @@ So an MPL2 or SubViewer `.sub` syncs with no video and no `--fps`. A MicroDVD fi
 
 The text STL has no frame rate in it either. A file with a frame number of 25 or more is read at 30 frames a second, and anything else at 25.
 
-A file named `.txt`, or with no extension, is opened and read before it is turned away. Subtitles come out of archives named like that often enough to be worth it. SubRip, WebVTT, SubStation, MicroDVD, MPL2, SubViewer and TTML all show what they are in the first few lines, and the file is written back as whatever it turned out to be. Anything over 4 MB, or with an extension LAPSE does not know, is left alone, so pointing it at a video by mistake fails straight away. The container only picks up the extensions `lapse --formats` lists, which leaves out `.txt` and `.xml`.
+A file named `.txt`, or with no extension, is opened and read before it is turned away. Subtitles come out of archives named like that often enough to be worth it. SubRip, WebVTT, SubStation, MicroDVD, MPL2, SubViewer and TTML all show what they are in the first few lines, and the file is written back as whatever it turned out to be. Anything over 4 MB, or with an extension LAPSE does not know, is left alone, so pointing it at a video by mistake fails straight away. The container picks up the extensions `lapse --formats` lists and a `.xml` with TTML inside. It leaves `.txt` alone, since most of those beside a video are release notes.
 
 **Video:** anything FFmpeg can read, such as `.mkv`, `.mp4`, `.avi`, `.mov`, `.ts` and `.webm`.
 
