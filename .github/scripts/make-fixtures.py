@@ -19,6 +19,7 @@
 
 import os
 import random
+import struct
 import sys
 import wave
 
@@ -116,5 +117,27 @@ while t < 140 * 1000:
     bogus.append((t, t + 900))
     t += random.randint(1100, 2600)
 write_srt("unrelated.srt", bogus)
+
+# cues six seconds apart that only their lengths tell apart, so a VobSub that
+# loses the time a picture leaves the screen has nothing to line up by. The
+# .sub is under 256KB, which is where every picture but the first lost it
+def picture(length):
+    spu = struct.pack(">HH", 35, 20) + bytes(16) + struct.pack(">HH", 0, 29) + b"\x01\x03\x00\x00\xff" \
+        + struct.pack(">HH", length * 90 // 1024, 29) + b"\x02\xff"
+    pes = b"\x00\x00\x01\xbd" + struct.pack(">H", 9 + len(spu)) + b"\x81\x80\x05" + bytes(5) + b"\x20" + spu
+    pack = b"\x00\x00\x01\xba\x44\x00\x04\x00\x04\x01\x01\x89\xc3\xf8" + pes
+    return pack + b"\xff" * (2048 - len(pack))
+
+
+steady = [(5000 + i * 6000, 5000 + i * 6000 + random.randint(800, 4500)) for i in range(40)]
+write_srt("steady.srt", steady)
+write_srt("steady_part.srt", steady[10:30])
+idx = "# VobSub index file, v7 (do not modify this line!)\nsize: 720x576\nid: en, index: 0\n"
+sub = b""
+for a, b in steady[10:30]:
+    idx += "timestamp: %s, filepos: %09x\n" % (ts(a + SHIFT).replace(",", ":"), len(sub))
+    sub += picture(b - a)
+open(os.path.join(work, "vobsub.idx"), "w").write(idx)
+open(os.path.join(work, "vobsub.sub"), "wb").write(sub)
 
 print("fixtures: %d cues, %d joined cues" % (len(cues), len(jcues)))
