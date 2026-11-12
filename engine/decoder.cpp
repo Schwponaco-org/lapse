@@ -506,18 +506,9 @@ static double profile_score(const std::vector<float>& probability) {
 
 // how loud it gets when something is happening. the mean is no good, a film
 // that is silent most of the time drags it to nothing
-static double loud_level(const std::vector<int16_t>& pcm) {
-    std::vector<float> rms;
-    for (size_t at = 0; at + FRAME_SAMPLES <= pcm.size(); at += FRAME_SAMPLES) {
-        double energy = 0;
-        for (int i = 0; i < FRAME_SAMPLES; ++i) {
-            double v = pcm[at + i] / 32768.0;
-            energy += v * v;
-        }
-        rms.push_back((float)std::sqrt(energy / FRAME_SAMPLES));
-    }
-    if (rms.empty()) return TARGET_LEVEL;
-
+static double loud_level(const std::vector<float>& loudness) {
+    if (loudness.empty()) return TARGET_LEVEL;
+    std::vector<float> rms = loudness;
     size_t at = rms.size() * 9 / 10;
     std::nth_element(rms.begin(), rms.begin() + at, rms.end());
     return rms[at];
@@ -526,7 +517,7 @@ static double loud_level(const std::vector<int16_t>& pcm) {
 static std::vector<float> analyse(const std::vector<int16_t>& pcm, bool silero) {
     std::vector<float> probability;
     std::vector<float> loudness;
-    std::vector<float> block(FRAME_SAMPLES);
+    loudness.reserve(pcm.size() / FRAME_SAMPLES + 1);
 
     for (size_t at = 0; at + FRAME_SAMPLES <= pcm.size(); at += FRAME_SAMPLES) {
         double energy = 0;
@@ -540,7 +531,7 @@ static std::vector<float> analyse(const std::vector<int16_t>& pcm, bool silero) 
 
     if (silero) {
 
-        double boost = getenv("NOBOOST") ? 1.0 : TARGET_LEVEL * 2.0 / std::max(loud_level(pcm), 1e-5);
+        double boost = getenv("NOBOOST") ? 1.0 : TARGET_LEVEL * 2.0 / std::max(loud_level(loudness), 1e-5);
         if (boost < 1.0) boost = 1.0;
         if (boost > 12.0) boost = 12.0;
 
@@ -592,6 +583,10 @@ static std::vector<float> analyse(const std::vector<int16_t>& pcm, bool silero) 
     Fvad* modes[VAD_MODES] = {nullptr, nullptr, nullptr, nullptr};
     for (int mode = 0; mode < VAD_MODES; ++mode) {
         modes[mode] = fvad_new();
+        if (!modes[mode]) {
+            for (int m = 0; m < mode; ++m) fvad_free(modes[m]);
+            return {};
+        }
         fvad_set_mode(modes[mode], mode);
         fvad_set_sample_rate(modes[mode], RATE);
     }

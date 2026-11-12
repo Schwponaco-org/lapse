@@ -179,7 +179,10 @@ static std::filesystem::path cache_path(const std::string& video, int track, boo
     auto written = std::filesystem::last_write_time(video, ec);
     if (ec) return {};
 
-    std::string key = video + "|" + std::to_string((long long)size) + "|" + std::to_string((long long)written.time_since_epoch().count()) + "|" + std::to_string(track);
+    // the same film reached by two names, one relative and one not, is one film
+    std::string film = std::filesystem::weakly_canonical(video, ec).string();
+    if (ec || film.empty()) film = video;
+    std::string key = film + "|" + std::to_string((long long)size) + "|" + std::to_string((long long)written.time_since_epoch().count()) + "|" + std::to_string(track);
     key += subtitles ? "|sub" : silero_open() ? "|silero" : "|fvad";
     unsigned long long hash = 1469598103934665603ULL;
     for (char c : key) {
