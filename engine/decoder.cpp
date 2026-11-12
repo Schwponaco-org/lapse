@@ -707,6 +707,7 @@ static std::vector<int16_t> decode_range(const std::string& path, int stream_ind
     std::vector<int16_t> scratch;
     bool started = false;
     bool done = false;
+    int channels = dec->ch_layout.nb_channels, rate = dec->sample_rate, format = dec->sample_fmt;
 
     auto drain = [&]() {
         while (!done) {
@@ -718,6 +719,17 @@ static std::vector<int16_t> decode_range(const std::string& path, int stream_ind
                       : (double)av_rescale_q(pts, tb, millis) - base;
 
             if (at >= 0 && at >= (double)to_ms) { done = true; av_frame_unref(frame); break; }
+
+            // a TV recording drops from 5.1 to stereo for the adverts, and swr
+            // would go on reading channels the frame no longer has
+            if (frame->ch_layout.nb_channels != channels || frame->sample_rate != rate || frame->format != format) {
+                channels = frame->ch_layout.nb_channels;
+                rate = frame->sample_rate;
+                format = frame->format;
+                swr_free(&swr);
+                swr = open_mix(dec, mix, centre, left, right);
+                if (!swr) swr = open_mix(dec, 1, -1, -1, -1);
+            }
 
             scratch.clear();
             pour(swr, frame, scratch);
