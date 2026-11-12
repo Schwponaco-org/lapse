@@ -6,11 +6,12 @@ LAPSE fixes subtitles that are out of sync with the video. It listens to the fil
 
 It fixes a subtitle that is early or late by the same amount all the way through, one that slowly drifts further out because it was made for a different frame rate, and one that was made for a different cut of the film, with scenes or ad breaks in other places.
 
-You can run it three ways:
+You can run it four ways:
 
 - **`lapse`**, a single program you run on one file at a time, or on a whole list of them with `--batch`.
 - **The Docker image**, which watches your media library, pairs every subtitle with its video and keeps the lot in sync, with a web page to see and undo what it did.
 - **The [Jellyfin plugin](https://github.com/Schwponaco-org/lapse-jellyfin-plugin)**, which runs the same engine from inside Jellyfin.
+- **The [terminal interface](https://github.com/Schwponaco-org/lapse-tui)**, which runs the `lapse` you have installed, for a server over ssh or anyone who would rather stay in the terminal. It runs on Linux and macOS.
 
 There is also a copy in the browser at [schwponaco.org/lapse](https://schwponaco.org/lapse/). It is the same engine built for WebAssembly and runs in the tab, so the video never leaves your machine. It is handy for a file or two. For a whole library the Docker image fits better, since it keeps track of what it already synced.
 
