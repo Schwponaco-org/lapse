@@ -165,6 +165,16 @@ else
     fails=$((fails + 1))
 fi
 
+# a file size limit stands in for a disk that fills up while the cache is written
+rm -rf "$LAPSE_CACHE"
+(trap '' XFSZ; ulimit -f 1; "$LAPSE" joined.mkv concat_gap.srt --dry-run --no-embedded > /dev/null 2>&1) || true
+if ls "$LAPSE_CACHE" | grep -q '\.spans$'; then
+    echo "  a cache cut short is dropped FAIL it was kept, $(wc -c < "$LAPSE_CACHE"/*.spans) bytes"
+    fails=$((fails + 1))
+else
+    echo "  a cache cut short is dropped ok"
+fi
+
 rm -rf "$LAPSE_CACHE"
 first=$("$LAPSE" tracked.mkv concat_gap.srt --dry-run --json 2> /dev/null || true)
 again=$("$LAPSE" tracked.mkv concat_gap.srt --dry-run 2>&1 || true)

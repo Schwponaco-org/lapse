@@ -239,8 +239,11 @@ static void save_spans(const std::filesystem::path& path, const std::vector<std:
         out << spans[i].first << ' ' << spans[i].second << ' ' << (i < (int)weights.size() ? weights[i] : 1.0f) << '\n';
 
     out.close();
+    // a disk that filled up leaves the list cut short, and a short list would
+    // be read back as all the speech in the film from then on
     std::error_code ec;
-    std::filesystem::rename(partial, path, ec);
+    if (!out) std::filesystem::remove(partial, ec);
+    else std::filesystem::rename(partial, path, ec);
 }
 
 
@@ -261,6 +264,8 @@ static std::vector<int> heard_words(const std::string& video, int stream, const 
     if (!saved.empty() && !words.empty()) {
         std::ofstream out(saved);
         for (int at : words) out << at << '\n';
+        out.close();
+        if (!out) std::filesystem::remove(saved, ec);
     }
     return words;
 }
