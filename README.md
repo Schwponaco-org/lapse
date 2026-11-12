@@ -519,7 +519,7 @@ So an MPL2 or SubViewer `.sub` syncs with no video and no `--fps`. A MicroDVD fi
 
 The text STL has no frame rate in it either. A file with a frame number of 25 or more is read at 30 frames a second, and anything else at 25.
 
-A file named `.txt`, or with no extension, is opened and read before it is turned away. Subtitles come out of archives named like that often enough to be worth it. SubRip, WebVTT, SubStation, MicroDVD, MPL2, SubViewer and TTML all show what they are in the first few lines, and the file is written back as whatever it turned out to be. Anything over 4 MB, or with an extension LAPSE does not know, is left alone, so pointing it at a video by mistake fails straight away. The container only picks up the extensions `lapse --formats` lists, which leaves out `.txt` and `.xml`.
+A file named `.txt`, or with no extension, is opened and read before it is turned away. Subtitles come out of archives named like that often enough to be worth it. SubRip, WebVTT, SubStation, MicroDVD, MPL2, SubViewer and TTML all show what they are in the first few lines, and the file is written back as whatever it turned out to be. Anything over 4 MB, or with an extension LAPSE does not know, is left alone, so pointing it at a video by mistake fails straight away. The container picks up the extensions `lapse --formats` lists and a `.xml` with TTML inside. It leaves `.txt` alone, since most of those beside a video are release notes.
 
 **Video:** anything FFmpeg can read, such as `.mkv`, `.mp4`, `.avi`, `.mov`, `.ts` and `.webm`.
 
