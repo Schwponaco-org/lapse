@@ -293,6 +293,22 @@ if ! cmp -s byhand.srt reference.srt; then
     fail "--shift -$SHIFT did not put the file back on the reference"
 fi
 
+echo "== --shift with --ratio stretches every line as well"
+for i in $(seq 0 39); do
+    start=$((5000 + i * 7000))
+    printf "%d\n%s --> %s\nline %d\n\n" $((i + 1)) "$(timestamp $((start * 4 / 5 + 1000)))" "$(timestamp $(((start + 3000) * 4 / 5 + 1000)))" $((i + 1))
+done > squeezed.srt
+run --shift -1250 --ratio 1.25 squeezed.srt --no-backup --json
+if [ "$status" != "$SOLID" ]; then
+    fail "expected exit $SOLID for --shift with --ratio, got $status"
+fi
+if ! echo "$output" | grep -q '"ratio":1.25'; then
+    fail "the json line does not carry the ratio"
+fi
+if ! cmp -s squeezed.srt reference.srt; then
+    fail "--ratio 1.25 did not stretch the file back onto the reference"
+fi
+
 cd /
 rm -rf "$WORK"
 echo "engine looks good"

@@ -193,6 +193,7 @@ And a few that do one thing and stop:
 | Command | What it does |
 |---|---|
 | `lapse --shift <ms> <subtitle>` | Move every line by `ms`, earlier when it is negative. No video is needed, and `--output`, `--no-backup`, `--encoding`, `--fps` and `--dry-run` work as usual |
+| `lapse --shift <ms> --ratio <R> <subtitle>` | Stretch every time by `R` and then move it by `ms`, so a line at `t` lands at `t * R + ms`. Two lines you know the right times for give both: `R` is how far apart they should be over how far apart they are, and `ms` is where the first should be minus its time times `R` |
 | `lapse --undo <subtitle>` | Put the `.bak` back and delete it |
 | `lapse --version` | Print the version |
 | `lapse --formats` | List the subtitle extensions this copy reads and writes |

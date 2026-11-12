@@ -457,7 +457,9 @@ static std::string escaped(const std::string& s) {
 
 static void report(const Report& r) {
     if (!as_json && r.mode == "shift") {
-        say() << "Moved every line by " << r.offset << "ms -> " << r.output << '\n';
+        say() << "Moved every line by " << r.offset << "ms";
+        if (r.ratio != 1.0) say() << " and stretched it by " << r.ratio;
+        say() << " -> " << r.output << '\n';
         return;
     }
     if (!as_json) {
@@ -518,6 +520,7 @@ void usage() {
     std::cerr << "       lapse --vad\n";
     std::cerr << "       lapse --undo <subtitle>\n";
     std::cerr << "       lapse --shift <ms> <subtitle>   move every line by ms, earlier when it is negative\n";
+    std::cerr << "       lapse --shift <ms> --ratio R <subtitle>   stretch every time by R first, so a line at t lands at t * R + ms\n";
     std::cerr << "       lapse --batch   read one job per line from stdin, same arguments as above, one json reply per line\n";
 }
 
@@ -593,6 +596,7 @@ int run(int argc, const char *argv[]) {
     std::string whisper_model;
     double fps = 0;
     double shift_ms = 0;
+    double shift_ratio = 1.0;
     bool shifting = false;
 
     for (int i = 1; i < argc; i++) {
@@ -690,11 +694,21 @@ int run(int argc, const char *argv[]) {
                 return -1;
             }
             shifting = true;
+        } else if (arg == "--ratio") {
+            if (i + 1 >= argc || !number(argv[++i], shift_ratio) || shift_ratio < 0.5 || shift_ratio > 2.0) {
+                std::cerr << "--ratio wants a number between 0.5 and 2\n";
+                return -1;
+            }
         } else if (arg == "--force") {
             force = true;
         } else {
             args.push_back(arg);
         }
+    }
+
+    if (shift_ratio != 1.0 && !shifting) {
+        std::cerr << "--ratio goes with --shift\n";
+        return -1;
     }
 
     if (shifting) {
@@ -714,15 +728,16 @@ int run(int argc, const char *argv[]) {
         card.mode = "shift";
         card.reference = "none";
         card.offset = (int)std::lround(shift_ms);
+        card.ratio = shift_ratio;
         card.offsets.assign(1, card.offset);
         card.cues = (int)read_subtitle(input_path).size();
         card.verdict = "solid";
         card.written = true;
-        card.unchanged = card.offset == 0 && output_path == input_path;
+        card.unchanged = card.offset == 0 && shift_ratio == 1.0 && output_path == input_path;
         card.output = output_path;
         if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
-            write_subtitle(input_path, output_path, 0, shift_ms / 1000.0);
+            write_subtitle(input_path, output_path, shift_ratio - 1.0, shift_ms / 1000.0);
         }
         report(card);
         return 0;
