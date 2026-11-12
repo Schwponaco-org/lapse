@@ -36,7 +36,7 @@ jobs:
             os: ubuntu-22.04-arm
             ort: linux-aarch64
           - name: macos-arm64
-            os: macos-14
+            os: macos-15
             ort: osx-arm64
             deployment: '11.0'
           - name: macos-x86_64
@@ -104,6 +104,35 @@ jobs:
 
       - name: Check the release archive builds
         run: .github/scripts/package.sh lapse-${{ matrix.name }} stage dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lapse-${{ matrix.name }}
+          path: dist/*
+
+  alpine:
+    name: Release binary (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-musl-amd64
+            os: ubuntu-22.04
+          - name: linux-musl-arm64
+            os: ubuntu-22.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ort-musl
+          key: ort-${{ matrix.name }}-${{ env.ORT_VERSION }}-${{ hashFiles('.github/scripts/fetch-onnxruntime.sh') }}
+
+      - name: Build and test inside Alpine
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src alpine:3.20 \
+            .github/scripts/build-alpine.sh ${{ matrix.name }} "$ORT_VERSION"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -192,6 +221,38 @@ jobs:
         with:
           name: lapse-${{ matrix.name }}
           path: dist/*
+
+  sanitize:
+    name: Sanitizers and mutated files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config espeak-ng ffmpeg \
+            libavformat-dev libavcodec-dev libavutil-dev libswresample-dev libfftw3-dev
+
+      - name: Build with AddressSanitizer and UBSan
+        run: |
+          cmake -B build -DLAPSE_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build -j
+
+      - name: Run the smoke test under the sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: .github/scripts/smoke-engine.sh build/lapse
+
+      - name: Feed every parser and writer mutated files
+        run: python3 .github/scripts/mutate-formats.py build/lapse work 60
+
+      - name: Sync real audio under the sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: .github/scripts/accuracy.sh build/lapse
 
   image:
     name: Docker image

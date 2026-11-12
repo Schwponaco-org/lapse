@@ -64,6 +64,8 @@ Every release has a ready to run archive for each platform. Unpack it and run th
 |---|---|---|
 | Linux x86-64 | `lapse-linux-amd64.tar.gz` | any x86-64 CPU, glibc 2.35 and newer (Ubuntu 22.04+, Debian 12+) |
 | Linux ARM64 | `lapse-linux-arm64.tar.gz` | Raspberry Pi 4/5, ARM servers, Apple silicon VMs |
+| Alpine x86-64 | `lapse-linux-musl-amd64.tar.gz` | Alpine 3.20 and newer, and other musl systems |
+| Alpine ARM64 | `lapse-linux-musl-arm64.tar.gz` | Alpine 3.20 and newer, and other musl systems |
 | macOS Apple silicon | `lapse-macos-arm64.tar.gz` | macOS 11 Big Sur and newer |
 | macOS Intel | `lapse-macos-x86_64.tar.gz` | macOS 10.15 Catalina and newer |
 | Windows x64 | `lapse-windows-x64.zip` | Windows 10 and newer |
@@ -111,6 +113,7 @@ Build options:
 | `-DLAPSE_DEPS_PREFIX=<prefix>` | Build against a prefix made by the scripts below |
 | `-DLAPSE_LTO=OFF` | Skip link time optimisation, for a quicker build |
 | `-DCMAKE_BUILD_TYPE=Debug` | A build you can step through in a debugger |
+| `-DLAPSE_SANITIZE=ON` | A build with AddressSanitizer and UBSan in it, slow, for finding memory bugs. `.github/scripts/mutate-formats.py` feeds one mutated files in every format |
 
 To build the way the releases are built, with FFmpeg, FFTW3 and libfvad static and cut down to what LAPSE uses:
 

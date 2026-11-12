@@ -407,10 +407,8 @@ bool is_mpl2(const std::string& text) {
 }
 
 int tenths_to_ms(long long tenths) {
-    if (tenths < 0) return -1;
-    long long ms = tenths * 100;
-    if (ms > MAX_TIME_MS) return -1;
-    return (int)ms;
+    if (tenths < 0 || tenths > MAX_TIME_MS / 100) return -1;
+    return (int)(tenths * 100);
 }
 
 static std::vector<std::pair<int,int>> read_mpl2(const std::string& text) {
@@ -773,7 +771,9 @@ bool idx_delay_line(const std::string& line, int& delay) {
     }
     int h = 0, m = 0, s = 0, ms = 0;
     sscanf(line.c_str() + at, "%d:%d:%d:%d", &h, &m, &s, &ms);
-    delay = sign * (h * 3600000 + m * 60000 + s * 1000 + ms);
+    long long total = h * 3600000LL + m * 60000LL + s * 1000LL + ms;
+    if (h < 0 || m < 0 || s < 0 || ms < 0 || total > MAX_TIME_MS) total = 0;
+    delay = (int)(sign * total);
     return true;
 }
 
@@ -825,13 +825,30 @@ static std::string spu_at(const std::string& sub, size_t at) {
     return spu;
 }
 
+// One subtitle picture is at most 64KB, spread over packs of 2KB with their
+// headers, so this much read from where the .idx points is always the whole
+// of it. Reading the .sub in one go took a file of hundreds of megabytes
+// into memory for the few bytes per line that say when it leaves the screen
+static std::string sub_chunk(std::ifstream& bin, unsigned long long at) {
+    static const size_t CHUNK = 256 * 1024;
+    std::string chunk;
+    if (!bin.is_open()) return chunk;
+    // a read that ran into the end of the file leaves the stream failed
+    bin.clear();
+    bin.seekg((std::streamoff)at);
+    if (!bin) return chunk;
+    chunk.resize(CHUNK);
+    bin.read(&chunk[0], CHUNK);
+    chunk.resize((size_t)bin.gcount());
+    return chunk;
+}
+
 std::vector<std::pair<int,int>> read_idx(const char* filename) {
     std::vector<int> starts, shown;
     std::string line {};
     std::istringstream read_file(load_text(filename));
 
     std::ifstream bin(std::filesystem::path(filename).replace_extension(".sub"), std::ios::binary);
-    std::string sub((std::istreambuf_iterator<char>(bin)), {});
     int delay = 0;
 
     while (getline(read_file, line)) {
@@ -844,7 +861,7 @@ std::vector<std::pair<int,int>> read_idx(const char* filename) {
         starts.push_back(at < 0 ? -1 : at + delay);
 
         size_t pos = line.find("filepos:");
-        std::string spu = (pos == std::string::npos || sub.empty()) ? "" : spu_at(sub, strtoull(line.c_str() + pos + 8, nullptr, 16));
+        std::string spu = (pos == std::string::npos || !bin.is_open()) ? "" : spu_at(sub_chunk(bin, strtoull(line.c_str() + pos + 8, nullptr, 16)), 0);
         shown.push_back(spu_stop_ms((const unsigned char*)spu.data(), spu.size()));
     }
 
@@ -1116,7 +1133,7 @@ std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(
         }
         if ((!speech && check) || (i == (int)probability.size() - 1 && check)) {
             check = false;
-            raw.push_back({start_ms, i * 10});
+            raw.push_back({start_ms, speech ? (i + 1) * 10 : i * 10});
             raw_weight.push_back(frames > 0 ? (float)(total / frames) : 0.0f);
         }
     }

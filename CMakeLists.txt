@@ -18,7 +18,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(lapse
-    VERSION 2.3.2
+    VERSION 2.3.3
     DESCRIPTION "Language-agnostic subtitle synchronization engine"
     LANGUAGES C CXX)
 
@@ -29,6 +29,7 @@ endif()
 option(LAPSE_FETCH_MISSING "download and build the dependencies the system does not have" ON)
 option(LAPSE_STATIC_DEPS   "link the dependencies statically, the way the releases do" OFF)
 option(LAPSE_LTO           "link time optimisation, worth a few percent, costs build time" ON)
+option(LAPSE_SANITIZE      "build with AddressSanitizer and UBSan to catch memory bugs, slow" OFF)
 set(LAPSE_DEPS_PREFIX "" CACHE PATH "prefix that .github/scripts/build-*.sh installed into")
 
 
@@ -197,6 +198,9 @@ elseif(LAPSE_FETCH_MISSING)
         PUBLIC  "${libfvad_SOURCE_DIR}/include"
         PRIVATE "${libfvad_SOURCE_DIR}/src")
     set_target_properties(fvad PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    if(LAPSE_SANITIZE AND NOT MSVC)
+        target_compile_options(fvad PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer -g)
+    endif()
 
     target_link_libraries(lapse_fvad INTERFACE fvad)
     set(LAPSE_FVAD_FROM "built here (532ab66)")
@@ -267,7 +271,12 @@ if(LAPSE_STATIC_DEPS)
     endif()
 endif()
 
-if(LAPSE_LTO)
+if(LAPSE_SANITIZE AND NOT MSVC)
+    target_compile_options(lapse PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer -g)
+    target_link_options(lapse PRIVATE -fsanitize=address,undefined)
+endif()
+
+if(LAPSE_LTO AND NOT LAPSE_SANITIZE)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT lapse_ipo OUTPUT lapse_ipo_why)
     if(lapse_ipo)
@@ -303,7 +312,11 @@ if(BASH_EXECUTABLE)
 endif()
 
 message(STATUS "")
-message(STATUS "lapse ${PROJECT_VERSION} (${CMAKE_BUILD_TYPE})")
+set(lapse_build_note "${CMAKE_BUILD_TYPE}")
+if(LAPSE_SANITIZE)
+    set(lapse_build_note "${lapse_build_note}, sanitizers on")
+endif()
+message(STATUS "lapse ${PROJECT_VERSION} (${lapse_build_note})")
 message(STATUS "  FFmpeg   ${LAPSE_FFMPEG_FROM}")
 message(STATUS "  FFTW3    ${LAPSE_FFTW3_FROM}")
 message(STATUS "  libfvad  ${LAPSE_FVAD_FROM}")
