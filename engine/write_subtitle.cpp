@@ -76,17 +76,25 @@ static std::string load_file(const char* path) {
 // disk only shows when the file is closed, and renaming what got written by
 // then would leave the subtitle cut short
 static void save_bytes(const char* output_path, const std::string& data) {
-    std::string temp_path = std::string(output_path) + ".tmp";
+    // a link stays a link, the file it points at is the one that gets written
+    std::error_code ec;
+    std::filesystem::path target = output_path;
+    if (std::filesystem::is_symlink(target, ec)) {
+        std::filesystem::path real = std::filesystem::canonical(target, ec);
+        if (!ec) target = real;
+    }
+
+    std::filesystem::path temp_path = target;
+    temp_path += ".tmp";
     std::ofstream out(temp_path, std::ios::binary);
     if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
     out.write(data.data(), (std::streamsize)data.size());
     out.close();
     if (!out) {
-        std::error_code ec;
         std::filesystem::remove(temp_path, ec);
         throw std::runtime_error("Cannot write subtitle, is the disk full? " + std::string(output_path));
     }
-    std::filesystem::rename(temp_path, output_path);
+    std::filesystem::rename(temp_path, target);
 }
 
 static void save_file(const char* output_path, const std::string& text) {

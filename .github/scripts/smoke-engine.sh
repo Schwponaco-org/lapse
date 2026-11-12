@@ -293,6 +293,20 @@ if ! cmp -s byhand.srt reference.srt; then
     fail "--shift -$SHIFT did not put the file back on the reference"
 fi
 
+echo "== a subtitle reached through a link is written where the link points"
+mkdir -p real
+cp pristine.srt real/linked.srt
+# Windows without developer mode copies instead of linking, nothing to test there
+if ln -s real/linked.srt linked.srt 2> /dev/null && [ -L linked.srt ]; then
+    run --shift -$SHIFT linked.srt --no-backup
+    if [ ! -L linked.srt ]; then
+        fail "the link was replaced by a file of its own"
+    fi
+    if ! cmp -s real/linked.srt reference.srt; then
+        fail "the file behind the link was not moved"
+    fi
+fi
+
 # a file size limit stands in for a disk that fills up, Windows has neither
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) ;;
