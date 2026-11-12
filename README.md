@@ -360,6 +360,8 @@ Set `PUID` and `PGID` to the user that owns your media. Without them the contain
 
 The first run is worth watching with `docker compose logs -f lapse` to check that subtitles were paired with the right videos.
 
+`latest` is built again whenever something is merged. Every release is also tagged with its version, such as `ghcr.io/schwponaco-org/lapse:2.5.0`, for when you want to stay on one.
+
 ### Web interface
 
 Publish port `8080` and open `http://your-host:8080`. There is no login, so keep it on your own network or behind whatever already protects the rest of your setup.

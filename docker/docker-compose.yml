@@ -61,3 +61,7 @@ services:
       - AUDIO_TRACK=
       - SUB_TRACK=
       - FPS=
+      - SNAP=
+      - MIN_SHIFT=
+      - ENCODING=
+      - WHISPER=
