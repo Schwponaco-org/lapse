@@ -1180,7 +1180,7 @@ int run(int argc, const char *argv[]) {
         bool drifts = sloped >= MIN_AGREEING + 1 && std::abs(drift) > 1e-5;
         bool distant = second_part(slices, offset);
         auto look_far = [&]() {
-            if (!distant && flat + 2 <= (int)slices.size())
+            if (!distant)
                 distant = second_part(chunk_offsets(spans, ref_spans, ref_weights, 16, ref_coverage, CONCAT_SEARCH_MS), offset);
             return distant;
         };
@@ -1220,7 +1220,7 @@ int run(int argc, const char *argv[]) {
         card.margin = margin;
         card.sigma = sigma;
 
-        if (choice == "recut") {
+        auto recut = [&]() {
             auto [file_spans, file_mapping] = process_spans(timestamps, true, false);
             double worst_sigma = 99.0;
             std::vector<int> joined = concat_offsets(file_spans, ref_spans, ref_weights, ref_coverage, &worst_sigma);
@@ -1234,7 +1234,13 @@ int run(int argc, const char *argv[]) {
                 card.agreement = backing ? 1.0 : 0.0;
                 return save(joined, file_mapping, judge(worst_sigma, 1.0, backing));
             }
-        }
+
+            card.mode = "auto/recut";
+            std::vector<int> offsets = split_alignment(file_spans, ref_spans, ref_weights, p, offset);
+            return save(offsets, file_mapping, judge_parts(offsets, file_spans, margin, slices));
+        };
+
+        if (choice == "recut") return recut();
 
         auto shifted = [&]() {
             card.mode = "auto/shifted";
@@ -1288,7 +1294,7 @@ int run(int argc, const char *argv[]) {
 
             if (sigma2 < sigma + 1.0) {
                 say() << "auto: the stretch does not beat the single offset, dropping it\n";
-                return shifted();
+                return look_far() ? recut() : shifted();
             }
 
             card.mode = "auto/drifting";
@@ -1308,6 +1314,13 @@ int run(int argc, const char *argv[]) {
 
 
             if (verdict != Verdict::Nothing) {
+                // the slices before the stretch could not see a part sitting far out, so look again now it is undone
+                if (second_part(chunk_offsets(scaled, ref_spans, ref_weights, 16, ref_coverage, CONCAT_SEARCH_MS), shift)) {
+                    say() << "auto: part of the stretched file sits far from the rest, splitting it over the whole range\n";
+                    std::vector<int> offsets = split_alignment(scaled, ref_spans, ref_weights, p, shift);
+                    card.mode = "auto/drifting+recut";
+                    return save(offsets, mapping, judge_parts(offsets, scaled, margin2, after), ratio - 1.0);
+                }
                 std::vector<int> tidied = split_alignment(scaled, ref_spans, ref_weights, p, shift,
                                                           REFINE_WINDOW_MS, REFINE_STEP_MS);
                 if (worth_splitting(tidied, shift)) {
@@ -1321,12 +1334,7 @@ int run(int argc, const char *argv[]) {
             return save_ols(ratio - 1.0, shift / 1000.0, verdict);
         }
 
-        {
-            auto [file_spans, file_mapping] = process_spans(timestamps, true, false);
-            card.mode = "auto/recut";
-            std::vector<int> offsets = split_alignment(file_spans, ref_spans, ref_weights, p, offset);
-            return save(offsets, file_mapping, judge_parts(offsets, file_spans, margin, slices));
-        }
+        return recut();
 
     } else {
         std::cerr << "Unknown mode: " << mode << ". Use auto, ols, nosplit or split.\n";
