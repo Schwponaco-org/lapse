@@ -101,6 +101,8 @@ write_srt("concat_three.srt", [(a + (30000 if a >= 8 * 60 * 1000 else 0) + (2000
                                 b + (30000 if a >= 8 * 60 * 1000 else 0) + (20000 if a >= 16 * 60 * 1000 else 0)) for a, b in jcues])
 # the last three minutes sit twenty minutes out, too short a part for two slices to find
 write_srt("concat_far.srt", [(a + 20 * 60 * 1000, b + 20 * 60 * 1000) if a >= 21 * 60 * 1000 else (a, b) for a, b in jcues])
+# the second half sits twenty minutes out, further than a slice looks
+write_srt("concat_far_half.srt", [(a + 20 * 60 * 1000, b + 20 * 60 * 1000) if a >= EP else (a, b) for a, b in jcues])
 
 # timed for 24 fps and played at 25, with a cut on top of the drift
 RATIO = 25 / 24

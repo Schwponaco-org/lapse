@@ -974,7 +974,11 @@ int run(int argc, const char *argv[]) {
         card.sigma = sigma_after(in, offsets, ref_spans, ref_weights, ref_coverage);
         card.agreement = agreement_of(measured, want);
         Verdict verdict = judge(card.sigma, margin, agree_count(measured, want));
-        if (verdict == Verdict::Solid && contradicted(measured, offsets)) verdict = Verdict::Unsure;
+        // a slice only looks MAX_OFFSET_MS either way, so it says nothing against a piece further out than that
+        std::vector<Chunk> able;
+        for (size_t i = 0; i < measured.size(); i++)
+            if (std::abs(want[i]) <= MAX_OFFSET_MS) able.push_back(measured[i]);
+        if (verdict == Verdict::Solid && contradicted(able, offsets)) verdict = Verdict::Unsure;
         return verdict;
     };
 
