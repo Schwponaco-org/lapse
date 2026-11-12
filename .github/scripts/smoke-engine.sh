@@ -293,6 +293,25 @@ if ! cmp -s byhand.srt reference.srt; then
     fail "--shift -$SHIFT did not put the file back on the reference"
 fi
 
+# a file size limit stands in for a disk that fills up, Windows has neither
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *)
+        echo "== a disk that fills up leaves the original whole"
+        cp pristine.srt full.srt
+        set +e
+        output=$( (trap '' XFSZ; ulimit -f 1; "$LAPSE" --shift 1000 full.srt --no-backup) 2>&1 )
+        status=$?
+        set -e
+        if [ "$status" = "$SOLID" ]; then
+            fail "a write that ran out of room still came back as done"
+        fi
+        if ! cmp -s full.srt pristine.srt; then
+            fail "the original was cut short by a write that ran out of room"
+        fi
+        ;;
+esac
+
 cd /
 rm -rf "$WORK"
 echo "engine looks good"
