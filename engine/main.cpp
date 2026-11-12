@@ -58,6 +58,7 @@ static double fps_from_length(const std::string& sub_path, const std::string& ot
     auto [ours, _o] = process_spans(read_subtitle(sub_path));
     auto [theirs, _t] = process_spans(read_subtitle(other_path));
     set_sub_fps(0);
+    set_threads(0);
     if (ours.empty() || theirs.empty()) return 0;
 
     double we_run = ours.back().second - ours.front().first;
@@ -506,13 +507,14 @@ static void report(const Report& r) {
 }
 
 void usage() {
-    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME] [--from video] [--min-shift ms] [--whisper model]\n";
+    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME] [--from video] [--min-shift ms] [--whisper model] [--threads N]\n";
     std::cerr << "       --confidence N   how far the answer has to stand out before the original is overwritten (default " << sure_sigma << ")\n";
     std::cerr << "       --encoding NAME  write the result as utf8, utf8-bom, utf16le, utf16be or latin1 instead of whatever came in\n";
     std::cerr << "       --snap [ms]      pull a cue start onto the picture cut it lands next to, within ms (default " << SNAP_WINDOW_MS << ")\n";
     std::cerr << "       --from video     the subtitle is in sync with this video, move it to the first one by their sound\n";
     std::cerr << "       --min-shift ms   leave the file alone when nothing in it would move by this much\n";
     std::cerr << "       --whisper model  only trust speech whisper-cli hears words in, model is a ggml file like ggml-base.en.bin\n";
+    std::cerr << "       --threads N      listen with at most N threads, default every core up to 8\n";
     std::cerr << "       lapse --version\n";
     std::cerr << "       lapse --formats\n";
     std::cerr << "       lapse --vad\n";
@@ -690,6 +692,13 @@ int run(int argc, const char *argv[]) {
                 return -1;
             }
             shifting = true;
+        } else if (arg == "--threads") {
+            double got;
+            if (i + 1 >= argc || !number(argv[++i], got) || got < 1 || got > 64) {
+                std::cerr << "--threads wants a number from 1 to 64\n";
+                return -1;
+            }
+            set_threads((int)got);
         } else if (arg == "--force") {
             force = true;
         } else {

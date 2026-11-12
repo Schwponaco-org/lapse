@@ -33,6 +33,16 @@ static const int64_t PROBE_MS = 180000;
 
 static const int64_t PIECE_MS = 180000;
 
+// 0 is every core, up to 8. A box that transcodes as well wants to keep some
+static int wanted_threads = 0;
+
+void set_threads(int n) { wanted_threads = std::max(0, n); }
+
+int worker_threads() {
+    if (wanted_threads > 0) return wanted_threads;
+    return std::clamp((int)std::thread::hardware_concurrency(), 1, 8);
+}
+
 AVFormatContext* open_file(const char* filename) {
         AVFormatContext *pFormatContext = avformat_alloc_context();
     if (!pFormatContext) {
@@ -154,7 +164,7 @@ AVCodecContext* open_audio_decoder(const AVFormatContext* pFormatContext, int au
     }
     // This to get value from AVCodecParameters to the AVCodecContext so avcodec_open2 can work with it
     avcodec_parameters_to_context(dec_ctx, pFormatContext->streams[audio_stream_index]->codecpar);
-    dec_ctx->thread_count = 0;   // let ffmpeg use every core it wants
+    dec_ctx->thread_count = wanted_threads ? 1 : 0;   // 0 lets ffmpeg take every core, a counted crew gets one each
 
     int ret = avcodec_open2(dec_ctx, NULL, NULL);
     if (ret < 0) {
@@ -808,7 +818,7 @@ std::vector<float> speech_profile(AVFormatContext* fmt, AVCodecContext* dec_ctx,
         int64_t probe_at = (int64_t)(duration_ms * 0.35);
         std::vector<double> scores(mixes.size(), 0.0);
         std::vector<std::thread> probes;
-        for (size_t m = 0; m < mixes.size(); m++)
+        for (size_t m = 0; m < mixes.size(); m++) {
             probes.emplace_back([&, m]() {
                 std::vector<int16_t> part = decode_range(path, audio_stream_index, mixes[m], centre, left, right,
                                                          probe_at, probe_at + PROBE_MS);
@@ -816,7 +826,10 @@ std::vector<float> speech_profile(AVFormatContext* fmt, AVCodecContext* dec_ctx,
                 if (got.empty() && silero) got = analyse(part, false);
                 scores[m] = profile_score(got);
             });
-        for (auto& t : probes) t.join();
+            if ((int)probes.size() < worker_threads() && m + 1 < mixes.size()) continue;
+            for (auto& t : probes) t.join();
+            probes.clear();
+        }
 
         double best = -1;
         for (size_t m = 0; m < mixes.size(); m++) {
@@ -829,10 +842,7 @@ std::vector<float> speech_profile(AVFormatContext* fmt, AVCodecContext* dec_ctx,
     int pieces = (int)(((int64_t)duration_ms + PIECE_MS - 1) / PIECE_MS);
     if (pieces < 1) pieces = 1;
 
-    int hands = (int)std::thread::hardware_concurrency();
-    if (hands < 1) hands = 1;
-    if (hands > 8) hands = 8;
-    if (hands > pieces) hands = pieces;
+    int hands = std::min(worker_threads(), pieces);
 
     auto ends_at = [&](int j) {
         if (j < pieces - 1) return (j + 1) * PIECE_MS;

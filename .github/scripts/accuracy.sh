@@ -149,6 +149,7 @@ check "drift and a long cut"  joined.mkv drift_long.srt concat_truth.srt
 echo "== modes"
 check "nosplit"               plain.mkv  shifted.srt truth.srt nosplit
 check "split"                 plain.mkv  shifted.srt truth.srt split
+check "on one thread"         aac51.mp4  shifted.srt truth.srt --threads 1
 
 echo "== a VobSub against a subtitle"
 cp vobsub.idx work.idx
