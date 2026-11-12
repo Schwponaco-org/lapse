@@ -73,7 +73,7 @@ if ! echo "$output" | grep -q "using libfvad"; then
     exit 1
 fi
 
-offset=$(echo "$output" | sed -n 's/.*offset=\(-\{0,1\}[0-9]*\)ms.*/\1/p')
+offset=$(echo "$output" | sed -n 's/^Done.*offset=\(-\{0,1\}[0-9]*\)ms.*/\1/p')
 if [ -z "$offset" ]; then
     echo "FAIL: no offset came back"
     exit 1

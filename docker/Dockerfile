@@ -39,11 +39,11 @@ RUN set -eux; \
       *) ORT_ARCH="" ;; \
     esac; \
     if [ -n "$ORT_ARCH" ]; then \
-      wget -q -O /tmp/ort.tgz "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}.tgz" && \
-      tar xf /tmp/ort.tgz -C /tmp && \
-      cp /tmp/onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /libonnxruntime.so && \
-      wget -q -O /silero_vad.onnx "https://github.com/snakers4/silero-vad/raw/${SILERO_TAG}/src/silero_vad/data/silero_vad.onnx" && \
-      echo "${SILERO_SHA}  /silero_vad.onnx" | sha256sum -c - && \
+      wget -q --tries=10 --waitretry=30 --retry-on-http-error=429,500,502,503,504 -O /tmp/ort.tgz "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}.tgz"; \
+      tar xf /tmp/ort.tgz -C /tmp; \
+      cp /tmp/onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /libonnxruntime.so; \
+      wget -q --tries=10 --waitretry=30 --retry-on-http-error=429,500,502,503,504 -O /silero_vad.onnx "https://github.com/snakers4/silero-vad/raw/${SILERO_TAG}/src/silero_vad/data/silero_vad.onnx"; \
+      echo "${SILERO_SHA}  /silero_vad.onnx" | sha256sum -c -; \
       rm -rf /tmp/ort.tgz /tmp/onnxruntime-linux-*; \
     fi; \
     touch /libonnxruntime.so /silero_vad.onnx
