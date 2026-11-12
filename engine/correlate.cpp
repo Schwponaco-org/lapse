@@ -325,12 +325,14 @@ std::vector<int> offsets_for_cuts(const std::vector<std::pair<int, int>>& read_s
 
 static double span_score(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, int x);
 
+// a piece shorter than two slices only ever has one slice to find it, so a
+// slice that locks on as clearly as a piece has to on its own counts too
 static std::vector<Chunk> backed(const std::vector<Chunk>& chunks) {
     std::vector<Chunk> kept;
     for (auto& c : chunks) {
         int seen = 0;
         for (auto& d : chunks) seen += std::abs(d.offset - c.offset) <= 1000;
-        if (seen >= 2) kept.push_back(c);
+        if (seen >= 2 || c.sigma >= 7.0) kept.push_back(c);
     }
     return kept;
 }
