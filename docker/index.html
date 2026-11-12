@@ -744,6 +744,10 @@ $("saveEngine").onclick = () => {
 
 function drawCues() {
   const ms = Number($("shiftMs").value) || 0;
+  if (!cues.length) {
+    $("shiftCues").innerHTML = `<tr><td class="weak" colspan="3">No preview for this format, the lines still move by the amount above</td></tr>`;
+    return;
+  }
   $("shiftCues").innerHTML = cues.map(cue => `
     <tr>
       <td class="weak num">${clock(cue.ms)}</td>

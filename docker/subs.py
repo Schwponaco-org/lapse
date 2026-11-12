@@ -106,41 +106,6 @@ def preview(path, limit=6):
     return cues
 
 
-def moved(lines, ms, ass):
-    out = []
-    for line in lines:
-        if ass:
-            fields = dialogue(line)
-            if fields and to_ms(fields[1]) is not None and to_ms(fields[2]) is not None:
-                fields[1] = from_ms_ass(to_ms(fields[1]) + ms)
-                fields[2] = from_ms_ass(to_ms(fields[2]) + ms)
-                line = "Dialogue:" + ",".join(fields)
-        elif "-->" in line:
-            line = CLOCK.sub(lambda found: from_ms(to_ms(found.group(0)) + ms,
-                                                   "." in found.group(0)), line)
-        out.append(line)
-    return out
-
-
-def save(path, lines, mode, suffix):
-    target = path
-    if mode.startswith("new"):
-        base, ext = os.path.splitext(path)
-        target = base + suffix + ext
-    if mode.endswith("backup") and not os.path.exists(path + ".bak"):
-        shutil.copy2(path, path + ".bak")
-
-    with open(target + ".part", "w", encoding=charset(path), errors="surrogateescape", newline="") as file:
-        file.writelines(lines)
-    os.replace(target + ".part", target)
-    return target
-
-
-def shift(path, ms, mode, suffix=".shifted"):
-    ass = kind(path) in (".ass", ".ssa")
-    return save(path, moved(read(path), ms, ass), mode, suffix)
-
-
 def text_cues(lines):
     cues = []
     for number, line in enumerate(lines):

@@ -194,6 +194,13 @@ def output_for(srt_path):
     return base + suffix + ext
 
 
+# where the engine puts a guess it is not sure of, beside the file it would
+# otherwise have written
+def unsure_for(srt_path):
+    base, ext = os.path.splitext(output_for(srt_path) or srt_path)
+    return base + ".lapse-unsure" + ext
+
+
 def engine_formats():
     try:
         result = subprocess.run([LAPSE, "--formats"], capture_output=True, text=True, timeout=30)
@@ -366,6 +373,11 @@ def scan(path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")
                    and not blocked(os.path.join(root, d))]
 
+        # The .sub beside a .idx is the picture data of a VobSub pair, the
+        # .idx carries the times, so the engine reads that one and leaves
+        # the .sub alone rather than taking it for a MicroDVD file
+        pictures = {os.path.splitext(f)[0] for f in files if f.lower().endswith(".idx")}
+
         for filename in files:
             if filename.startswith("."):
                 continue
@@ -375,6 +387,8 @@ def scan(path):
 
             if ext in VIDEO_EXTS:
                 videos.setdefault(root, []).append((base, full_path))
+            elif ext == ".sub" and base in pictures:
+                continue
             elif ext in SUBTITLE_EXTS and not ours(base):
                 subtitles.setdefault(root, []).append((base, full_path))
 
@@ -417,7 +431,10 @@ def find_pairs(path, verbose=False):
 
 def wait_stable(path):
     # A file that is still being copied in gives us half a video, so leave it
-    # alone until nothing has touched it for a while
+    # alone until nothing has touched it for a while. A share whose clock
+    # runs ahead of ours stamps every file in the future, and those are
+    # taken as settled once they stop growing instead
+    last = None
     for _ in range(60):
         if not running:
             return False
@@ -425,8 +442,12 @@ def wait_stable(path):
             info = os.stat(path)
         except OSError:
             return False
-        if info.st_size > 0 and time.time() - info.st_mtime > 30:
+        age = time.time() - info.st_mtime
+        if info.st_size > 0 and age > 30:
             return True
+        if info.st_size > 0 and age < -60 and last == (info.st_size, info.st_mtime):
+            return True
+        last = (info.st_size, info.st_mtime)
         time.sleep(2)
     return False
 
@@ -501,7 +522,7 @@ def run_batch(conn, batch):
                 except OSError:
                     line = ""
                 clock.cancel()
-                drop_leftovers(subtitle, output_for(subtitle))
+                drop_leftovers(subtitle, output_for(subtitle), unsure_for(subtitle))
                 if not line:
                     break
 

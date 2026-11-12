@@ -162,6 +162,23 @@ def output_mode(body):
     return mode
 
 
+# The engine moves a file in any format it writes, so the shift goes through
+# it rather than through a second set of writers here
+def shift_file(path, ms, mode):
+    command = [config["lapse"], "--shift", str(ms), path, "--json"]
+    if mode.startswith("new"):
+        base, ext = os.path.splitext(path)
+        command += ["--output", base + ".shifted" + ext]
+    if mode == "new" or mode == "overwrite":
+        command.append("--no-backup")
+
+    result = subprocess.run(command, capture_output=True, text=True, timeout=600)
+    values = engine_json(result.stdout or "")
+    if not values or not values.get("written"):
+        raise RuntimeError((result.stderr or "").strip() or "lapse could not move " + os.path.basename(path))
+    return values.get("output") or path
+
+
 def shift(conn, ids, ms, mode):
     if not ms:
         raise RuntimeError("Say how many milliseconds to move it by")
@@ -170,7 +187,7 @@ def shift(conn, ids, ms, mode):
         row = job(conn, job_id)
         if not row:
             continue
-        written = subs.shift(row["srt_path"], ms, mode)
+        written = shift_file(row["srt_path"], ms, mode)
         offset = (row["offset_ms"] or 0) + ms
         if written == row["srt_path"]:
             conn.execute("UPDATE sync_jobs SET offset_ms = ?, srt_mtime = ?, status = 'done' WHERE id = ?",
@@ -361,7 +378,11 @@ def act(path, body):
             row = job(conn, int(body.get("id", 0)))
             if not row:
                 raise RuntimeError("That file is not on record any more")
-            return {"path": row["srt_path"], "cues": subs.preview(row["srt_path"])}
+            try:
+                cues = subs.preview(row["srt_path"])
+            except RuntimeError:
+                cues = []    # a format the preview cannot read is still one the engine can move
+            return {"path": row["srt_path"], "cues": cues}
         elif path == "/api/shift":
             shift(conn, wanted_ids(body), int(body.get("ms", 0)), output_mode(body))
         elif path == "/api/neighbours":
