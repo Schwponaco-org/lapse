@@ -293,6 +293,17 @@ if ! cmp -s byhand.srt reference.srt; then
     fail "--shift -$SHIFT did not put the file back on the reference"
 fi
 
+echo "== an empty XDG_CACHE_HOME counts as not set"
+{
+    printf 'RIFF\044\175\000\000WAVEfmt \020\000\000\000\001\000\001\000\200\076\000\000\000\175\000\000\002\000\020\000data\000\175\000\000'
+    head -c 32000 /dev/zero
+} > quiet.wav
+mkdir -p home started
+(cd started && env -u LAPSE_CACHE HOME="$WORK/home" XDG_CACHE_HOME= "$LAPSE" ../quiet.wav ../pristine.srt > /dev/null 2>&1) || true
+if [ -n "$(ls -A started)" ]; then
+    fail "the cache went into the folder lapse was started from"
+fi
+
 cd /
 rm -rf "$WORK"
 echo "engine looks good"
