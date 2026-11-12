@@ -31,7 +31,7 @@ static const int LANES = 8;
 static const int64_t PRIME_MS = 3000;
 static const int64_t PROBE_MS = 180000;
 
-static const int64_t PIECE_MS = 600000;
+static const int64_t PIECE_MS = 180000;
 
 AVFormatContext* open_file(const char* filename) {
         AVFormatContext *pFormatContext = avformat_alloc_context();
@@ -636,6 +636,9 @@ static SwrContext* open_mix(const AVCodecContext* dec, int kind, int centre, int
                             &in, dec->sample_fmt, dec->sample_rate, 0, nullptr) < 0)
         return nullptr;
 
+    av_opt_set_int(swr, "filter_size", 16, 0);
+    av_opt_set_int(swr, "phase_shift", 8, 0);
+
     if (kind != 1) {
         std::vector<double> matrix(in.nb_channels, 0.0);
         if (kind == 0 && centre >= 0 && centre < in.nb_channels) {
@@ -808,16 +811,23 @@ std::vector<float> speech_profile(AVFormatContext* fmt, AVCodecContext* dec_ctx,
     int winner = mixes[0];
     if (mixes.size() > 1) {
         int64_t probe_at = (int64_t)(duration_ms * 0.35);
+        std::vector<double> scores(mixes.size(), 0.0);
+        std::vector<std::thread> probes;
+        for (size_t m = 0; m < mixes.size(); m++)
+            probes.emplace_back([&, m]() {
+                std::vector<int16_t> part = decode_range(path, audio_stream_index, mixes[m], centre, left, right,
+                                                         probe_at, probe_at + PROBE_MS);
+                std::vector<float> got = analyse(part, silero);
+                if (got.empty() && silero) got = analyse(part, false);
+                scores[m] = profile_score(got);
+            });
+        for (auto& t : probes) t.join();
+
         double best = -1;
-        for (int mix : mixes) {
-            std::vector<int16_t> part = decode_range(path, audio_stream_index, mix, centre, left, right,
-                                                     probe_at, probe_at + PROBE_MS);
-            std::vector<float> got = analyse(part, silero);
-            if (got.empty() && silero) got = analyse(part, false);
-            double score = profile_score(got);
-            const char* name = (mix == 0) ? "centre" : (mix == 2 ? "front pair" : "downmix");
-            say() << "Mix " << name << ": score=" << score << '\n';
-            if (score > best) { best = score; winner = mix; }
+        for (size_t m = 0; m < mixes.size(); m++) {
+            const char* name = (mixes[m] == 0) ? "centre" : (mixes[m] == 2 ? "front pair" : "downmix");
+            say() << "Mix " << name << ": score=" << scores[m] << '\n';
+            if (scores[m] > best) { best = scores[m]; winner = mixes[m]; }
         }
     }
 

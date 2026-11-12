@@ -92,6 +92,25 @@ open(path, 'w').write('\n'.join(out))
 " "$1" "$2" "$3" "$4" "$5" "${6:-0}"
 }
 
+# path, shift
+write_stl() {
+    python3 -c "
+import random, sys
+path, shift = sys.argv[1], int(sys.argv[2])
+random.seed(11)
+def tc(ms):
+    f = round(ms * 25 / 1000)
+    return '%02d:%02d:%02d:%02d' % (f // 90000, f // 1500 % 60, f // 25 % 60, f % 25)
+out = ['\$FontName = Arial', '\$FontSize = 30', '']
+at = $LEAD * 1000
+for i in range(60):
+    start = at + shift
+    out.append('%s , %s , line %d' % (tc(start), tc(start + 800), i + 1))
+    at += 1000 + random.randint(-400, 400)
+open(path, 'w').write('\n'.join(out) + '\n')
+" "$1" "$2"
+}
+
 speech_srt() {
     python3 -c "
 import sys
@@ -128,6 +147,7 @@ fi
 mkdir -p "/media/Movies/Test Movie (2024)"
 cp /tmp/video-with-track.mkv "/media/Movies/Test Movie (2024)/Test Movie (2024).mkv"
 write_srt "/media/Movies/Test Movie (2024)/Test Movie (2024).en.srt" $SHIFT 60 1000 800 400
+write_stl "/media/Movies/Test Movie (2024)/Test Movie (2024).da.stl" $SHIFT
 
 # Subtitles in their own folder, the way a lot of releases ship
 mkdir -p "/media/Movies/Scene.Release.2024.1080p.BluRay.x264-GRP/Subs"
@@ -150,7 +170,6 @@ speech_srt "/media/Movies/$odd/$odd.srt" $SHIFT
 mkdir -p "/media/TV/Show/Season 01/@eaDir" "/media/Movies/Orphan"
 speech_srt "/media/TV/Show/Season 01/@eaDir/Show.S01E01.srt" 0
 speech_srt "/media/Movies/Orphan/orphan.srt" 0
-printf '$FontName = Arial\n00:00:05:00 , 00:00:08:00 , Hello there\n' > "/media/Movies/Test Movie (2024)/Test Movie (2024).da.stl"
 
 chown -R 1000:1000 /media
 find /media -type f -exec touch -d "10 minutes ago" {} +

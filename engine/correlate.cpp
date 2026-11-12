@@ -29,12 +29,18 @@ Lock best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::ve
         tops.push_back(stay);
 
 
+        // too few cues to judge a peak by how its cues bunch up on the speech,
+        // and every candidate scores the same, so the height of the peak itself
+        // has to settle it rather than whatever order the sort left them in
         std::vector<std::pair<double, Hit>> ranked;
         for (auto& h : tops) {
             if (std::abs(h.offset) > max_offset) continue;
             ranked.push_back({onset_z(read_srt, h.offset), h});
         }
-        std::sort(ranked.begin(), ranked.end(), [](auto& a, auto& b) { return a.first > b.first; });
+        std::sort(ranked.begin(), ranked.end(), [](auto& a, auto& b) {
+            if (a.first != b.first) return a.first > b.first;
+            return a.second.z > b.second.z;
+        });
 
         Hit best;
         double best_lock = -1;
@@ -47,7 +53,7 @@ Lock best_offset(const std::vector<std::pair<int, int>>& read_srt, const std::ve
             c.score = align_score(read_srt, c.offset);
             double lock = onset_z(read_srt, c.offset);
 
-            if (!have || lock > best_lock) {
+            if (!have || lock > best_lock || (lock == best_lock && c.z > best.z)) {
                 best_lock = lock;
                 best = c;
                 have = true;
@@ -319,6 +325,16 @@ std::vector<int> offsets_for_cuts(const std::vector<std::pair<int, int>>& read_s
 
 static double span_score(const std::pair<int,int>& span, const std::vector<std::pair<int,int>>& reference_spans, const std::vector<float>& reference_weights, int x);
 
+static std::vector<Chunk> backed(const std::vector<Chunk>& chunks) {
+    std::vector<Chunk> kept;
+    for (auto& c : chunks) {
+        int seen = 0;
+        for (auto& d : chunks) seen += std::abs(d.offset - c.offset) <= 1000;
+        if (seen >= 2) kept.push_back(c);
+    }
+    return kept;
+}
+
 std::vector<int> concat_offsets(const std::vector<std::pair<int, int>>& read_srt,
                                 const std::vector<std::pair<int, int>>& reference_spans,
                                 const std::vector<float>& reference_weights,
@@ -329,7 +345,7 @@ std::vector<int> concat_offsets(const std::vector<std::pair<int, int>>& read_srt
     if (chunks.size() < 4) return {};
 
     std::vector<int> anchor;
-    for (auto& c : chunks) {
+    for (auto& c : backed(chunks)) {
         if (c.confidence < 0.02) continue;
         if (anchor.empty() || std::abs(c.offset - anchor.back()) > CONCAT_JUMP_MS)
             anchor.push_back((int)c.offset);
@@ -567,10 +583,16 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
     std::vector<int> grid;
     for (int x = base_offset - window_ms; x <= base_offset + window_ms; x += step_ms) grid.push_back(x);
 
-    if (window_ms >= SPLIT_WINDOW_MS)
-        for (auto& c : chunk_offsets(read_srt, reference_spans, reference_weights, 16, 1.0, CONCAT_SEARCH_MS))
+    std::vector<int> found(1, base_offset);
+    if (window_ms >= SPLIT_WINDOW_MS) {
+        for (auto& c : backed(chunk_offsets(read_srt, reference_spans, reference_weights, 16, 1.0, MAX_OFFSET_MS)))
+            found.push_back((int)c.offset);
+        for (auto& c : backed(chunk_offsets(read_srt, reference_spans, reference_weights, 16, 1.0, CONCAT_SEARCH_MS))) {
+            found.push_back((int)c.offset);
             if (std::abs(c.offset - base_offset) > window_ms)
                 for (int x = (int)c.offset - REFINE_WINDOW_MS; x <= c.offset + REFINE_WINDOW_MS; x += step_ms) grid.push_back(x);
+        }
+    }
     std::sort(grid.begin(), grid.end());
     grid.erase(std::unique(grid.begin(), grid.end()), grid.end());
 
@@ -637,18 +659,35 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
         offsets[n] = grid[sigma_best];
     }
 
+    int n = (int)offsets.size();
     int from = 0;
-    while (from < (int)offsets.size()) {
+    while (from < n) {
         int to = from;
-        while (to + 1 < (int)offsets.size() && offsets[to + 1] == offsets[from]) to++;
+        while (to + 1 < n && offsets[to + 1] == offsets[from]) to++;
 
         std::vector<std::pair<int, int>> part;
         for (int k = from; k <= to; k++)
             part.push_back({read_srt[k].first + offsets[from], read_srt[k].second + offsets[from]});
 
         Lock got = best_offset(part, reference_spans, reference_weights);
-        if (std::abs(got.offset) <= 2 * step_ms)
+        bool known = window_ms < SPLIT_WINDOW_MS || got.sigma >= 7.0;
+        if (from > 0) known = known || std::abs(offsets[from - 1] - offsets[from]) <= REFINE_WINDOW_MS;
+        if (to + 1 < n) known = known || std::abs(offsets[to + 1] - offsets[from]) <= REFINE_WINDOW_MS;
+        for (int o : found) known = known || std::abs(o - offsets[from]) <= 1000;
+        for (int k = 0; k < n && !known; k++) known = (k < from || k > to) && std::abs(offsets[k] - offsets[from]) <= 1000;
+
+        if (!known && (from > 0 || to + 1 < n)) {
+            double before = 0, after = 0;
+            for (int k = from; k <= to; k++) {
+                if (from > 0) before += span_score(read_srt[k], reference_spans, reference_weights, offsets[from - 1]);
+                if (to + 1 < n) after += span_score(read_srt[k], reference_spans, reference_weights, offsets[to + 1]);
+            }
+            bool back = to + 1 >= n || (from > 0 && before >= after);
+            for (int k = from; k <= to; k++) offsets[k] = back ? offsets[from - 1] : offsets[to + 1];
+            if (!back) continue;
+        } else if (std::abs(got.offset) <= 2 * step_ms) {
             for (int k = from; k <= to; k++) offsets[k] += got.offset;
+        }
 
         from = to + 1;
     }

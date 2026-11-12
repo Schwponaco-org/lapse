@@ -43,6 +43,7 @@ double sub_fps(const std::string& text);
 void set_sub_fps(double fps);
 int frames_to_ms(long long frame, double fps);
 
+extern const std::vector<std::string> SUBTITLE_FORMATS;
 std::string subtitle_kind(const std::string& path);
 std::vector<std::pair<int,int>> read_subtitle(const std::string& path);
 std::vector<std::pair<int, int>> read_srt(const char* filename);
@@ -57,6 +58,14 @@ int stl_fps(const std::string& data);
 int stl_ms(const unsigned char* tc, int fps);
 int stl_zero(const std::string& data, int fps);
 std::vector<std::pair<int,int>> read_stl(const char* filename);
+
+struct SpruceLine {
+    int seconds[2] = {0, 0}, frames[2] = {0, 0};
+    size_t at[2] = {0, 0}, len[2] = {0, 0}, text = 0;
+};
+bool spruce_line(const std::string& line, SpruceLine& got);
+int spruce_fps(const std::string& text);
+int spruce_ms(const SpruceLine& got, int which, int fps);
 
 struct SccLine {
     size_t at = 0, len = 0;
@@ -79,6 +88,7 @@ bool smi_blank(const std::string& body);
 std::vector<std::pair<int,int>> read_ttml(const char* filename);
 bool ttml_attr(const std::string& text, size_t from, size_t to, const char* name, size_t& val_from, size_t& val_len);
 int ttml_time_ms(const std::string& v);
+std::string ttml_time(int ms, const std::string& like);
 void ttml_rates(const std::string& text);
 size_t ttml_p(const std::string& text, size_t from);
 std::pair<std::vector<std::pair<int,int>>, std::vector<int>> process_spans(const std::vector<std::pair<int, int>>& timestamps, bool merge = true, bool sort_by_time = true);
@@ -86,9 +96,11 @@ const float SPEECH_THRESHOLD = 0.25f;
 const int MIN_CUES = 10;
 const int MIN_SPEECH_MS = 200;
 const int MAX_CUE_MS = 10000;
+const int LEAD_IN_MS = 150;
 
 const int MAX_TIME_MS = 24 * 3600 * 1000;
 const int MAX_CUES = 100000;
 const size_t MAX_SUBTITLE_BYTES = 64u * 1024 * 1024;
 
 std::pair<std::vector<std::pair<int, int>>, std::vector<float>> reference_spans(const std::vector<float>& probability);
+void lead_in(std::vector<std::pair<int,int>>& spans);

@@ -36,10 +36,6 @@
 #include "log.h"
 #include "transcribe.h"
 
-// The formats the parsers and the writers both handle. Callers can ask for the
-// list with --formats so they know what is safe to hand us
-const char* subtitle_formats[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".mpl2", ".sup", ".sbv", ".idx", ".smi", ".sami", ".ttml", ".dfxp", ".stl", ".scc"};
-
 bool is_subtitle(const std::string& path) {
     return !subtitle_kind(path).empty();
 }
@@ -75,33 +71,6 @@ static double fps_from_length(const std::string& sub_path, const std::string& ot
 
     if (std::fabs(best - got) > best * 0.08) return 0;
     return best;
-}
-
-// The format follows the file we read, the destination is wherever the caller asked us to put it
-void write_offsets(const std::string& in_path, const std::string& out_path, double slope, const std::vector<int>& offsets, const std::vector<int>& mapping) {
-    std::string kind = subtitle_kind(in_path);
-    if (kind == ".srt")
-        write_srt_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".ass" || kind == ".ssa")
-        write_ass_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".vtt")
-        write_vtt_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".sub" || kind == ".mpl2")
-        write_sub_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".sup")
-        write_sup_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".sbv")
-        write_sbv_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".idx")
-        write_idx_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".smi")
-        write_smi_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".ttml" || kind == ".dfxp")
-        write_ttml_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".stl")
-        write_stl_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
-    else if (kind == ".scc")
-        write_scc_split(in_path.c_str(), out_path.c_str(), slope, offsets, mapping);
 }
 
 static int nearest_cut(const std::vector<int>& cuts, int at) {
@@ -319,14 +288,14 @@ static const int MIN_AGREEING = 3;
 enum class Verdict { Solid, Unsure, Nothing };
 
 
-static bool worth_splitting(const std::vector<int>& offsets, int base) {
+static bool worth_splitting(const std::vector<int>& offsets, int base, int reach = 60000) {
     int runs = 0;
     size_t i = 0;
     while (i < offsets.size()) {
         size_t j = i;
         while (j + 1 < offsets.size() && offsets[j + 1] == offsets[i]) j++;
         if (j - i + 1 < 12) return false;
-        if (std::abs(offsets[i] - base) > 60000) return false;
+        if (std::abs(offsets[i] - base) > reach) return false;
         runs++;
         i = j + 1;
     }
@@ -338,6 +307,35 @@ static bool worth_splitting(const std::vector<int>& offsets, int base) {
         high = std::max(high, o);
     }
     return high - low >= 120;
+}
+
+// The refine search only looks a little way around the offset, so a part that
+// really sits further out than that gets pressed against the edge of the window
+static bool on_the_edge(const std::vector<int>& offsets, int base, int window) {
+    for (int o : offsets)
+        if (std::abs(o - base) >= window - window / 10) return true;
+    return false;
+}
+
+static double sigma_after(const std::vector<std::pair<int,int>>& spans, const std::vector<int>& offsets,
+                          const std::vector<std::pair<int,int>>& ref_spans, const std::vector<float>& ref_weights, double coverage) {
+    std::vector<std::pair<int,int>> moved;
+    for (size_t i = 0; i < spans.size(); i++) moved.push_back({spans[i].first + offsets[i], spans[i].second + offsets[i]});
+    std::sort(moved.begin(), moved.end());
+    return best_offset(moved, ref_spans, ref_weights, coverage).sigma;
+}
+
+static bool contradicted(const std::vector<Chunk>& chunks, const std::vector<int>& offsets) {
+    for (auto& c : chunks) {
+        if (c.sigma < 4.0) continue;
+        bool seen = false, close = false;
+        for (int o : offsets) {
+            seen = seen || std::abs(c.offset - o) <= 2000;
+            close = close || std::abs(c.offset - o) <= REFINE_WINDOW_MS;
+        }
+        if (!seen && (close || c.sigma >= 5.0)) return true;
+    }
+    return false;
 }
 
 static int agree_count(const std::vector<Chunk>& chunks, const std::vector<double>& expected) {
@@ -455,6 +453,10 @@ static std::string escaped(const std::string& s) {
 }
 
 static void report(const Report& r) {
+    if (!as_json && r.mode == "shift") {
+        say() << "Moved every line by " << r.offset << "ms -> " << r.output << '\n';
+        return;
+    }
     if (!as_json) {
         say() << "Done (" << r.mode << "): offset=" << r.offset << "ms";
         if (r.ratio != 1.0) say() << " ratio=" << r.ratio;
@@ -512,6 +514,7 @@ void usage() {
     std::cerr << "       lapse --formats\n";
     std::cerr << "       lapse --vad\n";
     std::cerr << "       lapse --undo <subtitle>\n";
+    std::cerr << "       lapse --shift <ms> <subtitle>   move every line by ms, earlier when it is negative\n";
     std::cerr << "       lapse --batch   read one job per line from stdin, same arguments as above, one json reply per line\n";
 }
 
@@ -586,6 +589,8 @@ int run(int argc, const char *argv[]) {
     int min_shift = 1;
     std::string whisper_model;
     double fps = 0;
+    double shift_ms = 0;
+    bool shifting = false;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -631,7 +636,7 @@ int run(int argc, const char *argv[]) {
             std::cout << LAPSE_VERSION << '\n';
             return 0;
         } else if (arg == "--formats") {
-            for (auto& ext : subtitle_formats)
+            for (auto& ext : SUBTITLE_FORMATS)
                 std::cout << ext << '\n';
             return 0;
         } else if (arg == "--vad") {
@@ -676,11 +681,48 @@ int run(int argc, const char *argv[]) {
         } else if (arg == "--whisper") {
             if (i + 1 >= argc) { usage(); return -1; }
             whisper_model = argv[++i];
+        } else if (arg == "--shift") {
+            if (i + 1 >= argc || !number(argv[++i], shift_ms) || std::fabs(shift_ms) > MAX_TIME_MS) {
+                std::cerr << "--shift wants a number of ms\n";
+                return -1;
+            }
+            shifting = true;
         } else if (arg == "--force") {
             force = true;
         } else {
             args.push_back(arg);
         }
+    }
+
+    if (shifting) {
+        if (args.size() != 1 || !is_subtitle(args[0])) {
+            std::cerr << "--shift wants one subtitle to move\n";
+            return -1;
+        }
+        std::string input_path = args[0];
+        if (output_path.empty()) output_path = input_path;
+        set_sub_fps(fps);
+        if (is_microdvd(input_path) && sub_fps(load_text(input_path)) <= 0) {
+            std::cerr << "Cannot tell what frame rate " << input_path << " counts in, pass --fps N\n";
+            return 1;
+        }
+
+        Report card;
+        card.mode = "shift";
+        card.reference = "none";
+        card.offset = (int)std::lround(shift_ms);
+        card.offsets.assign(1, card.offset);
+        card.cues = (int)read_subtitle(input_path).size();
+        card.verdict = "solid";
+        card.written = true;
+        card.unchanged = card.offset == 0 && output_path == input_path;
+        card.output = output_path;
+        if (!dry_run && !card.unchanged) {
+            if (make_backup) backup_file(input_path.c_str());
+            write_subtitle(input_path, output_path, 0, shift_ms / 1000.0);
+        }
+        report(card);
+        return 0;
     }
 
     if (args.size() == 1 && !is_subtitle(args[0])) {
@@ -769,6 +811,7 @@ int run(int argc, const char *argv[]) {
             return -1;
         }
         timestamps = speech_of(from_video, audio_track, use_cache);
+        if (silero_open()) lead_in(timestamps);
         if (timestamps.empty()) {
             std::cerr << "No speech found in: " << from_video << '\n';
             return 1;
@@ -884,6 +927,7 @@ int run(int argc, const char *argv[]) {
     else if (ref_weights.empty()) card.reference = "embedded";
     else if (!words.empty()) card.reference = "vad+whisper";
 
+    if (!ref_weights.empty() && silero_open()) lead_in(ref_spans);
     align_setup(ref_spans, ref_weights);
     chapter_hints(AVC ? chapter_marks(AVC) : std::vector<int>());
     if (AVC && AVC->nb_chapters > 1) say() << "Reading " << AVC->nb_chapters << " chapters as places the film may have been cut\n";
@@ -901,6 +945,7 @@ int run(int argc, const char *argv[]) {
 
         if (!cache.empty()) save_spans(cache, ref_spans, ref_weights, ref_coverage);
         if (!words.empty()) keep_spoken(ref_spans, ref_weights, words);
+        if (silero_open()) lead_in(ref_spans);
         align_setup(ref_spans, ref_weights);
         slices = chunk_offsets(spans, ref_spans, ref_weights, 8, ref_coverage);
         card.coverage = ref_coverage;
@@ -911,6 +956,36 @@ int run(int argc, const char *argv[]) {
         std::vector<double> want;
         for (auto& c : slices) want.push_back(c.time * (ratio - 1.0) + offset);
         return want;
+    };
+    auto expected_from = [&](const std::vector<int>& offsets, const std::vector<std::pair<int,int>>& in, const std::vector<Chunk>& measured) {
+        std::vector<double> want;
+        for (auto& c : measured) {
+            int at = 0;
+            while (at + 1 < (int)in.size() && (in[at].first + in[at].second) / 2.0 < c.time) at++;
+            want.push_back(offsets[at]);
+        }
+        return want;
+    };
+    auto judge_parts = [&](const std::vector<int>& offsets, const std::vector<std::pair<int,int>>& in, double margin, const std::vector<Chunk>& measured) {
+        std::vector<double> want = expected_from(offsets, in, measured);
+        card.sigma = sigma_after(in, offsets, ref_spans, ref_weights, ref_coverage);
+        card.agreement = agreement_of(measured, want);
+        Verdict verdict = judge(card.sigma, margin, agree_count(measured, want));
+        if (verdict == Verdict::Solid && contradicted(measured, offsets)) verdict = Verdict::Unsure;
+        return verdict;
+    };
+
+    // A piece the refine search pressed against the edge of its window, or one
+    // the slices say is somewhere else, gets looked for over the whole range
+    auto reach_further = [&](const std::vector<std::pair<int,int>>& in, std::vector<int>& pieces, int base, const std::vector<Chunk>& measured) {
+        if (!on_the_edge(pieces, base, REFINE_WINDOW_MS) && !contradicted(measured, pieces)) return;
+        std::vector<int> wide = split_alignment(in, ref_spans, ref_weights, p, base);
+        if (!worth_splitting(wide, base, SPLIT_WINDOW_MS)) return;
+        double narrow = sigma_after(in, pieces, ref_spans, ref_weights, ref_coverage);
+        double wider = sigma_after(in, wide, ref_spans, ref_weights, ref_coverage);
+        if (wider <= narrow) return;
+        say() << "auto: a part sits further out than the refine window reaches, taking the wider search (sigma " << wider << " against " << narrow << ")\n";
+        pieces = wide;
     };
 
     std::vector<int> cuts;
@@ -986,7 +1061,7 @@ int run(int argc, const char *argv[]) {
 
         if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
-            write_offsets(input_path, output_path, slope, offsets, mapping);
+            write_subtitle(input_path, output_path, slope, 0, offsets, mapping);
         }
         report(card);
         return (verdict != Verdict::Solid && !force) ? 3 : 0;
@@ -1007,33 +1082,10 @@ int run(int argc, const char *argv[]) {
         end_moves(ends);
         card.unchanged = ends.empty() && still(offsets, slope);
 
-        std::string kind = subtitle_kind(input_path);
         if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
-            if (card.snapped)
-                write_offsets(input_path, output_path, slope, offsets, mapping);
-            else if (kind == ".srt")
-                write_srt_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".ass" || kind == ".ssa")
-                write_ass_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".vtt")
-                write_vtt_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".sub" || kind == ".mpl2")
-                write_sub_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".sup")
-                write_sup_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".sbv")
-                write_sbv_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".idx")
-                write_idx_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".smi")
-                write_smi_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".ttml" || kind == ".dfxp")
-                write_ttml_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".stl")
-                write_stl_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
-            else if (kind == ".scc")
-                write_scc_OLS(input_path.c_str(), output_path.c_str(), slope, intercept);
+            if (card.snapped) write_subtitle(input_path, output_path, slope, 0, offsets, mapping);
+            else write_subtitle(input_path, output_path, slope, intercept);
         }
         report(card);
         return (verdict != Verdict::Solid && !force) ? 3 : 0;
@@ -1083,10 +1135,8 @@ int run(int argc, const char *argv[]) {
         card.confidence = confidence;
         card.margin = margin;
         card.sigma = sigma;
-        std::vector<double> want = expected_at(offset, 1.0);
-        card.agreement = agreement_of(slices, want);
         std::vector<int> offsets = split_alignment(spans, ref_spans, ref_weights, p, offset);
-        return save(offsets, mapping, judge(sigma, margin, agree_count(slices, want)));
+        return save(offsets, mapping, judge_parts(offsets, spans, margin, slices));
 
     } else if (mode == "auto") {
         auto [order_spans, order_mapping] = process_spans(timestamps, true, false);
@@ -1122,6 +1172,7 @@ int run(int argc, const char *argv[]) {
 
         std::string choice;
         double ratio = 1.0;
+        double seen = 0;
 
         bool drifts = sloped >= MIN_AGREEING + 1 && std::abs(drift) > 1e-5;
         bool distant = second_part(slices, offset);
@@ -1135,7 +1186,8 @@ int run(int argc, const char *argv[]) {
             choice = "shifted";
         } else if (drifts) {
             choice = "drifting";
-            ratio = snap_ratio(1.0 + drift);
+            seen = 1.0 + drift;
+            ratio = snap_ratio(seen);
             auto [searched, unused, searched_sigma] = search_ratio(spans, ref_spans, ref_weights, ref_coverage, 1.0 + drift - 0.003, 1.0 + drift + 0.003);
             if (searched_sigma > best_offset(stretch(spans, ratio), ref_spans, ref_weights, ref_coverage).sigma + 1.0) ratio = searched;
         } else if (groups >= 2 || distant) {
@@ -1148,7 +1200,7 @@ int run(int argc, const char *argv[]) {
 
             if (r != 1.0 && sigma2 >= sure_sigma && sigma2 > sigma + 2.0) {
                 choice = "drifting";
-                ratio = r;
+                ratio = seen = r;
             } else {
                 if (look_far()) {
                     choice = "recut";
@@ -1191,13 +1243,15 @@ int run(int argc, const char *argv[]) {
             Verdict verdict = judge(sigma, margin, flat);
 
             std::vector<int> offsets(spans.size(), offset);
-            if (verdict == Verdict::Solid) {
+            if (verdict != Verdict::Nothing) {
                 std::vector<int> tidied = split_alignment(spans, ref_spans, ref_weights, p, offset,
                 REFINE_WINDOW_MS, REFINE_STEP_MS);
                 if (worth_splitting(tidied, offset)) {
                     say() << "auto: one offset does not fit the whole file, splitting it\n";
+                    reach_further(spans, tidied, offset, slices);
                     offsets = tidied;
                     card.mode = "auto/shifted+split";
+                    verdict = judge_parts(offsets, spans, margin, slices);
                 }
             }
             return save(offsets, mapping, verdict);
@@ -1206,6 +1260,24 @@ int run(int argc, const char *argv[]) {
         if (choice == "shifted") return shifted();
 
         if (choice == "drifting") {
+            auto fit = [&](double r) {
+                std::vector<std::pair<int,int>> scaled = stretch(spans, r);
+                int at = best_offset(scaled, ref_spans, ref_weights, ref_coverage).offset;
+                std::vector<int> tidied = split_alignment(scaled, ref_spans, ref_weights, p, at, REFINE_WINDOW_MS, REFINE_STEP_MS);
+                return sigma_after(scaled, tidied, ref_spans, ref_weights, ref_coverage);
+            };
+            if (seen > 0) {
+                double best = fit(ratio);
+                for (double r : FRAMERATE_RATIOS) {
+                    if (r == ratio || std::abs(r - seen) > 0.004) continue;
+                    double got = fit(r);
+                    if (got > best) {
+                        say() << "auto: " << r << " fits better than " << ratio << " once the file is cut\n";
+                        best = got;
+                        ratio = r;
+                    }
+                }
+            }
             std::vector<std::pair<int,int>> scaled = stretch(spans, ratio);
 
             auto [shift, conf2, margin2, sigma2] = best_offset(scaled, ref_spans, ref_weights, ref_coverage);
@@ -1232,13 +1304,14 @@ int run(int argc, const char *argv[]) {
             Verdict verdict = judge(sigma2, margin2, backing);
 
 
-            if (verdict == Verdict::Solid) {
+            if (verdict != Verdict::Nothing) {
                 std::vector<int> tidied = split_alignment(scaled, ref_spans, ref_weights, p, shift,
                                                           REFINE_WINDOW_MS, REFINE_STEP_MS);
                 if (worth_splitting(tidied, shift)) {
                     say() << "auto: the stretched file still jumps about, splitting it as well\n";
+                    reach_further(scaled, tidied, shift, after);
                     card.mode = "auto/drifting+split";
-                    return save(tidied, mapping, verdict, ratio - 1.0);
+                    return save(tidied, mapping, judge_parts(tidied, scaled, margin2, after), ratio - 1.0);
                 }
             }
 
@@ -1249,15 +1322,7 @@ int run(int argc, const char *argv[]) {
             auto [file_spans, file_mapping] = process_spans(timestamps, true, false);
             card.mode = "auto/recut";
             std::vector<int> offsets = split_alignment(file_spans, ref_spans, ref_weights, p, offset);
-
-            std::vector<double> want;
-            for (auto& c : slices) {
-                int at = 0;
-                while (at + 1 < (int)file_spans.size() && (file_spans[at].first + file_spans[at].second) / 2.0 < c.time) at++;
-                want.push_back(offsets[at]);
-            }
-            card.agreement = agreement_of(slices, want);
-            return save(offsets, file_mapping, judge(sigma, margin, agree_count(slices, want)));
+            return save(offsets, file_mapping, judge_parts(offsets, file_spans, margin, slices));
         }
 
     } else {
