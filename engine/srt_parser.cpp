@@ -832,7 +832,8 @@ static std::string spu_at(const std::string& sub, size_t at) {
 static std::string sub_chunk(std::ifstream& bin, unsigned long long at) {
     static const size_t CHUNK = 256 * 1024;
     std::string chunk;
-    if (!bin) return chunk;
+    if (!bin.is_open()) return chunk;
+    // a read that ran into the end of the file leaves the stream failed
     bin.clear();
     bin.seekg((std::streamoff)at);
     if (!bin) return chunk;
@@ -860,7 +861,7 @@ std::vector<std::pair<int,int>> read_idx(const char* filename) {
         starts.push_back(at < 0 ? -1 : at + delay);
 
         size_t pos = line.find("filepos:");
-        std::string spu = (pos == std::string::npos || !bin) ? "" : spu_at(sub_chunk(bin, strtoull(line.c_str() + pos + 8, nullptr, 16)), 0);
+        std::string spu = (pos == std::string::npos || !bin.is_open()) ? "" : spu_at(sub_chunk(bin, strtoull(line.c_str() + pos + 8, nullptr, 16)), 0);
         shown.push_back(spu_stop_ms((const unsigned char*)spu.data(), spu.size()));
     }
 
