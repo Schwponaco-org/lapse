@@ -307,6 +307,17 @@ if ln -s real/linked.srt linked.srt 2> /dev/null && [ -L linked.srt ]; then
     fi
 fi
 
+echo "== a subtitle written over keeps its permissions"
+cp pristine.srt private.srt
+chmod 600 private.srt
+# chmod does not take on Windows, nothing to test there
+if [ "$(ls -l private.srt | cut -c1-10)" = "-rw-------" ]; then
+    run --shift -$SHIFT private.srt --no-backup
+    if [ "$(ls -l private.srt | cut -c1-10)" != "-rw-------" ]; then
+        fail "the subtitle came back as $(ls -l private.srt | cut -c1-10) instead of -rw-------"
+    fi
+fi
+
 # a file size limit stands in for a disk that fills up, Windows has neither
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) ;;

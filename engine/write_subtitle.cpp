@@ -94,6 +94,10 @@ static void save_bytes(const char* output_path, const std::string& data) {
         std::filesystem::remove(temp_path, ec);
         throw std::runtime_error("Cannot write subtitle, is the disk full? " + std::string(output_path));
     }
+
+    // the new file would get the default mode, which opens up a private one
+    std::filesystem::file_status was = std::filesystem::status(target, ec);
+    if (std::filesystem::exists(was)) std::filesystem::permissions(temp_path, was.permissions(), ec);
     std::filesystem::rename(temp_path, target);
 }
 
