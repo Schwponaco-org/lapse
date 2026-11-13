@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="228" viewBox="0 0 880 228" role="img" aria-label="First run on all 39 films, total seconds" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif">
+<title>First run on all 39 films, total seconds</title>
+<text x="0.0" y="22.0" font-size="17" font-weight="600" text-anchor="start" fill="#f0f6fc">First run on all 39 films</text>
+<text x="0.0" y="44.0" font-size="13" font-weight="400" text-anchor="start" fill="#9198a1">Total seconds. Lower is better.</text>
+<line x1="112.0" x2="112.0" y1="62" y2="202" stroke="#3d444d" stroke-width="1"/>
+<text x="112.0" y="224.0" font-size="11" font-weight="400" text-anchor="start" fill="#6e7681">0</text>
+<line x1="213.1" x2="213.1" y1="62" y2="202" stroke="#3d444d" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="213.1" y="224.0" font-size="11" font-weight="400" text-anchor="middle" fill="#6e7681">100s</text>
+<line x1="314.3" x2="314.3" y1="62" y2="202" stroke="#3d444d" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="314.3" y="224.0" font-size="11" font-weight="400" text-anchor="middle" fill="#6e7681">200s</text>
+<line x1="415.4" x2="415.4" y1="62" y2="202" stroke="#3d444d" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="415.4" y="224.0" font-size="11" font-weight="400" text-anchor="middle" fill="#6e7681">300s</text>
+<line x1="516.6" x2="516.6" y1="62" y2="202" stroke="#3d444d" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="516.6" y="224.0" font-size="11" font-weight="400" text-anchor="middle" fill="#6e7681">400s</text>
+<line x1="617.7" x2="617.7" y1="62" y2="202" stroke="#3d444d" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="617.7" y="224.0" font-size="11" font-weight="400" text-anchor="middle" fill="#6e7681">500s</text>
+<line x1="718.9" x2="718.9" y1="62" y2="202" stroke="#3d444d" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="718.9" y="224.0" font-size="11" font-weight="400" text-anchor="middle" fill="#6e7681">600s</text>
+<line x1="820.0" x2="820.0" y1="62" y2="202" stroke="#3d444d" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="820.0" y="224.0" font-size="11" font-weight="400" text-anchor="middle" fill="#6e7681">700s</text>
+<text x="0.0" y="85.5" font-size="13" font-weight="600" text-anchor="start" fill="#f0f6fc">LAPSE 2.5.0</text>
+<path d="M112.0,72.0 H485.6 Q489.6,72.0 489.6,76.0 V86.0 Q489.6,90.0 485.6,90.0 H112.0 Z" fill="#3987e5"/>
+<text x="496.6" y="85.5" font-size="13" font-weight="600" text-anchor="start" fill="#f0f6fc">373.3s</text>
+<text x="0.0" y="119.5" font-size="13" font-weight="400" text-anchor="start" fill="#f0f6fc">LAPSE 2.0.0</text>
+<path d="M112.0,106.0 H625.0 Q629.0,106.0 629.0,110.0 V120.0 Q629.0,124.0 625.0,124.0 H112.0 Z" fill="#6e7681"/>
+<text x="636.0" y="119.5" font-size="13" font-weight="400" text-anchor="start" fill="#f0f6fc">511.2s</text>
+<text x="0.0" y="153.5" font-size="13" font-weight="400" text-anchor="start" fill="#f0f6fc">alass</text>
+<path d="M112.0,140.0 H628.0 Q632.0,140.0 632.0,144.0 V154.0 Q632.0,158.0 628.0,158.0 H112.0 Z" fill="#6e7681"/>
+<text x="639.0" y="153.5" font-size="13" font-weight="400" text-anchor="start" fill="#f0f6fc">514.1s</text>
+<text x="0.0" y="187.5" font-size="13" font-weight="400" text-anchor="start" fill="#f0f6fc">ffsubsync</text>
+<path d="M112.0,174.0 H771.8 Q775.8,174.0 775.8,178.0 V188.0 Q775.8,192.0 771.8,192.0 H112.0 Z" fill="#6e7681"/>
+<text x="782.8" y="187.5" font-size="13" font-weight="400" text-anchor="start" fill="#f0f6fc">656.3s</text>
+</svg>

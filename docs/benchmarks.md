@@ -1,433 +1,565 @@
 # Benchmarks
 
-LAPSE 2.0.0 against alass 2.0.0 and ffsubsync 0.5.1, on 39 feature films, plus
-one test with a subtitle file that belongs to a different film entirely.
+LAPSE 2.5.0 and 2.0.0 tested against alass 2.0.0 and ffsubsync 0.5.1 on 39
+feature films, plus one test with a subtitle that belongs to a different film.
 
-## Read this before the tables
+> [!NOTE]
+> The 39 films were picked because they are hard to sync: long running times,
+> long silent stretches, loud music under the dialogue, and films with more than
+> one cut. Every tool scores lower here than it would on an ordinary library.
+> 39 films is also a small sample, so a gap of one or two films between tools
+> says little. See [About the test set](#about-the-test-set).
 
-***Note: LAPSE has since received significant changes that improve both
-accuracy and speed, so its current results are almost certainly better than the numbers
-below. ffsubsync is still under active development, so its numbers may have
-shifted too. alass sees little to no maintenance these days, so its numbers
-here should still be a reasonably accurate picture.***
+## LAPSE 2.5.0 in short
 
-**The films were picked to be hard.** They are not a random sample. They were
-chosen out of an ordinary home library for the traits that give a subtitle
-sync tool trouble: long running times, long stretches with no dialogue, heavy
-score under the dialogue, and films that exist in more than one cut. Offsets
-between 12 and 97 seconds were then injected, along with cuts in up to four
-places.
+- **37 of 39** films synced when the subtitle was shifted or drifting. 2.0.0 synced 36.
+- **34 of 39** films synced when the subtitle was cut in several places and
+  LAPSE had to find that out by itself. 2.0.0 synced 19.
+- **37 of 39** with splitting turned on. That is the best result of any tool
+  in the test.
+- **373 seconds** for a first run on all 39 films. That is 27% less time
+  than 2.0.0 and alass, and 43% less than ffsubsync.
+- When LAPSE is unsure, it still leaves the original subtitle alone and tells
+  you why.
 
-That matters when these numbers are set against what the tools report about
-themselves. alass, for example, reports that on subtitles pulled at random
-from OpenSubtitles "the percentage of good subtitles is about 88% to 98%".
-That is a fair number for a random sample and it does not contradict anything
-here. A random sample is mostly easy files. This set was chosen for the
-opposite reason. Every tool in this document scores lower here than it would
-on a normal library, and that is the point: the interesting part is where
-they fail, not where they all succeed.
+**Contents**
 
-**File types.** `2001: A Space Odyssey`, `Challengers`, `Come and See` and
-`Seven Samurai` are `.mkv` and also had embedded subtitles. The other 35 are
-`.mp4`. All subtitles are `.srt`. The container matters for timing, so
-ffsubsync is much faster on those four than on anything else and those four
-times should not be compared to the rest.
+- [Results at a glance](#results-at-a-glance)
+- [Film by film](#film-by-film)
+- [Confidence](#confidence)
+- [Wrong subtitle](#wrong-subtitle)
+- [Error in milliseconds](#error-in-milliseconds)
+- [Split test in detail](#split-test-in-detail)
+- [What each tool can do](#what-each-tool-can-do)
+- [Subtitle formats](#subtitle-formats)
+- [About the test set](#about-the-test-set)
+- [How the tests were made](#how-the-tests-were-made)
+- [Method notes](#method-notes)
 
-**Results will vary.** Different releases, different subtitle uploads and
-different hardware move all of this around. Treat the shape of the tables as
-the finding, not the individual figures.
+## Results at a glance
 
-## How the tests were made
+Films synced out of 39. Partial means some segments of a split file landed and
+some did not. The best result in each row is in bold.
 
-The films are ordinary rips. For each one the most popular subtitle on
-OpenSubtitles for that release was taken as the starting point, so the
-subtitle text is whatever anyone downloading it would have ended up with.
+| Test | LAPSE 2.5.0 | LAPSE 2.0.0 | alass | ffsubsync |
+| ---- | :---------: | :---------: | :---: | :-------: |
+| Normal file (shift or drift) | **37** | 36 | 31 | 33 |
+| Split file, the tool decides by itself | **34** +2 partial | 19 +5 partial | n/a | n/a |
+| Split file, splitting turned on | **37** +1 partial | 32 +3 partial | 28 +1 partial | 18 +1 partial |
+| First run, all 39 films | **373.3s** | 511.2s | 514.1s | 656.3s |
+| Second run on the same film, all 39 | 34.8s | **29.7s** | about 514s | about 656s |
 
-Two scripts produced the broken files:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/benchmark-synced-dark.svg">
+  <img alt="Films synced out of 39. Normal file: LAPSE 2.5.0 37, LAPSE 2.0.0 36, alass 31, ffsubsync 33. Split file, splitting turned on: LAPSE 2.5.0 37, LAPSE 2.0.0 32, alass 28, ffsubsync 18." src="images/benchmark-synced-light.svg">
+</picture>
 
-* The first took the subtitle and either shifted every cue by a constant
-  amount or stretched the whole file by a framerate ratio. That is the
-  `normal` test.
-* The second took a copy, cut it at one or more timestamps, and gave each
-  segment its own offset. That is the `split` test. The cut points and the
-  per-segment offsets are listed further down.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/benchmark-first-run-dark.svg">
+  <img alt="First run on all 39 films, total seconds: LAPSE 2.5.0 373.3, LAPSE 2.0.0 511.2, alass 514.1, ffsubsync 656.3." src="images/benchmark-first-run-light.svg">
+</picture>
 
-Each engine then got the same broken file and the same video:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/benchmark-second-run-dark.svg">
+  <img alt="Second run on the same 39 films, total seconds: LAPSE 2.5.0 34.8, LAPSE 2.0.0 29.7, alass about 514, ffsubsync about 656." src="images/benchmark-second-run-light.svg">
+</picture>
 
-* `lapse` in its default mode, which works out on its own whether the file is
-  shifted, drifting, split, or some combination, and picks the split penalty
-  itself. It ran a second time with splitting forced on, so there is a number
-  for both.
-* `alass` as it ships. Splitting is on by default in alass at a penalty of 7,
-  so its one run covers both of the lapse columns next to it.
-* `ffsubsync` twice. Once as it ships, where splitting is off, and once with
-  `--split-penalty` so its piecewise mode is available.
 
-A run counts as a pass when every cue lands close enough to where it belongs.
-In the result tables `✓` marks a pass, `✗` a failure, and `◑` with a fraction
-a partial, where some segments landed and some did not. Below half the
-segments counts as a plain failure.
+Only LAPSE has a number in the "decides by itself" row. alass runs in split
+mode by default, so its one run counts as splitting turned on. ffsubsync never
+splits until it is told to. The bottom split row is the fair comparison when
+you already know the file is split. The row above it is what happens when you
+don't know.
 
-The work happened in two rounds, so a few of the columns only exist for the
-27 films in the second round. Everything measured for all 39 films is in the
-same table.
+LAPSE saves the speech profile it builds from the audio. The first run on a
+film pays for decoding the audio, and every later run on the same film skips
+that step. That is the usual case in a library, where you fix one subtitle
+track and then another for the same film. alass and ffsubsync start from
+scratch every time. They were also run twice, and their second run took about
+as long as the first, so the second-run chart and table show their first-run
+time. LAPSE 2.5.0 is a little slower than 2.0.0 on a second run, and still
+more than ten times faster than alass and ffsubsync.
 
-## What each tool can do
+## Film by film
 
-|                                              | lapse 2.0.0         | alass 2.0.0    | ffsubsync 0.5.1      |
-| -------------------------------------------- | ------------------- | -------------- | -------------------- |
-| Sync against the video's audio               | yes                 | yes            | yes                  |
-| Sync against another subtitle file           | yes                 | yes            | yes                  |
-| Correct framerate drift                      | yes                 | yes            | yes                  |
-| Split the file into segments                 | yes                 | yes            | yes                  |
-| Read an embedded subtitle track as reference | yes, automatic      | no             | yes, with a flag     |
-| Choose the output encoding                   | yes, keeps the input's unless told otherwise | no, always UTF-8 | yes, but UTF-8 unless told otherwise |
-| **Decide per file whether to split**         | **yes**             | yes            | no, off unless asked |
-| **Pick the split penalty itself**            | **yes**             | no             | no, supplied by hand |
-| **Report a confidence verdict**              | **yes, always**     | no             | a score in the log   |
-| **Leave the file alone when unsure**         | **yes, by default** | no             | only with a flag     |
-| **Reuse the speech profile next run**        | **yes, automatic**  | no             | no                   |
+✅ synced  🟡 partly synced (segments that landed)  ❌ not synced
 
-All three can split. What differs is who decides. alass splits on every run
-whether the file needs it or not, at a fixed penalty of 7 that has to be
-tuned by hand. ffsubsync does not split at all unless `--split-penalty` is
-passed, and the number has to be supplied with it. LAPSE looks at the file,
-decides whether a split is warranted, and sets the penalty from what it
-found. That is the difference the split tables below are measuring.
+For the normal files, LAPSE's mark is from the cached run. alass made one run per split file, and
+it is shown under "splitting turned on" because split mode is its default.
 
-The same applies to confidence. alass has no notion of it. ffsubsync computes
-a score and prints it, and will leave the file alone if
-`--skip-sync-on-low-quality` is passed, but that is off by default, so out of
-the box a bad answer overwrites a subtitle exactly like a good one. LAPSE
-reports a verdict on every run and does not overwrite unless that verdict is
-`solid`.
+<table>
+<thead>
+<tr><th rowspan="2">Film</th><th colspan="4">Normal file</th><th colspan="2">Split file,<br>LAPSE decides</th><th colspan="4">Split file,<br>splitting turned on</th></tr>
+<tr><th>LAPSE<br>2.5.0</th><th>LAPSE<br>2.0.0</th><th>alass</th><th>ffsub-<br>sync</th><th>LAPSE<br>2.5.0</th><th>LAPSE<br>2.0.0</th><th>LAPSE<br>2.5.0</th><th>LAPSE<br>2.0.0</th><th>alass</th><th>ffsub-<br>sync</th></tr>
+</thead>
+<tbody>
+<tr><td>2001: A Space Odyssey</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td></tr>
+<tr><td>Andrei Rublev</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Apocalypse Now</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">🟡 2/3</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Badlands</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">🟡 2/3</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td></tr>
+<tr><td>Barry Lyndon</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Blue Velvet</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Brazil</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">🟡 2/3</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Challengers</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Come and See</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
+<tr><td>Dancer in the Dark</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td></tr>
+<tr><td>Drive</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">🟡 2/3</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td></tr>
+<tr><td>Enter the Void</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">❌</td></tr>
+<tr><td>Eraserhead</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">🟡 2/3</td><td align="center">❌</td><td align="center">🟡 2/3</td><td align="center">🟡 2/3</td><td align="center">🟡 2/3</td><td align="center">❌</td></tr>
+<tr><td>Ex Machina</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td></tr>
+<tr><td>Eyes Wide Shut</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Fallen Angels</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
+<tr><td>Fargo</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Hereditary</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Inland Empire</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td></tr>
+<tr><td>Manchester by the Sea</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td><td align="center">✅</td></tr>
+<tr><td>Mulholland Drive</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td></tr>
+<tr><td>No Country for Old Men</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Possession</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td></tr>
+<tr><td>Requiem for a Dream</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
+<tr><td>Saving Private Ryan</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Seven Samurai</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td></tr>
+<tr><td>Stalker</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td></tr>
+<tr><td>Synecdoche, New York</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td></tr>
+<tr><td>The Deer Hunter</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">🟡 2/3</td><td align="center">✅</td><td align="center">🟡 2/3</td><td align="center">✅</td><td align="center">🟡 2/3</td></tr>
+<tr><td>The Godfather</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
+<tr><td>The Godfather Part II</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td></tr>
+<tr><td>The Godfather Part III</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td><td align="center">🟡 2/3</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td></tr>
+<tr><td>The Hunt</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">🟡 3/4</td><td align="center">✅</td><td align="center">❌</td></tr>
+<tr><td>The Passenger</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>The Seventh Seal</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>There Will Be Blood</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Uncut Gems</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td></tr>
+<tr><td>Whiplash</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td></tr>
+<tr><td>Zoolander</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td><td align="center">✅</td><td align="center">❌</td><td align="center">✅</td></tr>
+<tr><td><b>Synced</b></td><td align="center"><b>37</b></td><td align="center"><b>36</b></td><td align="center"><b>31</b></td><td align="center"><b>33</b></td><td align="center"><b>34</b><br>+2 🟡</td><td align="center"><b>19</b><br>+5 🟡</td><td align="center"><b>37</b><br>+1 🟡</td><td align="center"><b>32</b><br>+3 🟡</td><td align="center"><b>28</b><br>+1 🟡</td><td align="center"><b>18</b><br>+1 🟡</td></tr>
+</tbody>
+</table>
 
-Encoding works the same way, one tool leaves it alone by default, one
-converts it by default. alass always writes UTF-8, whatever the input was,
-and has no flag to change that. ffsubsync also writes UTF-8 by default, but
-`--output-encoding same` keeps the input's encoding, or any other codec name
-can be given directly. LAPSE keeps the input's encoding unless `--encoding`
-asks for a specific one.
+alass crashed on `Come and See` in both tests.
 
-## Subtitle formats
+<details>
+<summary><b>Times for every film, normal files</b></summary>
 
-|                                   | lapse       | alass       | ffsubsync 0.5.1 |
-| --------------------------------- | :---------: | :---------: | :-------------: |
-| `.srt`                            |     yes     |     yes     |       yes       |
-| `.ass` / `.ssa`                   |     yes     |     yes     |       yes       |
-| `.vtt`                            |     yes     |     no      |       yes       |
-| `.sub` (MicroDVD)                 |     yes     |     no      |    read only    |
-| `.sup` (PGS)                      |     yes     |     no      |       no        |
-| `.idx` (VobSub)                   |     yes     |  reference only  |     no     |
-| `.smi`                            |     yes     |     no      |       no        |
-| `.ttml` / `.dfxp`                 |     yes     |     no      |       no        |
-| `.sbv`                            |     yes     |     no      |       no        |
-| Pull an embedded track out of the video and sync it | yes | no | no |
+`First` is the first run on a film. `Cached` is a later run on the same film.
+Times are in seconds.
 
-alass reads `.srt`, `.ssa`/`.ass` and `.idx` and writes back in whatever
-format the file it corrected came in, so an `.ass` file stays `.ass`. `.idx`
-is timing only (it has no text of its own), so alass only reads it as a
-reference, the same way LAPSE does. ffsubsync also reads and writes `.ass`,
-`.ssa` and `.vtt` through pysubs2, and can read `.sub` (MicroDVD) the same
-way, but its writer has no MicroDVD branch, so asking it to save back out as
-`.sub` fails; that combination has to land as `.srt` or an SSA-family format
-instead. Neither tool pulls a subtitle track out of the video file itself, so
-a film whose only subtitle lives inside the mkv has to be extracted by hand
-first.
+| Film | 2.5.0 first | 2.5.0 cached | 2.0.0 first | 2.0.0 cached | alass | ffsubsync |
+| ---- | ----------: | -----------: | ----------: | -----------: | ----: | --------: |
+| 2001: A Space Odyssey | 11.36 | 0.76 ✅ | 13.41 | 0.68 ✅ | 21.60 ✅ | 2.21 ❌ |
+| Andrei Rublev | 4.46 | 0.51 ✅ | 5.32 | 0.43 ✅ | 6.84 ✅ | 11.64 ✅ |
+| Apocalypse Now | 7.82 | 1.23 ✅ | 9.41 | 0.97 ✅ | 14.86 ✅ | 22.13 ✅ |
+| Badlands | 8.97 | 0.56 ✅ | 9.93 | 0.48 ✅ | 14.10 ✅ | 13.90 ✅ |
+| Barry Lyndon | 13.09 | 1.10 ✅ | 16.14 | 0.91 ✅ | 30.19 ✅ | 27.83 ✅ |
+| Blue Velvet | 5.28 | 0.55 ✅ | 6.74 | 0.46 ✅ | 8.37 ✅ | 13.94 ✅ |
+| Brazil | 7.94 | 0.96 ✅ | 8.86 | 0.88 ✅ | 12.48 ✅ | 18.84 ✅ |
+| Challengers | 10.32 | 0.71 ✅ | 13.64 | 0.58 ✅ | 19.78 ✅ | 2.77 ✅ |
+| Come and See | 13.21 | 0.76 ✅ | 15.94 | 0.70 ✅ | 0.09 ❌ crashed | 4.03 ❌ |
+| Dancer in the Dark | 2.68 | 0.56 ✅ | 3.52 | 0.43 ✅ | 4.47 ✅ | 7.21 ✅ |
+| Drive | 4.80 | 0.43 ✅ | 6.68 | 0.40 ✅ | 6.68 ✅ | 11.08 ✅ |
+| Enter the Void | 7.20 | 0.92 ✅ | 8.89 | 0.77 ✅ | 11.29 ✅ | 18.07 ✅ |
+| Eraserhead | 8.82 | 0.43 ✅ | 10.67 | 0.33 ✅ | 5.75 ❌ | 10.96 ✅ |
+| Ex Machina | 4.73 | 0.57 ✅ | 5.49 | 0.50 ✅ | 7.63 ✅ | 12.26 ✅ |
+| Eyes Wide Shut | 7.01 | 0.86 ✅ | 7.65 | 0.82 ✅ | 11.34 ✅ | 17.25 ✅ |
+| Fallen Angels | 7.29 | 0.63 ✅ | 10.32 | 0.64 ✅ | 14.60 ✅ | 15.19 ✅ |
+| Fargo | 3.87 | 0.67 ✅ | 4.93 | 0.56 ✅ | 7.33 ✅ | 11.14 ✅ |
+| Hereditary | 10.75 | 0.56 ✅ | 13.25 | 0.43 ✅ | 18.44 ✅ | 17.51 ✅ |
+| Inland Empire | 16.82 | 0.91 ✅ | 18.90 | 0.78 ✅ | 32.08 ✅ | 41.62 ✅ |
+| Manchester by the Sea | 5.84 | 1.30 ✅ | 7.91 | 1.08 ✅ | 8.65 ❌ | 15.73 ✅ |
+| Mulholland Drive | 16.65 | 0.93 ✅ | 20.00 | 0.80 ✅ | 23.53 ✅ | 23.20 ✅ |
+| No Country for Old Men | 8.49 | 0.62 ✅ | 11.38 | 0.48 ✅ | 17.53 ✅ | 17.81 ✅ |
+| Possession | 6.50 | 0.49 ✅ | 8.34 | 0.50 ✅ | 5.95 ✅ | 11.78 ✅ |
+| Requiem for a Dream | 10.74 | 0.62 ✅ | 13.72 | 0.52 ✅ | 8.79 ❌ | 17.89 ✅ |
+| Saving Private Ryan | 6.46 | 1.38 ✅ | 8.57 | 0.94 ✅ | 12.46 ✅ | 18.39 ✅ |
+| Seven Samurai | 15.39 | 1.05 ✅ | 37.53 | 0.76 ✅ | 11.04 ✅ | 7.05 ✅ |
+| Stalker | 9.05 | 1.24 ✅ | 10.82 | 1.79 ❌ | 11.17 ✅ | 18.32 ❌ |
+| Synecdoche, New York | 10.85 | 0.94 ✅ | 13.07 | 0.69 ✅ | 21.14 ✅ | 18.40 ✅ |
+| The Deer Hunter | 9.23 | 1.22 ✅ | 11.06 | 0.83 ✅ | 13.62 ✅ | 21.08 ✅ |
+| The Godfather | 12.85 | 2.46 ❌ | 15.00 | 2.01 ❌ | 12.46 ❌ | 25.13 ❌ |
+| The Godfather Part II | 12.38 | 2.56 ❌ | 17.30 | 2.16 ❌ | 14.53 ❌ | 28.75 ❌ |
+| The Godfather Part III | 10.78 | 1.40 ✅ | 13.82 | 1.29 ✅ | 11.83 ❌ | 23.58 ❌ |
+| The Hunt | 7.81 | 0.52 ✅ | 11.49 | 0.44 ✅ | 7.42 ✅ | 20.35 ✅ |
+| The Passenger | 14.98 | 0.56 ✅ | 23.77 | 0.43 ✅ | 9.69 ✅ | 17.12 ✅ |
+| The Seventh Seal | 4.86 | 0.70 ✅ | 5.82 | 0.53 ✅ | 6.95 ✅ | 11.49 ✅ |
+| There Will Be Blood | 27.09 | 0.69 ✅ | 57.63 | 0.66 ✅ | 31.55 ✅ | 33.57 ✅ |
+| Uncut Gems | 15.17 | 1.29 ✅ | 18.69 | 1.01 ✅ | 23.51 ✅ | 21.25 ✅ |
+| Whiplash | 4.25 | 0.54 ✅ | 5.21 | 0.47 ✅ | 7.58 ✅ | 12.31 ✅ |
+| Zoolander | 7.48 | 0.66 ✅ | 10.33 | 0.52 ✅ | 6.82 ❌ | 13.49 ✅ |
 
-## Summary
+</details>
 
-Passes out of 39 films.
+<details>
+<summary><b>Times for every film, split files</b></summary>
 
-| Test                          |         lapse          |       alass        |     ffsubsync      |
-| ----------------------------- | :--------------------: | :----------------: | :----------------: |
-| Normal (shift or drift)       |       **36**/39        |       31/39        |       33/39        |
-| Split, tool decides by itself |   19/39 (+5 partial)   |        n/a         |        n/a         |
-| Split, splitting turned on    | **32**/39 (+3 partial) | 27/39 (+1 partial) | 17/39 (+1 partial) |
+`auto` is LAPSE with no hint that the file was cut. `forced` is LAPSE with
+splitting turned on. alass ran once in its default split mode. ffsubsync ran
+once with its default settings, where splitting is off, and once with
+`--split-penalty`. All LAPSE times are cached runs, in seconds.
 
-Nothing sits opposite LAPSE in the middle row because neither of the other
-two makes that decision. alass is already splitting on every run, and
-ffsubsync is not splitting at all until it is told to. The bottom row is the
-like-for-like comparison, and it applies once the file is already known to be
-split. The middle row is what happens when it is not.
+| Film | Cuts | 2.5.0 auto | 2.5.0 forced | 2.0.0 auto | 2.0.0 forced | alass | ffsubsync | ffsubsync split |
+| ---- | :--: | ---------: | -----------: | ---------: | -----------: | ----: | --------: | --------------: |
+| 2001: A Space Odyssey | 1 | 0.86 ✅ | 0.94 ✅ | 0.71 ✅ | 0.78 ✅ | 21.31 ✅ | 2.24 ❌ | 22.95 ❌ |
+| Andrei Rublev | 1 | 0.62 ✅ | 0.50 ✅ | 0.45 ✅ | 0.41 ✅ | 6.62 ✅ | 11.78 ❌ | 13.83 ✅ |
+| Apocalypse Now | 2 | 0.96 ✅ | 1.60 ✅ | 0.88 🟡 2/3 | 1.11 ✅ | 15.82 ✅ | 21.91 ❌ | 28.30 ✅ |
+| Badlands | 3 | 0.74 ✅ | 0.68 ✅ | 0.52 🟡 2/3 | 0.58 ✅ | 13.89 ✅ | 13.57 ❌ | 16.96 ❌ |
+| Barry Lyndon | 3 | 1.13 ✅ | 1.22 ✅ | 1.03 ✅ | 1.14 ✅ | 30.33 ✅ | 27.76 🟡 2/3 | 32.98 ✅ |
+| Blue Velvet | 1 | 0.77 ✅ | 0.63 ✅ | 0.55 ✅ | 0.60 ✅ | 8.64 ✅ | 14.16 ❌ | 17.14 ✅ |
+| Brazil | 2 | 1.00 ✅ | 1.39 ✅ | 0.94 🟡 2/3 | 1.08 ✅ | 12.70 ✅ | 18.79 ❌ | 23.01 ✅ |
+| Challengers | 1 | 0.59 ✅ | 0.44 ✅ | 0.58 ✅ | 0.30 ✅ | 19.76 ✅ | 2.70 ❌ | 23.59 ✅ |
+| Come and See | 1 | 0.59 ✅ | 0.76 ✅ | 0.70 ❌ | 0.66 ✅ | 0.08 ❌ crashed | 3.88 ❌ | 18.22 ❌ |
+| Dancer in the Dark | 1 | 0.49 ✅ | 0.94 ✅ | 0.46 ✅ | 0.83 ✅ | 4.90 ✅ | 7.23 ❌ | 14.00 ❌ |
+| Drive | 2 | 0.53 ✅ | 0.64 ✅ | 0.47 🟡 2/3 | 0.50 ✅ | 6.69 ✅ | 11.27 ❌ | 13.75 ❌ |
+| Enter the Void | 3 | 2.04 ✅ | 1.18 ✅ | 2.09 ❌ | 0.89 ❌ | 11.12 ✅ | 20.23 ❌ | 20.64 ❌ |
+| Eraserhead | 2 | 0.31 🟡 2/3 | 0.48 🟡 2/3 | 0.30 ❌ | 0.33 🟡 2/3 | 5.65 🟡 2/3 | 10.66 ❌ | 11.15 ❌ |
+| Ex Machina | 2 | 0.42 ✅ | 0.74 ✅ | 0.50 ❌ | 0.58 ✅ | 7.74 ❌ | 12.06 🟡 2/3 | 15.56 ✅ |
+| Eyes Wide Shut | 1 | 1.14 ✅ | 0.95 ✅ | 0.88 ✅ | 0.89 ✅ | 12.15 ✅ | 17.22 ❌ | 21.26 ✅ |
+| Fallen Angels | 1 | 1.11 ✅ | 0.68 ✅ | 0.97 ❌ | 0.55 ✅ | 14.76 ❌ | 15.24 ❌ | 17.11 ❌ |
+| Fargo | 1 | 0.60 ✅ | 0.82 ✅ | 0.53 ✅ | 0.62 ✅ | 7.58 ✅ | 11.31 ❌ | 15.03 ✅ |
+| Hereditary | 1 | 0.54 ✅ | 0.73 ✅ | 0.49 ✅ | 0.52 ✅ | 18.43 ✅ | 17.55 ❌ | 20.56 ✅ |
+| Inland Empire | 3 | 0.88 ✅ | 1.11 ✅ | 0.90 ✅ | 0.98 ✅ | 33.22 ✅ | 39.40 ❌ | 43.74 ❌ |
+| Manchester by the Sea | 1 | 1.57 ❌ | 3.85 ✅ | 1.16 ❌ | 3.16 ❌ | 8.26 ❌ | 15.62 ❌ | 21.42 ✅ |
+| Mulholland Drive | 1 | 0.88 ✅ | 0.92 ✅ | 0.77 ✅ | 0.83 ✅ | 23.02 ✅ | 22.74 ❌ | 25.93 ❌ |
+| No Country for Old Men | 1 | 0.69 ✅ | 0.58 ✅ | 0.50 ✅ | 0.51 ✅ | 18.01 ✅ | 17.71 ❌ | 20.39 ✅ |
+| Possession | 1 | 1.29 ✅ | 0.69 ✅ | 1.51 ❌ | 0.60 ✅ | 6.03 ✅ | 11.77 ❌ | 15.94 ❌ |
+| Requiem for a Dream | 1 | 0.51 ✅ | 0.67 ✅ | 0.45 ✅ | 0.67 ✅ | 8.78 ❌ | 17.80 ❌ | 20.94 ❌ |
+| Saving Private Ryan | 1 | 1.34 ✅ | 0.73 ✅ | 1.41 ❌ | 0.49 ✅ | 12.62 ✅ | 18.81 ❌ | 23.23 ✅ |
+| Seven Samurai | 1 | 0.93 ✅ | 0.73 ✅ | 0.78 ✅ | 0.70 ❌ | 11.16 ❌ | 6.99 ❌ | 10.42 ❌ |
+| Stalker | 1 | 1.84 ✅ | 0.64 ✅ | 1.74 ✅ | 0.61 ✅ | 11.27 ✅ | 18.28 ❌ | 21.66 ❌ |
+| Synecdoche, New York | 3 | 0.69 ✅ | 0.82 ✅ | 0.73 ❌ | 0.78 ✅ | 20.96 ✅ | 18.19 ❌ | 24.51 ❌ |
+| The Deer Hunter | 2 | 3.07 ✅ | 1.24 ✅ | 2.55 🟡 2/3 | 1.10 🟡 2/3 | 13.47 ✅ | 21.39 ❌ | 26.51 🟡 2/3 |
+| The Godfather | 1 | 2.40 ❌ | 1.38 ✅ | 2.03 ❌ | 1.29 ✅ | 13.32 ❌ | 25.49 ❌ | 30.10 ❌ |
+| The Godfather Part II | 1 | 3.03 ❌ | 1.68 ❌ | 2.17 ❌ | 1.36 ❌ | 15.55 ❌ | 28.60 ❌ | 34.15 ❌ |
+| The Godfather Part III | 2 | 1.80 🟡 2/3 | 1.10 ✅ | 2.03 ❌ | 1.14 ✅ | 12.48 ❌ | 23.33 ❌ | 26.93 ❌ |
+| The Hunt | 4 | 0.56 ✅ | 0.60 ✅ | 0.63 ❌ | 0.57 🟡 3/4 | 8.06 ✅ | 20.17 ❌ | 23.03 ❌ |
+| The Passenger | 1 | 0.51 ✅ | 0.53 ✅ | 0.42 ✅ | 0.47 ✅ | 9.66 ✅ | 17.29 ❌ | 19.34 ✅ |
+| The Seventh Seal | 1 | 0.44 ✅ | 0.50 ✅ | 0.47 ✅ | 0.43 ✅ | 6.92 ✅ | 11.17 ✅ | 14.21 ✅ |
+| There Will Be Blood | 1 | 0.58 ✅ | 0.91 ✅ | 0.72 ❌ | 0.76 ✅ | 32.39 ✅ | 33.82 ❌ | 35.74 ✅ |
+| Uncut Gems | 1 | 2.27 ✅ | 0.75 ✅ | 1.72 ✅ | 0.57 ✅ | 23.66 ✅ | 21.68 ❌ | 29.00 ❌ |
+| Whiplash | 1 | 0.41 ✅ | 0.39 ✅ | 0.42 ✅ | 0.40 ✅ | 7.55 ✅ | 12.20 ❌ | 14.82 ✅ |
+| Zoolander | 2 | 0.56 ✅ | 0.59 ✅ | 0.61 ❌ | 0.56 ✅ | 6.66 ❌ | 13.35 ❌ | 18.17 ✅ |
+| **Synced** | | **34** +2 🟡 | **37** +1 🟡 | **19** +5 🟡 | **32** +3 🟡 | **28** +1 🟡 | **1** +2 🟡 | **18** +1 🟡 |
 
-Total wall clock across the 39 normal runs:
+</details>
 
-| Tool             | Total     | Median run |
-| ---------------- | --------- | ---------- |
-| lapse, cached    | **29.7s** | **0.66s**  |
-| lapse, first run | 511.2s    | 10.7s      |
-| alass            | 514.1s    | 11.3s      |
-| ffsubsync        | 656.3s    | 17.1s      |
+<details>
+<summary><b>Where each file was cut and how far it was moved</b></summary>
 
-LAPSE keeps the speech profile it built from the audio, keyed on the video.
-The first run on a film pays for the decode, every run after that on the same
-film does not. That is the common case in a library, where one subtitle track
-gets fixed and then another for the same film. alass and ffsubsync start from
-nothing every time.
+The 12 films from the first round were cut once. The 27 films from the second
+round were cut in up to four places, as listed here.
 
-## Speed and result, normal mode
+| Film | Cuts | Cut at | Offset per segment (ms) |
+| ---- | :--: | ------ | ----------------------- |
+| Apocalypse Now | 2 | 00:59:23 | +33000, -21000, +33000 |
+| Badlands | 3 | 00:25:07, 00:40:52 | -21000, +45000, +12000, -21000 |
+| Barry Lyndon | 3 | 00:44:48, 01:22:52, 02:13:49 | -33000, +21000, -33000, +12000 |
+| Blue Velvet | 1 | 00:55:20 | +33000, -38500 |
+| Brazil | 2 | 00:38:54, 01:41:59 | +38500, -33000, +21000 |
+| Drive | 2 | 00:29:49, 01:09:21 | +21000, -33000, +21000 |
+| Enter the Void | 3 | 00:31:50, 01:23:52, 01:45:36 | -12000, -45000, -15000, +33000 |
+| Eraserhead | 2 | 00:26:30, 00:58:41 | -15000, +15000, -12000 |
+| Ex Machina | 2 | 00:29:25, 01:02:30 | +21000, +38500, -12000 |
+| Eyes Wide Shut | 1 | 01:10:21 | +12000, +33000 |
+| Fallen Angels | 1 | 00:43:05 | -45000, +45000 |
+| Fargo | 1 | 00:44:28 | -45000, -15000 |
+| Hereditary | 1 | 00:56:00 | +15000, -21000 |
+| Inland Empire | 3 | 00:51:53, 01:31:06, 02:11:54 | -12000, +12000, -33000, +12000 |
+| Manchester by the Sea | 1 | 00:58:58 | +15000, +38500 |
+| Mulholland Drive | 1 | 01:14:58 | +38500, -12000 |
+| No Country for Old Men | 1 | 01:02:25 | +33000, -15000 |
+| Possession | 1 | 00:53:52 | -33000, +33000 |
+| Synecdoche, New York | 3 | 00:38:13, 01:04:41, 01:32:22 | -38500, -15000, +21000, +38500 |
+| The Deer Hunter | 2 | 00:57:45, 01:51:49 | -12000, +21000, +45000 |
+| The Godfather | 1 | 01:32:14 | -45000, +12000 |
+| The Godfather Part II | 1 | 01:31:22 | +38500, -21000 |
+| The Godfather Part III | 2 | 00:56:24, 01:43:55 | -15000, -33000, +38500 |
+| The Hunt | 4 | 00:22:03, 00:41:17, 01:11:23, 01:27:20 | -15000, +15000, +38500, -15000, -33000 |
+| The Passenger | 1 | 01:03:37 | +33000, -38500 |
+| There Will Be Blood | 1 | 00:36:16 | -45000, +12000 |
+| Zoolander | 2 | 00:26:30, 00:59:43 | +12000, +38500, -45000 |
 
-`Cached` is the second and later run on the same film.
-
-| Film                   | lapse first | lapse cached  | alass             | ffsubsync    |
-| ---------------------- | ----------- | ------------- | ----------------- | ------------ |
-| 2001: A Space Odyssey  | 13.41s      | **0.68s** ✓   | 21.60s ✓          | 2.21s ✗      |
-| Andrei Rublev          | 5.32s       | **0.43s** ✓   | 6.84s ✓           | 11.64s ✓     |
-| Apocalypse Now         | 9.41s       | **0.97s** ✓   | 14.86s ✓          | 22.13s ✓     |
-| Badlands               | 9.93s       | **0.48s** ✓   | 14.10s ✓          | 13.90s ✓     |
-| Barry Lyndon           | 16.14s      | **0.91s** ✓   | 30.19s ✓          | 27.83s ✓     |
-| Blue Velvet            | 6.74s       | **0.46s** ✓   | 8.37s ✓           | 13.94s ✓     |
-| Brazil                 | 8.86s       | **0.88s** ✓   | 12.48s ✓          | 18.84s ✓     |
-| Challengers            | 13.64s      | **0.58s** ✓   | 19.78s ✓          | 2.77s ✓      |
-| Come and See           | 15.94s      | **0.70s** ✓   | 0.09s ✗ (crashed) | 4.03s ✗      |
-| Dancer in the Dark     | 3.52s       | **0.43s** ✓   | 4.47s ✓           | 7.21s ✓      |
-| Drive                  | 6.68s       | **0.40s** ✓   | 6.68s ✓           | 11.08s ✓     |
-| Enter the Void         | 8.89s       | **0.77s** ✓   | 11.29s ✓          | 18.07s ✓     |
-| Eraserhead             | 10.67s      | **0.33s** ✓   | 5.75s ✗           | 10.96s ✓     |
-| Ex Machina             | 5.49s       | **0.50s** ✓   | 7.63s ✓           | 12.26s ✓     |
-| Eyes Wide Shut         | 7.65s       | **0.82s** ✓   | 11.34s ✓          | 17.25s ✓     |
-| Fallen Angels          | 10.32s      | **0.64s** ✓   | 14.60s ✓          | 15.19s ✓     |
-| Fargo                  | 4.93s       | **0.56s** ✓   | 7.33s ✓           | 11.14s ✓     |
-| Hereditary             | 13.25s      | **0.43s** ✓   | 18.44s ✓          | 17.51s ✓     |
-| Inland Empire          | 18.90s      | **0.78s** ✓   | 32.08s ✓          | 41.62s ✓     |
-| Manchester by the Sea  | 7.91s       | **1.08s** ✓   | 8.65s ✗           | 15.73s ✓     |
-| Mulholland Drive       | 20.00s      | **0.80s** ✓   | 23.53s ✓          | 23.20s ✓     |
-| No Country for Old Men | 11.38s      | **0.48s** ✓   | 17.53s ✓          | 17.81s ✓     |
-| Possession             | 8.34s       | **0.50s** ✓   | 5.95s ✓           | 11.78s ✓     |
-| Requiem for a Dream    | 13.72s      | **0.52s** ✓   | 8.79s ✗           | 17.89s ✓     |
-| Saving Private Ryan    | 8.57s       | **0.94s** ✓   | 12.46s ✓          | 18.39s ✓     |
-| Seven Samurai          | 37.53s      | **0.76s** ✓   | 11.04s ✓          | 7.05s ✓      |
-| Stalker                | 10.82s      | **1.79s** ✗   | 11.17s ✓          | 18.32s ✗     |
-| Synecdoche, New York   | 13.07s      | **0.69s** ✓   | 21.14s ✓          | 18.40s ✓     |
-| The Deer Hunter        | 11.06s      | **0.83s** ✓   | 13.62s ✓          | 21.08s ✓     |
-| The Godfather          | 15.00s      | **2.01s** ✗   | 12.46s ✗          | 25.13s ✗     |
-| The Godfather Part II  | 17.30s      | **2.16s** ✗   | 14.53s ✗          | 28.75s ✗     |
-| The Godfather Part III | 13.82s      | **1.29s** ✓   | 11.83s ✗          | 23.58s ✗     |
-| The Hunt               | 11.49s      | **0.44s** ✓   | 7.42s ✓           | 20.35s ✓     |
-| The Passenger          | 23.77s      | **0.43s** ✓   | 9.69s ✓           | 17.12s ✓     |
-| The Seventh Seal       | 5.82s       | **0.53s** ✓   | 6.95s ✓           | 11.49s ✓     |
-| There Will Be Blood    | 57.63s      | **0.66s** ✓   | 31.55s ✓          | 33.57s ✓     |
-| Uncut Gems             | 18.69s      | **1.01s** ✓   | 23.51s ✓          | 21.25s ✓     |
-| Whiplash               | 5.21s       | **0.47s** ✓   | 7.58s ✓           | 12.31s ✓     |
-| Zoolander              | 10.33s      | **0.52s** ✓   | 6.82s ✗           | 13.49s ✓     |
-| **Passed**             |             | **36 / 39**   | 31 / 39           | 33 / 39      |
-
-## Speed and result, split mode
-
-`lapse auto` is the default run, with no indication that the file was split.
-Every other column here is a run where splitting was already on: alass
-because it always is, ffsubsync because it was given `--split-penalty`. All
-lapse times are cached runs.
-
-| Film                   | Cuts | lapse auto      | lapse forced    | alass             | ffsubsync     | ffsubsync split |
-| ---------------------- | :--: | --------------- | --------------- | ----------------- | ------------- | --------------- |
-| 2001: A Space Odyssey  |  1   | **0.71s** ✓     | **0.78s** ✓     | 21.31s ✓          | 2.24s ✗       | 22.95s ✗        |
-| Andrei Rublev          |  1   | **0.45s** ✓     | **0.41s** ✓     | 6.62s ✓           | 11.78s ✗      | 13.83s ✓        |
-| Apocalypse Now         |  2   | **0.88s** ◑ 2/3 | **1.11s** ✓     | 15.82s ✓          | 21.91s ✗      | 28.30s ✓        |
-| Badlands               |  3   | **0.52s** ◑ 2/3 | **0.58s** ✓     | 13.89s ✓          | 13.57s ✗      | 16.96s ✗        |
-| Barry Lyndon           |  3   | **1.03s** ✓     | **1.14s** ✓     | 30.33s ✓          | 27.76s ◑ 2/3  | 32.98s ✓        |
-| Blue Velvet            |  1   | **0.55s** ✓     | **0.60s** ✓     | 8.64s ✓           | 14.16s ✗      | 17.14s ✓        |
-| Brazil                 |  2   | **0.94s** ◑ 2/3 | **1.08s** ✓     | 12.70s ✓          | 18.79s ✗      | 23.01s ✓        |
-| Challengers            |  1   | **0.58s** ✓     | **0.30s** ✓     | 19.76s ✓          | 2.70s ✗       | 23.59s ✓        |
-| Come and See           |  1   | **0.70s** ✗     | **0.66s** ✓     | 0.08s ✗ (crashed) | 3.88s ✗       | 18.22s ✗        |
-| Dancer in the Dark     |  1   | **0.46s** ✓     | **0.83s** ✓     | 4.90s ✓           | 7.23s ✗       | 14.00s ✗        |
-| Drive                  |  2   | **0.47s** ◑ 2/3 | **0.50s** ✓     | 6.69s ✓           | 11.27s ✗      | 13.75s ✗        |
-| Enter the Void         |  3   | **2.09s** ✗     | **0.89s** ✗     | 11.12s ✓          | 20.23s ✗      | 20.64s ✗        |
-| Eraserhead             |  2   | **0.30s** ✗     | **0.33s** ◑ 2/3 | 5.65s ◑ 2/3       | 10.66s ✗      | 11.15s ✗        |
-| Ex Machina             |  2   | **0.50s** ✗     | **0.58s** ✓     | 7.74s ✗           | 12.06s ◑ 2/3  | 15.56s ✓        |
-| Eyes Wide Shut         |  1   | **0.88s** ✓     | **0.89s** ✓     | 12.15s ✓          | 17.22s ✗      | 21.26s ✓        |
-| Fallen Angels          |  1   | **0.97s** ✗     | **0.55s** ✓     | 14.76s ✗          | 15.24s ✗      | 17.11s ✗        |
-| Fargo                  |  1   | **0.53s** ✓     | **0.62s** ✓     | 7.58s ✓           | 11.31s ✗      | 15.03s ✓        |
-| Hereditary             |  1   | **0.49s** ✓     | **0.52s** ✓     | 18.43s ✓          | 17.55s ✗      | 20.56s ✓        |
-| Inland Empire          |  3   | **0.90s** ✓     | **0.98s** ✓     | 33.22s ✓          | 39.40s ✗      | 43.74s ✗        |
-| Manchester by the Sea  |  1   | **1.16s** ✗     | **3.16s** ✗     | 8.26s ✗           | 15.62s ✗      | 21.42s ✓        |
-| Mulholland Drive       |  1   | **0.77s** ✓     | **0.83s** ✓     | 23.02s ✓          | 22.74s ✗      | 25.93s ✗        |
-| No Country for Old Men |  1   | **0.50s** ✓     | **0.51s** ✓     | 18.01s ✓          | 17.71s ✗      | 20.39s ✓        |
-| Possession             |  1   | **1.51s** ✗     | **0.60s** ✓     | 6.03s ✓           | 11.77s ✗      | 15.94s ✗        |
-| Requiem for a Dream    |  1   | **0.45s** ✓     | **0.67s** ✓     | 8.78s ✗           | 17.80s ✗      | 20.94s ✗        |
-| Saving Private Ryan    |  1   | **1.41s** ✗     | **0.49s** ✓     | 12.62s ✓          | 18.81s ✗      | 23.23s ✓        |
-| Seven Samurai          |  1   | **0.78s** ✓     | **0.70s** ✗     | 11.16s ✗          | 6.99s ✗       | 10.42s ✗        |
-| Stalker                |  1   | **1.74s** ✓     | **0.61s** ✓     | 11.27s ✓          | 18.28s ✗      | 21.66s ✗        |
-| Synecdoche, New York   |  3   | **0.73s** ✗     | **0.78s** ✓     | 20.96s ✓          | 18.19s ✗      | 24.51s ✗        |
-| The Deer Hunter        |  2   | **2.55s** ◑ 2/3 | **1.10s** ◑ 2/3 | 13.47s ✓          | 21.39s ✗      | 26.51s ◑ 2/3    |
-| The Godfather          |  1   | **2.03s** ✗     | **1.29s** ✓     | 13.32s ✗          | 25.49s ✗      | 30.10s ✗        |
-| The Godfather Part II  |  1   | **2.17s** ✗     | **1.36s** ✗     | 15.55s ✗          | 28.60s ✗      | 34.15s ✗        |
-| The Godfather Part III |  2   | **2.03s** ✗     | **1.14s** ✓     | 12.48s ✗          | 23.33s ✗      | 26.93s ✗        |
-| The Hunt               |  4   | **0.63s** ✗     | **0.57s** ◑ 3/4 | 8.06s ✓           | 20.17s ✗      | 23.03s ✗        |
-| The Passenger          |  1   | **0.42s** ✓     | **0.47s** ✓     | 9.66s ✓           | 17.29s ✗      | 19.34s ✓        |
-| The Seventh Seal       |  1   | **0.47s** ✓     | **0.43s** ✓     | 6.92s ✓           | 11.17s ✓      | 14.21s ✓        |
-| There Will Be Blood    |  1   | **0.72s** ✗     | **0.76s** ✓     | 32.39s ✓          | 33.82s ✗      | 35.74s ✓        |
-| Uncut Gems             |  1   | **1.72s** ✓     | **0.57s** ✓     | 23.66s ✓          | 21.68s ✗      | 29.00s ✗        |
-| Whiplash               |  1   | **0.42s** ✓     | **0.40s** ✓     | 7.55s ✓           | 12.20s ✗      | 14.82s ✓        |
-| Zoolander              |  2   | **0.61s** ✗     | **0.56s** ✓     | 6.66s ✗           | 13.35s ✗      | 18.17s ✓        |
-| **Passed**             |      | 19 ✓ +5 ◑       | **32 ✓** +3 ◑   | 27 ✓ +1 ◑         | 0 ✓ +2 ◑      | 17 ✓ +1 ◑       |
-
-The `lapse auto` column is the one with no help. Nineteen clean passes and
-five partials out of 39 came from files it was never told were cut. The other
-columns in this table exist only because the split was already known going
-in. Once LAPSE is told, the `lapse forced` column is the best result here.
-
-## Error in milliseconds, normal mode
-
-The first twelve films were also measured by how far each cue ended up from
-where it should be. The best value in each row is in bold.
-
-| Film                  | Injected       | lapse           | alass          | ffsubsync        |
-| --------------------- | -------------- | --------------- | -------------- | ---------------- |
-| 2001: A Space Odyssey | shift +97000ms | **19ms** ✓      | 50ms ✓         | 34769ms ✗        |
-| Andrei Rublev         | shift +15000ms | 35ms ✓          | 168ms ✓        | **0ms** ✓        |
-| Challengers           | drift x1.00100 | 67ms ✓          | **46ms** ✓     | 160ms ✓          |
-| Come and See          | shift +97000ms | **24082ms** ✓   | crashed ✗      | 33110ms ✗        |
-| Dancer in the Dark    | drift x0.99900 | 384035ms ✓      | 304591ms ✓     | **195928ms** ✓   |
-| Requiem for a Dream   | shift -33000ms | 2113ms ✓        | 140672ms ✗     | **1790ms** ✓     |
-| Saving Private Ryan   | drift x1.00100 | 3646ms ✓        | 3574ms ✓       | **3525ms** ✓     |
-| Seven Samurai         | drift x1.04167 | 60ms ✓          | 38ms ✓         | **0ms** ✓        |
-| Stalker               | shift +52500ms | 89302ms ✗       | 101286ms ✓     | **0ms** ✗        |
-| The Seventh Seal      | shift +33000ms | 58ms ✓          | **26ms** ✓     | **0ms** ✓        |
-| Uncut Gems            | shift -33000ms | 16076ms ✓       | 16105ms ✓      | **16054ms** ✓    |
-| Whiplash              | shift +38500ms | 266ms ✓         | 172ms ✓        | **170ms** ✓      |
-
-The error figure and the pass mark do not always agree. A large error on a
-film whose subtitle was already off by that much before anything was injected
-still lines up with the audio, and a zero error on `Stalker` still failed
-because the rest of the file did not follow.
-
-## Split test in detail
-
-The same twelve films, cut in two and given a different offset on each side.
-`clean` means the tool produced one cut in the right place. `noisy` means it
-produced a cut, but not where the real one is. `messy xN` means it produced N
-cuts, and every extra cut is a place where the subtitle jumps during
-playback. Where a cell has a `set` line, that is the offset the tool applied
-to each side. The `err` line is how far each side ended up from the truth.
-
-| Film                  | True cut | Injected        | lapse                                                       | alass                                                       | ffsubsync                                                   |
-| --------------------- | -------- | --------------- | ----------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------- |
-| 2001: A Space Odyssey | 00:49:05 | -33000 / +45000 | ✓ **clean** @00:59:36<br>set +33070/-44388ms<br>err **70/7ms** | ✓ **clean** @00:59:36<br>set +33050/-45098ms<br>err 50/98ms | ✗ messy x17 @00:27:51<br>err 78000/0ms                      |
-| Andrei Rublev         | 00:34:45 | -45000 / -12000 | ✓ **clean** @00:35:06<br>set +45026/+12037ms<br>err **26/37ms** | ✓ **clean** @00:34:33<br>set +44932/+11811ms<br>err 68/189ms | ✓ cue mismatch                                             |
-| Challengers           | 01:20:16 | -33000 / +33000 | ✓ **clean** @01:22:08<br>set +33065/-32475ms<br>err 65/69ms | ✓ noisy @01:20:49<br>set +32965/**+99099ms**<br>err **35**/146ms | ◑ 2/3 messy x39<br>err 140/66140ms                     |
-| Come and See          | 01:19:39 | +45000 / -45000 | ✓ noisy @00:25:34<br>err **22107/65287ms**                  | ✗ crashed                                                   | ✗ messy x20<br>err 22164/63450ms                            |
-| Dancer in the Dark    | 00:36:00 | +33000 / -33000 | ✓ noisy @00:19:56<br>err 395597/329597ms                    | ✓ messy x16<br>err 224691/51282ms                           | ✗ messy x19<br>err cue mismatch                             |
-| Requiem for a Dream   | 00:59:09 | -45000 / +45000 | ✓ noisy @01:03:26<br>err **2063/4198ms**                    | ✗ messy x98<br>err 100143/172055ms                          | ✗ cue mismatch                                              |
-| Saving Private Ryan   | 01:07:02 | +21000 / -33000 | ✓ messy x38<br>err 51487/4702ms                             | ✓ messy x22<br>err **3281/5143ms**                          | ✓ messy x63<br>err 53572/3343ms                             |
-| Seven Samurai         | 01:13:31 | +12000 / -12000 | ✓ **clean** @01:13:11<br>set -11937/+12054ms<br>err 63/54ms | ✗ **clean** @01:14:51<br>set -12005/+11927ms<br>err **5/73ms** | ✗ **clean** @01:13:19<br>set -12052/+11943ms<br>err 0/24000ms |
-| Stalker               | 00:57:14 | -33000 / +45000 | ✓ messy x102<br>err 214608/81555ms                          | ✓ messy x101<br>err 165526/74902ms                          | ✗ messy x63<br>err **81462/1651ms**                         |
-| The Seventh Seal      | 00:42:55 | -12000 / -45000 | ✓ **clean** @00:42:19<br>set +12069/+45046ms<br>err 69/50ms | ✓ **clean** @00:42:19<br>set +11974/+44828ms<br>err **26**/172ms | ✓ noisy @00:42:19<br>set +12000/+44990ms<br>err 32950/50ms |
-| Uncut Gems            | 00:55:20 | -33000 / +21000 | ✓ messy x15<br>err 13695/17641ms                            | ✓ messy x16<br>err 13721/17589ms                            | ✗ messy x113<br>err 40430/17576ms                           |
-| Whiplash              | 00:46:09 | +12000 / -33000 | ✓ noisy @00:45:36<br>err **266/271ms**                      | ✓ **clean** @00:45:11<br>set -11828/+32932ms<br>err 172/68ms | ✓ messy x8<br>err 45140/140ms                              |
-
-Producing one clean cut is not the same as producing a usable file, and the
-lines under each verdict show that. ffsubsync placed sixty three cuts on
-`Stalker` and a hundred and thirteen on `Uncut Gems`. On `Challengers` alass
-found the cut close to the right place but set the second half nearly 100
-seconds out.
-
-## What was injected in the second round
-
-The 27 films in the second round were cut in more places.
-
-| Film                   | Cuts | Cut at (hh:mm:ss)                      | Segment offsets (ms)                   |
-| ---------------------- | :--: | -------------------------------------- | -------------------------------------- |
-| Apocalypse Now         |  2   | 00:59:23                               | +33000, -21000, +33000                 |
-| Badlands               |  3   | 00:25:07, 00:40:52                     | -21000, +45000, +12000, -21000         |
-| Barry Lyndon           |  3   | 00:44:48, 01:22:52, 02:13:49           | -33000, +21000, -33000, +12000         |
-| Blue Velvet            |  1   | 00:55:20                               | +33000, -38500                         |
-| Brazil                 |  2   | 00:38:54, 01:41:59                     | +38500, -33000, +21000                 |
-| Drive                  |  2   | 00:29:49, 01:09:21                     | +21000, -33000, +21000                 |
-| Enter the Void         |  3   | 00:31:50, 01:23:52, 01:45:36           | -12000, -45000, -15000, +33000         |
-| Eraserhead             |  2   | 00:26:30, 00:58:41                     | -15000, +15000, -12000                 |
-| Ex Machina             |  2   | 00:29:25, 01:02:30                     | +21000, +38500, -12000                 |
-| Eyes Wide Shut         |  1   | 01:10:21                               | +12000, +33000                         |
-| Fallen Angels          |  1   | 00:43:05                               | -45000, +45000                         |
-| Fargo                  |  1   | 00:44:28                               | -45000, -15000                         |
-| Hereditary             |  1   | 00:56:00                               | +15000, -21000                         |
-| Inland Empire          |  3   | 00:51:53, 01:31:06, 02:11:54           | -12000, +12000, -33000, +12000         |
-| Manchester by the Sea  |  1   | 00:58:58                               | +15000, +38500                         |
-| Mulholland Drive       |  1   | 01:14:58                               | +38500, -12000                         |
-| No Country for Old Men |  1   | 01:02:25                               | +33000, -15000                         |
-| Possession             |  1   | 00:53:52                               | -33000, +33000                         |
-| Synecdoche, New York   |  3   | 00:38:13, 01:04:41, 01:32:22           | -38500, -15000, +21000, +38500         |
-| The Deer Hunter        |  2   | 00:57:45, 01:51:49                     | -12000, +21000, +45000                 |
-| The Godfather          |  1   | 01:32:14                               | -45000, +12000                         |
-| The Godfather Part II  |  1   | 01:31:22                               | +38500, -21000                         |
-| The Godfather Part III |  2   | 00:56:24, 01:43:55                     | -15000, -33000, +38500                 |
-| The Hunt               |  4   | 00:22:03, 00:41:17, 01:11:23, 01:27:20 | -15000, +15000, +38500, -15000, -33000 |
-| The Passenger          |  1   | 01:03:37                               | +33000, -38500                         |
-| There Will Be Blood    |  1   | 00:36:16                               | -45000, +12000                         |
-| Zoolander              |  2   | 00:26:30, 00:59:43                     | +12000, +38500, -45000                 |
+</details>
 
 ## Confidence
 
-LAPSE reports a verdict on every run. `solid` means the audio backs the
-answer up and the file is overwritten with a `.bak` kept. `unsure` means
-there is an answer but it is not proven. `nothing` means the audio does not
-support any offset. On `unsure` and `nothing` the original is left alone and
-the answer goes to a sidecar beside it, where it can be checked before it is
-used.
+LAPSE gives a verdict on every run and only overwrites the subtitle when it is
+sure.
 
-This was recorded for the 27 films in the second round. Nothing sits beside
-it because neither of the other two tools produces one.
+| Verdict | Meaning | What happens to the file |
+| ------- | ------- | ------------------------ |
+| 🟢 `solid` | The audio backs up the result. | Overwritten. The original is kept as `.bak`. |
+| 🟠 `unsure` | There is a result, but it isn't proven. | Left alone. The result goes to a sidecar file next to it. |
+| ⚪ `nothing` | The audio doesn't support any offset. | Left alone. The result goes to a sidecar file next to it. |
 
-| Film                   | Normal  | Split, auto | Split, forced |
-| ---------------------- | ------- | ----------- | ------------- |
-| Apocalypse Now         | solid   | unsure      | unsure        |
-| Badlands               | solid   | solid       | solid         |
-| Barry Lyndon           | solid   | solid       | solid         |
-| Blue Velvet            | solid   | nothing     | solid         |
-| Brazil                 | solid   | nothing     | solid         |
-| Drive                  | solid   | solid       | solid         |
-| Enter the Void         | solid   | solid       | unsure        |
-| Eraserhead             | solid   | solid       | unsure        |
-| Ex Machina             | solid   | solid       | solid         |
-| Eyes Wide Shut         | solid   | solid       | solid         |
-| Fallen Angels          | unsure  | unsure      | unsure        |
-| Fargo                  | solid   | solid       | solid         |
-| Hereditary             | solid   | solid       | solid         |
-| Inland Empire          | solid   | solid       | solid         |
-| Manchester by the Sea  | nothing | nothing     | solid         |
-| Mulholland Drive       | solid   | solid       | solid         |
-| No Country for Old Men | solid   | solid       | solid         |
-| Possession             | solid   | solid       | unsure        |
-| Synecdoche, New York   | solid   | solid       | solid         |
-| The Deer Hunter        | solid   | solid       | unsure        |
-| The Godfather          | unsure  | unsure      | unsure        |
-| The Godfather Part II  | unsure  | unsure      | unsure        |
-| The Godfather Part III | unsure  | unsure      | unsure        |
-| The Hunt               | solid   | nothing     | unsure        |
-| The Passenger          | solid   | unsure      | solid         |
-| There Will Be Blood    | solid   | solid       | solid         |
-| Zoolander              | solid   | nothing     | unsure        |
+The sidecar lets you check a result before you use it. alass and ffsubsync
+have no verdict, so they are not in the table below. It covers the 27 films
+from the second round.
 
-The three Godfather films are the clearest case. All three failed in normal
-mode for all three tools. LAPSE was the only one that said so first, and the
-only one that left the original alone. `Manchester by the Sea` reported
-`nothing` on the two runs it failed and `solid` on the one it passed.
+<table>
+<thead>
+<tr><th rowspan="2">Film</th><th colspan="3">LAPSE 2.5.0</th><th colspan="3">LAPSE 2.0.0</th></tr>
+<tr><th>Normal</th><th>Split,<br>auto</th><th>Split,<br>forced</th><th>Normal</th><th>Split,<br>auto</th><th>Split,<br>forced</th></tr>
+</thead>
+<tbody>
+<tr><td>Apocalypse Now</td><td>🟢 solid</td><td>🟢 solid</td><td>🟠 unsure</td><td>🟢 solid</td><td>🟠 unsure</td><td>🟠 unsure</td></tr>
+<tr><td>Badlands</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td></tr>
+<tr><td>Barry Lyndon</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td></tr>
+<tr><td>Blue Velvet</td><td>🟢 solid</td><td>⚪ nothing</td><td>🟢 solid</td><td>🟢 solid</td><td>⚪ nothing</td><td>🟢 solid</td></tr>
+<tr><td>Brazil</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>⚪ nothing</td><td>🟢 solid</td></tr>
+<tr><td>Drive</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td></tr>
+<tr><td>Enter the Void</td><td>🟢 solid</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟢 solid</td><td>🟢 solid</td><td>🟠 unsure</td></tr>
+<tr><td>Eraserhead</td><td>🟢 solid</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟢 solid</td><td>🟢 solid</td><td>🟠 unsure</td></tr>
+<tr><td>Ex Machina</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td></tr>
+<tr><td>Eyes Wide Shut</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td></tr>
+<tr><td>Fallen Angels</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td></tr>
+<tr><td>Fargo</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td></tr>
+<tr><td>Hereditary</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td></tr>
+<tr><td>Inland Empire</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td></tr>
+<tr><td>Manchester by the Sea</td><td>⚪ nothing</td><td>⚪ nothing</td><td>🟢 solid</td><td>⚪ nothing</td><td>⚪ nothing</td><td>🟢 solid</td></tr>
+<tr><td>Mulholland Drive</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td></tr>
+<tr><td>No Country for Old Men</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td></tr>
+<tr><td>Possession</td><td>🟢 solid</td><td>🟢 solid</td><td>🟠 unsure</td><td>🟢 solid</td><td>🟢 solid</td><td>🟠 unsure</td></tr>
+<tr><td>Synecdoche, New York</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td></tr>
+<tr><td>The Deer Hunter</td><td>🟢 solid</td><td>🟠 unsure</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟠 unsure</td></tr>
+<tr><td>The Godfather</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td></tr>
+<tr><td>The Godfather Part II</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td></tr>
+<tr><td>The Godfather Part III</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟠 unsure</td></tr>
+<tr><td>The Hunt</td><td>🟢 solid</td><td>🟠 unsure</td><td>🟠 unsure</td><td>🟢 solid</td><td>⚪ nothing</td><td>🟠 unsure</td></tr>
+<tr><td>The Passenger</td><td>🟢 solid</td><td>🟠 unsure</td><td>🟢 solid</td><td>🟢 solid</td><td>🟠 unsure</td><td>🟢 solid</td></tr>
+<tr><td>There Will Be Blood</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td><td>🟢 solid</td></tr>
+<tr><td>Zoolander</td><td>🟢 solid</td><td>🟢 solid</td><td>🟠 unsure</td><td>🟢 solid</td><td>⚪ nothing</td><td>🟠 unsure</td></tr>
+</tbody>
+</table>
+
+The three Godfather films show why this matters. `The Godfather` and `Part II`
+failed in normal mode with every tool. LAPSE was the only tool that warned
+about it, and the only one that left the original file alone.
+`Manchester by the Sea` got `nothing` on the runs it failed and `solid` on the
+run it passed, in both versions.
 
 ## Wrong subtitle
 
 A subtitle for a documentary about Oppenheimer, run against the film
-`Oppenheimer`
+`Oppenheimer`. The right answer is to refuse.
 
-| Tool      | Time   | What it worked out                                          | What happened to the file                                                                                                |
-| --------- | ------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| lapse     | 83.28s | sigma 2.14, verdict `nothing`                               | **Left alone.** Guess written to a sidecar, with the reason that the audio does not back it up                            |
-| alass     | 25.01s | shifted -6:53, ratio 25/23.976, negative timestamps clamped | Overwritten. alass has no confidence measure, so nothing was reported                                                     |
-| ffsubsync | 28.97s | offset +60.000s, ratio 1.042, score -93455                  | Overwritten. The negative score was printed and the exit was marked unsuccessful, but the shifted file was written anyway |
+| Tool | Time | What it found | What happened to the file |
+| ---- | ---: | ------------- | ------------------------- |
+| LAPSE 2.5.0 | 61.47s | sigma 1.87, verdict `nothing` | ✅ **Left alone.** The guess was written to a sidecar, with a note that the audio doesn't back it up. |
+| LAPSE 2.0.0 | 83.28s | sigma 2.14, verdict `nothing` | ✅ **Left alone.** The guess was written to a sidecar, with a note that the audio doesn't back it up. |
+| alass | 25.01s | shift -6:53, ratio 25/23.976, negative timestamps clamped | ❌ Overwritten. alass has no confidence check, so it reported nothing. |
+| ffsubsync | 28.97s | offset +60.000s, ratio 1.042, score -93455 | ❌ Overwritten. It printed the negative score and exited with an error, but still wrote the shifted file. |
 
-ffsubsync 0.5.1 will leave the file alone here if `--skip-sync-on-low-quality`
-is passed. It is off by default, so the row above is the out of the box
-result. LAPSE runs the check by default and there is no flag to remember.
+ffsubsync 0.5.1 leaves the file alone here if you pass
+`--skip-sync-on-low-quality`. That flag is off by default, so the table shows
+what happens with default settings. LAPSE always runs this check, so there is
+no flag to remember.
+
+## Error in milliseconds
+
+The 12 films from the first round were also measured by how far the cues ended
+up from where they should be. Lower is better, and the lowest error in each row
+is in bold.
+
+| Film | Injected | LAPSE 2.5.0 | LAPSE 2.0.0 | alass | ffsubsync |
+| ---- | -------- | ----------: | ----------: | ----: | --------: |
+| 2001: A Space Odyssey | shift +97,000 ms | **17** ✅ | 19 ✅ | 50 ✅ | 34,769 ❌ |
+| Andrei Rublev | shift +15,000 ms | 23 ✅ | 35 ✅ | 168 ✅ | **0** ✅ |
+| Challengers | drift x1.00100 | **41** ✅ | 67 ✅ | 46 ✅ | 160 ✅ |
+| Come and See | shift +97,000 ms | **24,071** ✅ | 24,082 ✅ | ❌ crashed | 33,110 ❌ |
+| Dancer in the Dark | drift x0.99900 | 384,022 ✅ | 384,035 ✅ | 304,591 ✅ | **195,928** ✅ |
+| Requiem for a Dream | shift -33,000 ms | **1,768** ✅ | 2,113 ✅ | 140,672 ❌ | 1,790 ✅ |
+| Saving Private Ryan | drift x1.00100 | **3,487** ✅ | 3,646 ✅ | 3,574 ✅ | 3,525 ✅ |
+| Seven Samurai | drift x1.04167 | 33 ✅ | 60 ✅ | 38 ✅ | **0** ✅ |
+| Stalker | shift +52,500 ms | 101,243 ✅ | 89,302 ❌ | 101,286 ✅ | **0** ❌ |
+| The Seventh Seal | shift +33,000 ms | 31 ✅ | 58 ✅ | 26 ✅ | **0** ✅ |
+| Uncut Gems | shift -33,000 ms | **16,047** ✅ | 16,076 ✅ | 16,105 ✅ | 16,054 ✅ |
+| Whiplash | shift +38,500 ms | **167** ✅ | 266 ✅ | 172 ✅ | 170 ✅ |
+
+The error and the result don't always agree. Some subtitles were already off
+by a lot before anything was added, so a tool can line the file up with the
+audio and still show a large error. On `Stalker`, ffsubsync shows an error of
+zero and still fails, because the rest of the file did not follow.
+
+## Split test in detail
+
+The 12 films from the first round, cut once, with a different offset on each
+side of the cut.
+
+- `clean` means the tool made one cut in the right place.
+- `noisy` means it made one cut in the wrong place.
+- `messy xN` means it made N cuts. Every extra cut is a spot where the
+  subtitle jumps during playback.
+- `set` is the offset the tool applied to each side, in ms.
+- `err` is how far each side ended up from the truth, in ms.
+
+<details>
+<summary><b>Show the split test for all 12 films</b></summary>
+
+| Film | LAPSE 2.5.0 | LAPSE 2.0.0 | alass | ffsubsync |
+| ---- | ----------- | ----------- | ----- | --------- |
+| 2001: A Space Odyssey<br><sub>cut at 00:49:05<br>-33000 / +45000 ms</sub> | ✅ clean @00:59:36<br>set +33056/-44386ms<br>err 56/9ms | ✅ clean @00:59:36<br>set +33070/-44388ms<br>err 70/7ms | ✅ clean @00:59:36<br>set +33050/-45098ms<br>err 50/98ms | ❌ messy x17 @00:27:51<br>err 78000/0ms |
+| Andrei Rublev<br><sub>cut at 00:34:45<br>-45000 / -12000 ms</sub> | ✅ clean @00:35:06<br>set +45021/+12030ms<br>err 21/30ms | ✅ clean @00:35:06<br>set +45026/+12037ms<br>err 26/37ms | ✅ clean @00:34:33<br>set +44932/+11811ms<br>err 68/189ms | ✅ cue mismatch |
+| Challengers<br><sub>cut at 01:20:16<br>-33000 / +33000 ms</sub> | ✅ clean @01:21:52<br>set +33052/-32944ms<br>err 52/56ms | ✅ clean @01:22:08<br>set +33065/-32475ms<br>err 65/69ms | ✅ noisy @01:20:49<br>set +32965/+99099ms<br>err 35/146ms | 🟡 2/3 messy x39<br>err 140/66140ms |
+| Come and See<br><sub>cut at 01:19:39<br>+45000 / -45000 ms</sub> | ✅ noisy @01:21:03<br>err 22096/65264ms | ✅ noisy @00:25:34<br>err 22107/65287ms | ❌ crashed | ❌ messy x20<br>err 22164/63450ms |
+| Dancer in the Dark<br><sub>cut at 00:36:00<br>+33000 / -33000 ms</sub> | ✅ noisy @00:19:56<br>err 395571/329608ms | ✅ noisy @00:19:56<br>err 395597/329597ms | ✅ messy x16<br>err 224691/51282ms | ❌ messy x19<br>err cue mismatch |
+| Requiem for a Dream<br><sub>cut at 00:59:09<br>-45000 / +45000 ms</sub> | ✅ clean @00:59:27<br>set +42941/-49187ms<br>err 2059/4187ms | ✅ noisy @01:03:26<br>err 2063/4198ms | ❌ messy x98<br>err 100143/172055ms | ❌ cue mismatch |
+| Saving Private Ryan<br><sub>cut at 01:07:02<br>+21000 / -33000 ms</sub> | ✅ noisy @01:07:38<br>err 3594/4713ms | ✅ messy x38<br>err 51487/4702ms | ✅ messy x22<br>err 3281/5143ms | ✅ messy x63<br>err 53572/3343ms |
+| Seven Samurai<br><sub>cut at 01:13:31<br>+12000 / -12000 ms</sub> | ✅ clean @01:13:14<br>set -11950/+12043ms<br>err 50/43ms | ✅ clean @01:13:11<br>set -11937/+12054ms<br>err 63/54ms | ❌ clean @01:14:51<br>set -12005/+11927ms<br>err 5/73ms | ❌ clean @01:13:19<br>set -12052/+11943ms<br>err 0/24000ms |
+| Stalker<br><sub>cut at 00:57:14<br>-33000 / +45000 ms</sub> | ✅ messy x6<br>err 101231/81547ms | ✅ messy x102<br>err 214608/81555ms | ✅ messy x101<br>err 165526/74902ms | ❌ messy x63<br>err 81462/1651ms |
+| The Seventh Seal<br><sub>cut at 00:42:55<br>-12000 / -45000 ms</sub> | ✅ clean @00:42:19<br>set +12055/+45041ms<br>err 55/41ms | ✅ clean @00:42:19<br>set +12069/+45046ms<br>err 69/50ms | ✅ clean @00:42:19<br>set +11974/+44828ms<br>err 26/172ms | ✅ noisy @00:42:19<br>set +12000/+44990ms<br>err 32950/50ms |
+| Uncut Gems<br><sub>cut at 00:55:20<br>-33000 / +21000 ms</sub> | ✅ noisy @00:55:41<br>err 16052/17623ms | ✅ messy x15<br>err 13695/17641ms | ✅ messy x16<br>err 13721/17589ms | ❌ messy x113<br>err 40430/17576ms |
+| Whiplash<br><sub>cut at 00:46:09<br>+12000 / -33000 ms</sub> | ✅ clean @00:45:36<br>set -11789/+32786ms<br>err 211/214ms | ✅ noisy @00:45:36<br>err 266/271ms | ✅ clean @00:45:11<br>set -11828/+32932ms<br>err 172/68ms | ✅ messy x8<br>err 45140/140ms |
+
+</details>
+
+One clean cut doesn't always give a usable file. ffsubsync made 63 cuts in
+`Stalker` and 113 in `Uncut Gems`. On `Challengers`, alass found the cut close
+to the right place but moved the second half almost 100 seconds too far.
+
+## What each tool can do
+
+🆕 marks what is new in LAPSE 2.5.0. Everything else was already in 2.0.0.
+
+| Feature | LAPSE 2.5.0 | alass 2.0.0 | ffsubsync 0.5.1 |
+| ------- | ----------- | ----------- | --------------- |
+| Sync against the video's audio | ✅ | ✅ | ✅ |
+| Sync against another subtitle file | ✅ | ✅ | ✅ |
+| Correct framerate drift | ✅ | ✅ | ✅ |
+| Split the file into segments | ✅ | ✅ | ✅ |
+| Decide per file whether to split | ✅ | ✅ | ❌ off unless asked |
+| Pick the split penalty itself | ✅ | ❌ | ❌ set by hand |
+| Report a confidence verdict | ✅ always | ❌ | a score in the log |
+| Leave the file alone when unsure | ✅ by default | ❌ | only with a flag |
+| Keep the input's encoding | ✅ by default | ❌ always UTF-8 | with `--output-encoding same` |
+| Use an embedded subtitle track as reference | ✅ automatic, text, PGS and VobSub | ❌ | with a flag |
+| Reuse the speech profile on the next run | ✅ plus the subtitle track timings 🆕 | ❌ | ❌ |
+| Move a subtitle to another release by sound 🆕 | ✅ `--from` | ❌ | ❌ |
+| Use the video's chapters as split hints 🆕 | ✅ automatic | ❌ | ❌ |
+| Snap lines to picture cuts 🆕 | ✅ `--snap` | ❌ | ❌ |
+| Only trust speech that has words in it 🆕 | ✅ `--whisper` | ❌ | ❌ |
+| Leave credit and advert lines out 🆕 | ✅ automatic | ❌ | ❌ |
+| Drift ratios outside the standard framerate pairs 🆕 | ✅ | ❌ | with `--gss` |
+| Follow the audio when 5.1 drops to stereo 🆕 | ✅ | ❌ | ❌ |
+| Shift or stretch by hand 🆕 | ✅ `--shift` and `--ratio` | ❌ | shift only, `--apply-offset-seconds` |
+| Many files with the model kept loaded 🆕 | ✅ `--batch` | ❌ | ❌ |
+| Limit the number of threads 🆕 | ✅ `--threads` | ❌ | ❌ |
+
+**Splitting.** All three tools can split a file. They differ in who decides
+when to do it. alass runs in split mode by default and decides per file, with
+a fixed penalty of 7 that you have to tune by hand. ffsubsync only splits when
+you pass `--split-penalty` together with a number. LAPSE looks at the file,
+decides if it needs a split, and sets the penalty from what it found.
+
+**Confidence.** alass has no confidence check. ffsubsync prints a score, and
+with `--skip-sync-on-low-quality` it leaves the file alone when the score is
+low. That flag is off by default, so a bad result overwrites the subtitle the
+same way a good one does. LAPSE gives a verdict on every run and only
+overwrites the file when the verdict is `solid`.
+
+**Encoding.** alass always writes UTF-8 and has no option to change it.
+ffsubsync also writes UTF-8 by default, but `--output-encoding same` keeps the
+input's encoding, and you can name any other encoding too. LAPSE keeps the
+input's encoding unless you ask for another one with `--encoding`.
+
+## Subtitle formats
+
+| Format | LAPSE 2.5.0 | alass | ffsubsync 0.5.1 |
+| ------ | :---------: | :---: | :-------------: |
+| `.srt` | ✅ | ✅ | ✅ |
+| `.ass` / `.ssa` | ✅ | ✅ | ✅ |
+| `.vtt` | ✅ | ❌ | ✅ |
+| `.sub` (MicroDVD) | ✅ | ❌ | read only |
+| `.sup` (PGS) | ✅ | ❌ | ❌ |
+| `.idx` (VobSub) | ✅ | reference only | ❌ |
+| `.smi` | ✅ | ❌ | ❌ |
+| `.ttml` / `.dfxp` | ✅ | ❌ | ❌ |
+| `.sbv` | ✅ | ❌ | ❌ |
+| `.mpl2` / MPL2 in `.sub` 🆕 | ✅ | ❌ | ❌ |
+| `.sub` (SubViewer 2) 🆕 | ✅ | ❌ | ❌ |
+| `.itt` (iTunes Timed Text) 🆕 | ✅ | ❌ | ❌ |
+| TTML saved as `.xml` 🆕 | read only | ❌ | ❌ |
+| `.stl` (EBU STL) 🆕 | ✅ | ❌ | ❌ |
+| `.stl` (text STL, DVD Studio Pro / Spruce) 🆕 | ✅ | ❌ | ❌ |
+| `.scc` (Scenarist) 🆕 | ✅ | ❌ | ❌ |
+| Sync a subtitle track embedded in the video | ✅ | ❌ | ❌ |
+
+alass reads `.srt`, `.ssa`/`.ass` and `.idx`, and writes the result in the
+same format it read, so an `.ass` file stays `.ass`. `.idx` only holds timing
+and no text, so alass can only use it as a reference. LAPSE handles it the
+same way.
+
+ffsubsync reads and writes `.ass`, `.ssa` and `.vtt` through pysubs2. It can
+also read MicroDVD `.sub`, but it can't write it, so that output has to be
+saved as `.srt` or an SSA-style format.
+
+Neither alass nor ffsubsync can pull a subtitle track out of the video file. If
+a film only has its subtitle inside the `.mkv`, you have to extract it by hand
+first.
+
+## About the test set
+
+**The films were picked to be hard.** They come from an ordinary home library
+and were chosen for the things that make subtitle syncing difficult: long
+running times, long stretches without dialogue, loud music under the dialogue,
+and films that exist in more than one cut. On top of that, offsets between 12
+and 97 seconds were added, and some files were cut in up to four places.
+
+Keep this in mind when comparing these numbers with what the tools say about
+themselves. alass, for example, says that on random subtitles from
+OpenSubtitles "the percentage of good subtitles is about 88% to 98%". That is
+a fair number for a random sample, and most files in a random sample are easy.
+This set was built to be difficult, so every tool scores lower here than it
+would on a normal library. The interesting part is where the tools fail.
+
+**File types.** `2001: A Space Odyssey`, `Challengers`, `Come and See` and
+`Seven Samurai` are `.mkv` files with embedded subtitles. The other 35 are
+`.mp4`. All subtitles are `.srt`. ffsubsync is much faster on the four `.mkv`
+films than on the rest, so don't compare those four times with the others.
+
+**39 films is a small sample.** Every run in this document was checked by
+hand, film by film, so the marks are right. That takes a lot of time, and it
+is why the test stops at 39 films. Picking hard films helps, but with a set
+this small a few films more or less can move a score by several points. A gap
+of one or two films between two tools may not hold on another set of films.
+The larger gaps are the ones to trust.
+
+**Results will vary.** Other releases, other subtitle uploads and other
+hardware will give different numbers. Look at the overall pattern in the
+tables more than at single figures.
+
+## How the tests were made
+
+The films are ordinary rips. For each one, the most popular subtitle on
+OpenSubtitles for that release was used as the starting point. That is the
+same file anyone downloading a subtitle for it would most likely get.
+
+Two scripts broke the subtitles on purpose:
+
+1. **Normal test.** The first script shifted every cue by the same amount, or
+   stretched the whole file by a framerate ratio.
+2. **Split test.** The second script cut a copy at one or more timestamps and
+   gave each piece its own offset.
+
+Every tool got the same broken file and the same video:
+
+- **LAPSE** ran in its default mode. It works out by itself whether the file is
+  shifted, drifting, split or a mix, and picks its own split penalty. It then
+  ran once more with splitting forced on.
+- **alass** ran with its default settings. Its default is split mode with a
+  penalty of 7, so one run covers both LAPSE columns.
+- **ffsubsync** ran twice. Once with its default settings, where splitting is
+  off, and once with `--split-penalty` so it could split.
+
+A film counts as synced when every cue lands close enough to where it belongs.
+A split file counts as partly synced when at least half of its segments land.
+Less than half counts as not synced.
 
 ## Method notes
 
-Every timing is a single run on one machine with nothing else running. The
-`lapse cached` column is the second run on that film, after the speech
-profile already exists on disk.
-
-The tests ran in two rounds. The first round covers twelve films with
-millisecond error figures and split locations. The second round covers
-twenty seven films with the confidence verdicts. Anything measured for all
-39 films is in the same table.
-
-Versions used: LAPSE 2.0.0, alass 2.0.0, ffsubsync 0.5.1.
+- Every time is a single run on a Mac mini M2 Pro with nothing else running.
+  LAPSE 2.5.0 ran on the same machine as everything else.
+- The cached LAPSE columns are the second run on a film, after the speech
+  profile was already saved to disk.
+- The first round covers twelve films, with error in milliseconds and split
+  locations. The second round covers 27 films, with confidence verdicts.
+  Results measured for all 39 films are kept in the same table.
+- Versions used: LAPSE 2.0.0 and 2.5.0, alass 2.0.0, ffsubsync 0.5.1.

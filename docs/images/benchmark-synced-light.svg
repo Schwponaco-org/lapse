@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="258" viewBox="0 0 880 258" role="img" aria-label="Films synced, out of 39" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif">
+<title>Films synced, out of 39</title>
+<text x="0.0" y="22.0" font-size="17" font-weight="600" text-anchor="start" fill="#1f2328">Films synced, out of 39</text>
+<text x="0.0" y="44.0" font-size="13" font-weight="400" text-anchor="start" fill="#59636e">Higher is better. The same 39 films in every test.</text>
+<rect x="0" y="58" width="12" height="12" rx="2" fill="#2a78d6"/>
+<text x="18.0" y="68.5" font-size="12" font-weight="400" text-anchor="start" fill="#59636e">Synced</text>
+<rect x="82" y="58" width="12" height="12" rx="2" fill="#9ec5f4"/>
+<text x="100.0" y="68.5" font-size="12" font-weight="400" text-anchor="start" fill="#59636e">Partly synced</text>
+<text x="0.0" y="129.5" font-size="13" font-weight="600" text-anchor="start" fill="#1f2328">LAPSE 2.5.0</text>
+<text x="0.0" y="163.5" font-size="13" font-weight="400" text-anchor="start" fill="#1f2328">LAPSE 2.0.0</text>
+<text x="0.0" y="197.5" font-size="13" font-weight="400" text-anchor="start" fill="#1f2328">alass</text>
+<text x="0.0" y="231.5" font-size="13" font-weight="400" text-anchor="start" fill="#1f2328">ffsubsync</text>
+<text x="112.0" y="98.0" font-size="13" font-weight="600" text-anchor="start" fill="#1f2328">Normal file</text>
+<rect x="112.0" y="116" width="191.3" height="18" rx="4" fill="#eff2f5"/>
+<path d="M112.0,116.0 H289.5 Q293.5,116.0 293.5,120.0 V130.0 Q293.5,134.0 289.5,134.0 H112.0 Z" fill="#2a78d6"/>
+<text x="300.5" y="129.5" font-size="13" font-weight="600" text-anchor="start" fill="#1f2328">37</text>
+<rect x="112.0" y="150" width="191.3" height="18" rx="4" fill="#eff2f5"/>
+<path d="M112.0,150.0 H284.6 Q288.6,150.0 288.6,154.0 V164.0 Q288.6,168.0 284.6,168.0 H112.0 Z" fill="#8c959f"/>
+<text x="295.6" y="163.5" font-size="13" font-weight="400" text-anchor="start" fill="#1f2328">36</text>
+<rect x="112.0" y="184" width="191.3" height="18" rx="4" fill="#eff2f5"/>
+<path d="M112.0,184.0 H260.1 Q264.1,184.0 264.1,188.0 V198.0 Q264.1,202.0 260.1,202.0 H112.0 Z" fill="#8c959f"/>
+<text x="271.1" y="197.5" font-size="13" font-weight="400" text-anchor="start" fill="#1f2328">31</text>
+<rect x="112.0" y="218" width="191.3" height="18" rx="4" fill="#eff2f5"/>
+<path d="M112.0,218.0 H269.9 Q273.9,218.0 273.9,222.0 V232.0 Q273.9,236.0 269.9,236.0 H112.0 Z" fill="#8c959f"/>
+<text x="280.9" y="231.5" font-size="13" font-weight="400" text-anchor="start" fill="#1f2328">33</text>
+<line x1="112.0" x2="112.0" y1="110" y2="242" stroke="#d1d9e0" stroke-width="1"/>
+<text x="112.0" y="254.0" font-size="11" font-weight="400" text-anchor="start" fill="#818b98">0</text>
+<text x="303.3" y="254.0" font-size="11" font-weight="400" text-anchor="end" fill="#818b98">39</text>
+<text x="377.3" y="98.0" font-size="13" font-weight="600" text-anchor="start" fill="#1f2328">Split file, tool decides</text>
+<rect x="377.3" y="116" width="191.3" height="18" rx="4" fill="#eff2f5"/>
+<path d="M377.3,116.0 H544.1 Q544.1,116.0 544.1,116.0 V134.0 Q544.1,134.0 544.1,134.0 H377.3 Z" fill="#2a78d6"/>
+<path d="M546.1,116.0 H549.9 Q553.9,116.0 553.9,120.0 V130.0 Q553.9,134.0 549.9,134.0 H546.1 Z" fill="#9ec5f4"/>
+<text x="560.9" y="129.5" font-size="13" font-weight="600" text-anchor="start" fill="#1f2328">34<tspan fill="#59636e" font-weight="400" dx="4">+2</tspan></text>
+<rect x="377.3" y="150" width="191.3" height="18" rx="4" fill="#eff2f5"/>
+<path d="M377.3,150.0 H470.5 Q470.5,150.0 470.5,150.0 V168.0 Q470.5,168.0 470.5,168.0 H377.3 Z" fill="#8c959f"/>
+<path d="M472.5,150.0 H491.1 Q495.1,150.0 495.1,154.0 V164.0 Q495.1,168.0 491.1,168.0 H472.5 Z" fill="#d1d9e0"/>
+<text x="502.1" y="163.5" font-size="13" font-weight="400" text-anchor="start" fill="#1f2328">19<tspan fill="#59636e" font-weight="400" dx="4">+5</tspan></text>
+<rect x="377.3" y="184" width="191.3" height="18" rx="4" fill="#eff2f5"/>
+<text x="385.3" y="197.5" font-size="12" font-weight="400" text-anchor="start" fill="#818b98">n/a</text>
+<rect x="377.3" y="218" width="191.3" height="18" rx="4" fill="#eff2f5"/>
+<text x="385.3" y="231.5" font-size="12" font-weight="400" text-anchor="start" fill="#818b98">n/a</text>
+<line x1="377.3" x2="377.3" y1="110" y2="242" stroke="#d1d9e0" stroke-width="1"/>
+<text x="377.3" y="254.0" font-size="11" font-weight="400" text-anchor="start" fill="#818b98">0</text>
+<text x="568.7" y="254.0" font-size="11" font-weight="400" text-anchor="end" fill="#818b98">39</text>
+<text x="642.7" y="98.0" font-size="13" font-weight="600" text-anchor="start" fill="#1f2328">Split file, splitting on</text>
+<rect x="642.7" y="116" width="191.3" height="18" rx="4" fill="#eff2f5"/>
+<path d="M642.7,116.0 H824.2 Q824.2,116.0 824.2,116.0 V134.0 Q824.2,134.0 824.2,134.0 H642.7 Z" fill="#2a78d6"/>
+<path d="M826.2,116.0 H826.2 Q829.1,116.0 829.1,118.9 V131.1 Q829.1,134.0 826.2,134.0 H826.2 Z" fill="#9ec5f4"/>
+<text x="836.1" y="129.5" font-size="13" font-weight="600" text-anchor="start" fill="#1f2328">37<tspan fill="#59636e" font-weight="400" dx="4">+1</tspan></text>
+<rect x="642.7" y="150" width="191.3" height="18" rx="4" fill="#eff2f5"/>
+<path d="M642.7,150.0 H799.7 Q799.7,150.0 799.7,150.0 V168.0 Q799.7,168.0 799.7,168.0 H642.7 Z" fill="#8c959f"/>
+<path d="M801.7,150.0 H810.4 Q814.4,150.0 814.4,154.0 V164.0 Q814.4,168.0 810.4,168.0 H801.7 Z" fill="#d1d9e0"/>
+<text x="821.4" y="163.5" font-size="13" font-weight="400" text-anchor="start" fill="#1f2328">32<tspan fill="#59636e" font-weight="400" dx="4">+3</tspan></text>
+<rect x="642.7" y="184" width="191.3" height="18" rx="4" fill="#eff2f5"/>
+<path d="M642.7,184.0 H780.0 Q780.0,184.0 780.0,184.0 V202.0 Q780.0,202.0 780.0,202.0 H642.7 Z" fill="#8c959f"/>
+<path d="M782.0,184.0 H782.0 Q784.9,184.0 784.9,186.9 V199.1 Q784.9,202.0 782.0,202.0 H782.0 Z" fill="#d1d9e0"/>
+<text x="791.9" y="197.5" font-size="13" font-weight="400" text-anchor="start" fill="#1f2328">28<tspan fill="#59636e" font-weight="400" dx="4">+1</tspan></text>
+<rect x="642.7" y="218" width="191.3" height="18" rx="4" fill="#eff2f5"/>
+<path d="M642.7,218.0 H731.0 Q731.0,218.0 731.0,218.0 V236.0 Q731.0,236.0 731.0,236.0 H642.7 Z" fill="#8c959f"/>
+<path d="M733.0,218.0 H733.0 Q735.9,218.0 735.9,220.9 V233.1 Q735.9,236.0 733.0,236.0 H733.0 Z" fill="#d1d9e0"/>
+<text x="742.9" y="231.5" font-size="13" font-weight="400" text-anchor="start" fill="#1f2328">18<tspan fill="#59636e" font-weight="400" dx="4">+1</tspan></text>
+<line x1="642.7" x2="642.7" y1="110" y2="242" stroke="#d1d9e0" stroke-width="1"/>
+<text x="642.7" y="254.0" font-size="11" font-weight="400" text-anchor="start" fill="#818b98">0</text>
+<text x="834.0" y="254.0" font-size="11" font-weight="400" text-anchor="end" fill="#818b98">39</text>
+</svg>

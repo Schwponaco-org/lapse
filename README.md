@@ -533,7 +533,7 @@ A file named `.txt`, or with no extension, is opened and read before it is turne
 ## More documentation
 
 - [docs/pipeline-integration.md](docs/pipeline-integration.md) is for running `lapse` from Bazarr, Sonarr, Radarr or any other tool that can run a command when a file arrives.
-- [docs/benchmarks.md](docs/benchmarks.md) has the test against alass and ffsubsync on 39 feature films picked to be hard to sync, with the method and the result for every film. That test was run on LAPSE 2.0.0.
+- [docs/benchmarks.md](docs/benchmarks.md) has the test against alass and ffsubsync on 39 feature films picked to be hard to sync, with the method and the result for every film. It covers LAPSE 2.0.0 and 2.5.0.
 
 ---
 
