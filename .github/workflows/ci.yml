@@ -140,6 +140,8 @@ jobs:
         with:
           path: ort-musl
           key: ort-${{ matrix.name }}-${{ env.ORT_VERSION }}-${{ hashFiles('.github/scripts/fetch-onnxruntime.sh') }}
+          # the source tarball is gone from GitHub too, so keep using the library built before
+          restore-keys: ort-${{ matrix.name }}-${{ env.ORT_VERSION }}-
 
       - name: Build and test inside Alpine
         run: |

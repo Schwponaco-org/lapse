@@ -30,23 +30,25 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
 
-BASE="https://github.com/microsoft/onnxruntime/releases/download/v${VERSION}"
-DIR="onnxruntime-${TARGET}-${VERSION}"
+# the onnxruntime releases on GitHub return 404 now, NuGet has the same libraries
+NUPKG="https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/${VERSION}/microsoft.ml.onnxruntime.${VERSION}.nupkg"
+RID=${TARGET/x86_64/x64}
+RID=${RID/aarch64/arm64}
 
 case "$TARGET" in
     win-*)
-        curl -fsSL --retry 10 --retry-all-errors --retry-delay 30 --connect-timeout 20 -o ort.zip "${BASE}/${DIR}.zip"
+        curl -fsSL --retry 10 --retry-all-errors --retry-delay 30 --connect-timeout 20 -o ort.zip "$NUPKG"
         # MSYS2's unzip has been seen mangling this binary, likely a text mode line
         # ending conversion, so extract it with Windows' own tool instead
         pwsh=powershell.exe
         command -v "$pwsh" > /dev/null 2>&1 || pwsh="/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
         "$pwsh" -NoProfile -Command "Expand-Archive -LiteralPath '$(cygpath -w "$PWD/ort.zip")' -DestinationPath '$(cygpath -w "$PWD")' -Force"
-        cp "${DIR}/lib/onnxruntime.dll" "$DEST/onnxruntime.dll"
+        cp "runtimes/${RID}/native/onnxruntime.dll" "$DEST/onnxruntime.dll"
         ;;
     osx-*)
-        curl -fsSL --retry 10 --retry-all-errors --retry-delay 30 --connect-timeout 20 -o ort.tgz "${BASE}/${DIR}.tgz"
-        tar xf ort.tgz "${DIR}/lib/libonnxruntime.${VERSION}.dylib"
-        cp "${DIR}/lib/libonnxruntime.${VERSION}.dylib" "$DEST/libonnxruntime.dylib"
+        curl -fsSL --retry 10 --retry-all-errors --retry-delay 30 --connect-timeout 20 -o ort.zip "$NUPKG"
+        unzip -q ort.zip "runtimes/${RID}/native/libonnxruntime.dylib"
+        cp "runtimes/${RID}/native/libonnxruntime.dylib" "$DEST/libonnxruntime.dylib"
         ;;
     linux-musl)
         CACHE=${ORT_CACHE:-$WORK/built}
@@ -70,9 +72,9 @@ case "$TARGET" in
         cp "$CACHE/libonnxruntime.so.${VERSION}" "$DEST/libonnxruntime.so"
         ;;
     linux-*)
-        curl -fsSL --retry 10 --retry-all-errors --retry-delay 30 --connect-timeout 20 -o ort.tgz "${BASE}/${DIR}.tgz"
-        tar xf ort.tgz "${DIR}/lib/libonnxruntime.so.${VERSION}"
-        cp "${DIR}/lib/libonnxruntime.so.${VERSION}" "$DEST/libonnxruntime.so"
+        curl -fsSL --retry 10 --retry-all-errors --retry-delay 30 --connect-timeout 20 -o ort.zip "$NUPKG"
+        unzip -q ort.zip "runtimes/${RID}/native/libonnxruntime.so"
+        cp "runtimes/${RID}/native/libonnxruntime.so" "$DEST/libonnxruntime.so"
         ;;
     *)
         echo "Unknown onnxruntime target: $TARGET"
