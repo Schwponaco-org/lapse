@@ -66,6 +66,12 @@ ffmpeg -v error -y -i audio.wav -c:a pcm_s24le audio24.wav
 build audio24.wav deep.mkv      -c:a flac -sample_fmt s32
 ffmpeg -v error -y -i plain.mkv -c:v mpeg4 -c:a mp3 clip.avi
 ffmpeg -v error -y -i aac51.mp4 -c copy -output_ts_offset 3600 -muxdelay 0 late.ts
+# a recording that drops from 5.1 to stereo for the adverts and back
+ffmpeg -v error -y -i audio.wav -t 60 -ar 48000 -af "pan=5.1|FC=c0|FL=0.3*c0|FR=0.3*c0" -c:a ac3 surround.ac3
+ffmpeg -v error -y -ss 60 -t 32 -i audio.wav -ar 48000 -ac 2 -c:a ac3 adverts.ac3
+ffmpeg -v error -y -ss 92 -i audio.wav -ar 48000 -af "pan=5.1|FC=c0|FL=0.3*c0|FR=0.3*c0" -c:a ac3 rest.ac3
+cat surround.ac3 adverts.ac3 rest.ac3 > switching.ac3
+ffmpeg -v error -y -i switching.ac3 -c copy switching.ts
 build concat_audio.wav joined.mkv -c:a flac
 ffmpeg -v error -y -i joined.mkv -i concat_truth.srt -map 0 -map 1 -c copy -c:s srt tracked.mkv
 
@@ -129,6 +135,7 @@ check "opus mono mkv"         mono.mkv   shifted.srt truth.srt
 check "24 bit flac, s32"      deep.mkv   shifted.srt truth.srt
 check "mpeg4 mp3 avi"         clip.avi   shifted.srt truth.srt
 check "mpegts starting at 1h" late.ts    shifted.srt truth.srt
+check "5.1 that drops to stereo" switching.ts shifted.srt truth.srt
 
 echo "== the shift itself"
 check "already correct"       plain.mkv  truth.srt   truth.srt
