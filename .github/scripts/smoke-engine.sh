@@ -332,6 +332,50 @@ if ! cmp -s squeezed.srt reference.srt; then
     fail "--ratio 1.25 did not stretch the file back onto the reference"
 fi
 
+echo "== a subtitle reached through a link is written where the link points"
+mkdir -p real
+cp pristine.srt real/linked.srt
+# Windows without developer mode copies instead of linking, nothing to test there
+if ln -s real/linked.srt linked.srt 2> /dev/null && [ -L linked.srt ]; then
+    run --shift -$SHIFT linked.srt --no-backup
+    if [ ! -L linked.srt ]; then
+        fail "the link was replaced by a file of its own"
+    fi
+    if ! cmp -s real/linked.srt reference.srt; then
+        fail "the file behind the link was not moved"
+    fi
+fi
+
+echo "== a subtitle written over keeps its permissions"
+cp pristine.srt private.srt
+chmod 600 private.srt
+# chmod does not take on Windows, nothing to test there
+if [ "$(ls -l private.srt | cut -c1-10)" = "-rw-------" ]; then
+    run --shift -$SHIFT private.srt --no-backup
+    if [ "$(ls -l private.srt | cut -c1-10)" != "-rw-------" ]; then
+        fail "the subtitle came back as $(ls -l private.srt | cut -c1-10) instead of -rw-------"
+    fi
+fi
+
+# a file size limit stands in for a disk that fills up, Windows has neither
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *)
+        echo "== a disk that fills up leaves the original whole"
+        cp pristine.srt full.srt
+        set +e
+        output=$( (trap '' XFSZ; ulimit -f 1; "$LAPSE" --shift 1000 full.srt --no-backup) 2>&1 )
+        status=$?
+        set -e
+        if [ "$status" = "$SOLID" ]; then
+            fail "a write that ran out of room still came back as done"
+        fi
+        if ! cmp -s full.srt pristine.srt; then
+            fail "the original was cut short by a write that ran out of room"
+        fi
+        ;;
+esac
+
 cd /
 rm -rf "$WORK"
 echo "engine looks good"
