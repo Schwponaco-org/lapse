@@ -1228,7 +1228,8 @@ int run(int argc, const char *argv[]) {
 
         if (flat >= MIN_AGREEING && !(drifts && sloped >= flat + 2) && !look_far()) {
             choice = "shifted";
-        } else if (drifts) {
+        } else if (drifts && (flat < MIN_AGREEING || sloped >= flat + 2)) {
+            // most slices agree on one offset, so a far part explains the slight slope better than a drift
             choice = "drifting";
             seen = 1.0 + drift;
             ratio = snap_ratio(seen);
