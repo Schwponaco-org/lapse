@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y \
     libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
     libfftw3-dev \
     g++ cmake pkg-config git \
-    wget ca-certificates \
+    wget ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -32,19 +32,20 @@ RUN cmake -B build && \
 ARG ORT_VERSION=1.28.0
 ARG SILERO_TAG=v6.2.1
 ARG SILERO_SHA=1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3
+# the onnxruntime releases on GitHub return 404 now, NuGet has the same libraries
 RUN set -eux; \
     case "$(dpkg --print-architecture)" in \
       amd64) ORT_ARCH=x64 ;; \
-      arm64) ORT_ARCH=aarch64 ;; \
+      arm64) ORT_ARCH=arm64 ;; \
       *) ORT_ARCH="" ;; \
     esac; \
     if [ -n "$ORT_ARCH" ]; then \
-      wget -q --tries=10 --waitretry=30 --retry-on-http-error=429,500,502,503,504 -O /tmp/ort.tgz "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}.tgz"; \
-      tar xf /tmp/ort.tgz -C /tmp; \
-      cp /tmp/onnxruntime-linux-${ORT_ARCH}-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION} /libonnxruntime.so; \
+      wget -q --tries=10 --waitretry=30 --retry-on-http-error=429,500,502,503,504 -O /tmp/ort.zip "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/${ORT_VERSION}/microsoft.ml.onnxruntime.${ORT_VERSION}.nupkg"; \
+      unzip -q /tmp/ort.zip "runtimes/linux-${ORT_ARCH}/native/libonnxruntime.so" -d /tmp/ort; \
+      cp /tmp/ort/runtimes/linux-${ORT_ARCH}/native/libonnxruntime.so /libonnxruntime.so; \
       wget -q --tries=10 --waitretry=30 --retry-on-http-error=429,500,502,503,504 -O /silero_vad.onnx "https://github.com/snakers4/silero-vad/raw/${SILERO_TAG}/src/silero_vad/data/silero_vad.onnx"; \
       echo "${SILERO_SHA}  /silero_vad.onnx" | sha256sum -c -; \
-      rm -rf /tmp/ort.tgz /tmp/onnxruntime-linux-*; \
+      rm -rf /tmp/ort.zip /tmp/ort; \
     fi; \
     touch /libonnxruntime.so /silero_vad.onnx
 
