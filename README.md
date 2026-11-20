@@ -402,7 +402,7 @@ What you change in the web interface is saved in the database and wins over the 
 
 ### Syncing for other programs
 
-The web port also takes one subtitle at a time from another program, which is how Bazarr can use LAPSE from its own container. Run it with `SCAN=0` so it never goes through the library by itself, and mount the media at the same path Bazarr sees, read only is enough:
+The web port also takes one subtitle at a time from another program, which is how Bazarr can use LAPSE from its own container, as the [Bazarr guide](docs/bazarr.md) shows. Run it with `SCAN=0` so it never goes through the library by itself, and mount the media at the same path Bazarr sees, read only is enough:
 
 ```yaml
 services:
@@ -580,6 +580,7 @@ A file named `.txt`, or with no extension, is opened and read before it is turne
 ## More documentation
 
 - [docs/pipeline-integration.md](docs/pipeline-integration.md) is for running `lapse` from Bazarr, Sonarr, Radarr or any other tool that can run a command when a file arrives.
+- [docs/bazarr.md](docs/bazarr.md) is a guide to setting up LAPSE as the sync engine in Bazarr, with Docker or without.
 - [docs/benchmarks.md](docs/benchmarks.md) has the test against alass and ffsubsync on 39 feature films picked to be hard to sync, with the method and the result for every film. It covers LAPSE 2.0.0 and 2.5.0.
 
 ---
