@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import bazarr
 import json
 import os
 import queue
@@ -456,6 +457,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.split("?")[0] == "/api/state":
             self.reply(state())
             return
+        if self.path.split("?")[0] == "/api/version":
+            try:
+                self.reply(bazarr.version(config["lapse"]))
+            except Exception as e:
+                self.reply({"error": "could not ask lapse for its version: " + str(e)}, 500)
+            return
         if self.path.split("?")[0] not in ("/", "/index.html"):
             self.reply({"error": "not found"}, 404)
             return
@@ -468,6 +475,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        if self.path.split("?")[0] == "/api/sync":
+            try:
+                bazarr.sync(self, config["lapse"], config["formats"])
+            except bazarr.Refused as e:
+                self.reply({"error": str(e)}, e.code)
+            return
+
         length = int(self.headers.get("Content-Length") or 0)
         try:
             body = json.loads(self.rfile.read(length) or b"{}")

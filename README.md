@@ -400,6 +400,48 @@ What you change in the web interface is saved in the database and wins over the 
 | `WEB` | `1` | Set to `0` to run without the web interface |
 | `WEB_PORT` | `8080` | Port inside the container |
 
+### Syncing for other programs
+
+The web port also takes one subtitle at a time from another program, which is how Bazarr can use LAPSE from its own container. Run it with `SCAN=0` so it never goes through the library by itself, and mount the media at the same path Bazarr sees, read only is enough:
+
+```yaml
+services:
+  lapse:
+    image: ghcr.io/schwponaco-org/lapse:latest
+    restart: always
+    ports:
+      - 8080:8080
+    volumes:
+      - ./data:/data
+      - /mnt/media:/mnt/media:ro
+    environment:
+      - SCAN=0
+      - PUID=1000
+      - PGID=1000
+```
+
+There is no login, so keep the port on your own network. Results are cached under `/data/cache`, like the rest of the container's work.
+
+`GET /api/version` answers `{"version": "2.5.0"}`.
+
+`POST /api/sync` takes a JSON body:
+
+| Field | |
+|---|---|
+| `video` | Path to the video, the same one the caller sees. `null` when `reference` is used |
+| `subtitle`, `filename` | The subtitle as base64, and its file name. The extension says which format it is |
+| `reference`, `reference_filename` | Another subtitle, as base64, to line up against instead of the video. The video is not looked at then |
+| `audio_track`, `sub_track`, `no_embedded` | `--audio-track`, `--sub-track` and `--no-embedded`. Optional |
+
+A body that cannot be used gets `400` and `{"error": "..."}`. A video that is not in the container gets `404` and the same kind of answer. Anything else is `200` with `application/x-ndjson`, one JSON object per line as the sync goes along. When nothing has been sent for a second an empty line is, so skip those. It shows the connection is alive, and it is how a caller that left is noticed:
+
+```
+{"progress": 40, "phase": "Listening to the audio"}
+{"done": {...}, "subtitle": "<base64>"}
+```
+
+`done` is the `--json` line of the sync, and `subtitle` is the result as base64, or `null` when LAPSE did not write one (`unsure`, `nothing`, or too few lines). A sync that failed ends in `{"error": "..."}` instead. If the caller hangs up, the sync is stopped straight away. Nothing is written beside the media or kept after the answer, and several syncs can run at once.
+
 ### Settings
 
 | Variable | Default | What it does |
@@ -409,6 +451,7 @@ What you change in the web interface is saved in the database and wins over the 
 | `PUID` / `PGID` | unset | Run as this user and group |
 | `MODE` | `auto` | `auto`, `nosplit`, `ols` or `split` |
 | `PENALTY` | `6` | Split penalty, only used in split mode |
+| `SCAN` | `1` | Set to `0` to leave the library alone: no scan on start, no watching for new files and no rescans. The container then only answers [requests from other programs](#syncing-for-other-programs). Rescans you ask for in the web interface still run, and cache cleanup still runs every `SCAN_INTERVAL` |
 | `SCAN_INTERVAL` | `900` | Seconds between full rescans. `0` turns them off |
 | `MIN_CONFIDENCE` | `0` | Put the original back when a result stands out less than this, on the same scale as `CONFIDENCE`. `0` keeps everything |
 | `MAX_ATTEMPTS` | `3` | How many times a failing pair is tried before it is left alone |
