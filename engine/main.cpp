@@ -574,6 +574,7 @@ int run(int argc, const char *argv[]) {
     sure_sigma = SURE_SIGMA;
     keep_output_charset();
     set_sub_fps(0);
+    end_moves({});
 
     std::vector<std::string> args;
     std::string output_path;
