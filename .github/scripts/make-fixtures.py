@@ -101,6 +101,11 @@ write_srt("concat_three.srt", [(a + (30000 if a >= 8 * 60 * 1000 else 0) + (2000
                                 b + (30000 if a >= 8 * 60 * 1000 else 0) + (20000 if a >= 16 * 60 * 1000 else 0)) for a, b in jcues])
 # the last three minutes sit twenty minutes out, too short a part for two slices to find
 write_srt("concat_far.srt", [(a + 20 * 60 * 1000, b + 20 * 60 * 1000) if a >= 21 * 60 * 1000 else (a, b) for a, b in jcues])
+# four minutes from six minutes in moved sixteen minutes on, past the end, and the last two minutes gone
+moved = sorted(((a + 16 * 60 * 1000, b + 16 * 60 * 1000), (a, b)) if 6 * 60 * 1000 <= a < 10 * 60 * 1000 else ((a, b), (a, b))
+               for a, b in jcues if a < 22 * 60 * 1000)
+write_srt("concat_moved.srt", [m[0] for m in moved])
+write_srt("concat_moved_truth.srt", [m[1] for m in moved])
 
 # timed for 24 fps and played at 25, with a cut on top of the drift
 RATIO = 25 / 24

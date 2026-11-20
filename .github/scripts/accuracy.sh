@@ -140,6 +140,7 @@ check "a part was cut out"    joined.mkv concat_gap.srt concat_truth.srt
 check "a long part was cut out" joined.mkv concat_long.srt concat_truth.srt
 check "two parts were cut out"  joined.mkv concat_three.srt concat_truth.srt
 check "a short part far out"  joined.mkv concat_far.srt concat_truth.srt split
+check "a part moved far on"   joined.mkv concat_moved.srt concat_moved_truth.srt
 check "subtitle restarts"     joined.mkv concat_ep.srt  concat_truth.srt
 
 echo "== drift with a cut in it"
