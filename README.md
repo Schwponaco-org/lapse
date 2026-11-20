@@ -186,6 +186,7 @@ The options can go anywhere on the line.
 | `--snap [ms]` | Move line starts and ends onto picture cuts close by. Default 120 ms |
 | `--from <video>` | The subtitle fits this video. Move it to the first one by their sound |
 | `--whisper <model>` | Only trust the speech whisper.cpp hears words in |
+| `--threads N` | Listen to the video with at most `N` threads. The default is every core, up to 8 |
 | `--json` | Print one line of JSON on stdout and everything else on stderr |
 | `--quiet` | Print only errors |
 
