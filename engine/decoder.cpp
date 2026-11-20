@@ -748,8 +748,8 @@ static std::vector<int16_t> decode_range(const std::string& path, int stream_ind
                 rate = frame->sample_rate;
                 format = frame->format;
                 swr_free(&swr);
-                swr = open_mix(dec, mix, centre, left, right);
-                if (!swr) swr = open_mix(dec, 1, -1, -1, -1);
+                swr = open_mix(dec, mix, centre, left, right, picked);
+                if (!swr) swr = open_mix(dec, 1, -1, -1, -1, picked);
             }
 
             scratch.clear();
