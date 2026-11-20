@@ -240,6 +240,8 @@ The other exit codes: 2 for a subtitle with fewer than 10 lines to go on (it sti
  "cues":1578,"ignored_cues":1,"parts":1,"snapped":0,"written":true,"unchanged":false,"output":"...","splits":[],"offsets":[22]}
 ```
 
+Set `LAPSE_PROGRESS=1` to get the progress lines on stderr as well, such as `Listening to the audio 40%`.
+
 `mode` says what LAPSE decided the file needed. `ols`, `nosplit` and `split` mean you asked for that mode. Everything under `auto` is what it worked out by itself:
 
 | `mode` | What it found | What moved |
