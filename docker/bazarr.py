@@ -135,9 +135,14 @@ def stderr_lines(child, sock, deadline):
                 yield line.decode("utf-8", "replace").strip()
 
 
-def say(handler, payload):
-    handler.wfile.write(json.dumps(payload).encode() + b"\n")
+# chunked, so clients get every line right away and not when some buffer fills
+def send(handler, data):
+    handler.wfile.write(b"%x\r\n%s\r\n" % (len(data), data))
     handler.wfile.flush()
+
+
+def say(handler, payload):
+    send(handler, json.dumps(payload).encode() + b"\n")
 
 
 def outcome(code, stdout, tail, out):
@@ -166,6 +171,7 @@ def run(handler, command, out):
         handler.send_header("Content-Type", "application/x-ndjson")
         handler.send_header("Cache-Control", "no-cache")
         handler.send_header("Connection", "close")
+        handler.send_header("Transfer-Encoding", "chunked")
         handler.end_headers()
 
         tail = []
@@ -181,13 +187,13 @@ def run(handler, command, out):
                     tail = (tail + [line])[-5:]
                 # an empty line is for the client to skip, and a write that fails tells us it left
                 if time.time() - wrote >= 1:
-                    handler.wfile.write(b"\n")
-                    handler.wfile.flush()
+                    send(handler, b"\n")
                     wrote = time.time()
             stdout = child.stdout.read()
             say(handler, outcome(child.wait(), stdout, tail, out))
         except Slow:
             say(handler, {"error": "lapse took longer than %d seconds" % TIMEOUT})
+        handler.wfile.write(b"0\r\n\r\n")
     except (Gone, OSError):
         pass    # the client left, nobody is listening for an answer
     finally:

@@ -276,6 +276,24 @@ check("progress" in json.loads(line) and lapse_running() == 1, "lapse is still r
 hang_up(conn, answer)
 check(gone_within(2), "lapse was killed when the client left part way through")
 
+print("== lines are not held back")
+try:
+    import requests
+except ImportError:
+    requests = None
+    print("skipped, python requests is not here")
+if requests:
+    # Bazarr reads it like this, and iter_lines waits for 512 bytes on a stream that is not chunked
+    began = time.time()
+    first = None
+    with requests.post(url.geturl() + "/api/sync", data=long_body, stream=True, timeout=60) as answer:
+        for line in answer.iter_lines():
+            if line:
+                first = time.time() - began
+                break
+    check(first is not None and first < 2, "the first progress line came after %s seconds" % (first and round(first, 1)))
+    check(gone_within(2), "lapse was killed when requests closed the answer")
+
 print("== four at once")
 seen_running = []
 stop = threading.Event()
