@@ -60,6 +60,8 @@ Now open Bazarr and go to Settings, Subtitles, Processing, and open **Audio Sync
 
 Press **Test**. Bazarr shows "Connected to LAPSE" and the version when it works. Then save.
 
+If Bazarr uses a proxy, add `lapse` (or the host of your LAPSE URL) to **Ignored Addresses** under Settings, General, Proxy. Otherwise Bazarr cannot reach it.
+
 ### The same path rule
 
 LAPSE has to find the video at the same path that Bazarr uses. Bazarr sends the path, and LAPSE opens that exact path inside its own container.
@@ -109,11 +111,11 @@ If Bazarr is installed directly on Linux, Windows or macOS, run the `lapse` prog
 
    Download the archive. The single `lapse-...` file next to it has no speech model, and LAPSE needs the model for its best results.
 
-2. Check the download. The release has a `SHA256SUMS` file. Put it in the same folder as your download and run:
+2. Check the download. The release has a `SHA256SUMS` file. Put it in the same folder as your download and run this with your own file name:
 
    ```bash
-   sha256sum -c SHA256SUMS --ignore-missing     # Linux
-   shasum -a 256 -c SHA256SUMS --ignore-missing # macOS
+   grep lapse-linux-amd64.tar.gz SHA256SUMS | sha256sum -c       # Linux
+   grep lapse-macos-arm64.tar.gz SHA256SUMS | shasum -a 256 -c       # macOS
    ```
 
    On Windows, run this and compare the result with the line for your file in `SHA256SUMS`:
@@ -122,18 +124,17 @@ If Bazarr is installed directly on Linux, Windows or macOS, run the `lapse` prog
    certutil -hashfile lapse-windows-x64.zip SHA256
    ```
 
-3. Unpack it and keep all the files together in one folder. On Linux and macOS, make sure the program can run:
+3. Unpack it and keep all the files together in one folder. On Linux and macOS, check that it runs:
 
    ```bash
    tar xf lapse-linux-amd64.tar.gz
-   chmod +x lapse-linux-amd64/lapse
    lapse-linux-amd64/lapse --version
    ```
 
 4. Tell Bazarr where it is. In Settings, Subtitles, Processing, **Audio Synchronization**, set **Synchronization Engine** to LAPSE and either:
 
-   - put the unpacked folder on your `PATH` (or a symlink to `lapse` in a folder that is, such as `/usr/local/bin`) and leave **LAPSE Executable Path** empty, or
-   - fill in **LAPSE Executable Path** with the full path, such as `/opt/lapse/lapse` or `C:\lapse\lapse.exe`.
+   - fill in **LAPSE Executable Path** with the full path, such as `/opt/lapse/lapse` or `C:\lapse\lapse.exe`. This always works, or
+   - put the unpacked folder on your `PATH` (or a symlink to `lapse` in a folder that is, such as `/usr/local/bin`) and leave **LAPSE Executable Path** empty. If Bazarr runs as a service (systemd or a Windows service), it can have its own `PATH`, so this may not work there.
 
    Leave **LAPSE URL** empty. Press **Test** to see the version, then save.
 
@@ -143,7 +144,7 @@ Which one Bazarr uses: it uses **LAPSE URL** if you filled it in. If not, it use
 
 LAPSE rates every sync as solid, unsure or nothing. Bazarr only writes the solid ones. With the other two, your subtitle stays exactly as it was, and the reason shows up in Bazarr's log.
 
-A few things stay the same as before:
+Some things to know:
 
 - Bazarr's **score threshold** still decides which subtitles get synced.
 - The ffsubsync offset and quality settings are hidden when LAPSE is the engine. LAPSE checks every sync itself.
@@ -159,16 +160,16 @@ Bazarr's log is under System, Logs. Look for lines that start with `BAZARR LAPSE
 
 **The Test button shows an error.**
 
-- "Could not get the version from ...": Bazarr cannot reach the LAPSE container. Check that the container is running, that the URL is right, and that both are on the same Docker network. If they are not, publish the port as described above.
-- "LAPSE executable not found": the path is wrong, or `lapse` is not on the `PATH`.
-- "Could not run ... --version": the file is there but does not start. Check that it is executable and that it is the right one for your system.
+- "Could not get the version from <url>: ...": Bazarr cannot reach the LAPSE container. Check that the container is running, that the URL is right, and that both are on the same Docker network. If they are not, publish the port as described above.
+- "LAPSE executable not found (...)": the path is wrong, the file is not executable, or `lapse` is not on the `PATH`.
+- "Could not run <path> --version: ...": the file is there but does not start. Check that it is the right one for your system.
 
 **"LAPSE could not find the video" (404).** The same path rule above. Make both containers see the media at the same path.
 
-**"LAPSE is not available, using ffsubsync instead".** Bazarr could not reach LAPSE, or found no `lapse` program. That sync is done by ffsubsync, so nothing is lost. Run the Test button to see why.
+**"LAPSE is not available (...), using ffsubsync instead".** Bazarr could not reach LAPSE, or found no `lapse` program. That sync is done by ffsubsync, so nothing is lost. Run the Test button to see why.
 
-**"LAPSE left these subtitles untouched".** LAPSE was not sure enough to change the subtitle. The reason is in the same line. This is normal for some files.
+**"LAPSE left these subtitles untouched (...)".** LAPSE was not sure enough to change the subtitle. The verdict and the reason are in the brackets. This is normal for some files.
 
-**"LAPSE failed for this subtitle file".** The error after it says what happened. The original subtitle is untouched. The LAPSE container log has more: `docker compose logs lapse`.
+**"LAPSE failed for this subtitle file: ...".** The error after it says what happened. The original subtitle is untouched. The LAPSE container log has more: `docker compose logs lapse`.
 
 For everything about LAPSE itself, see the [main README](../README.md).
