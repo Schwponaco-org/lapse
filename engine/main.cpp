@@ -160,14 +160,21 @@ static bool number(const char* text, double& into) {
 // Listening to a film is the slow part by a mile, so the speech we found gets
 // written down. Every other subtitle track for the same film then starts from
 // the answer instead of decoding the whole thing again
+// a variable set to nothing counts as not set, the way XDG says, or the cache
+// lands in whatever folder we were started from
+static const char* setting(const char* name) {
+    const char* value = std::getenv(name);
+    return (value && *value) ? value : nullptr;
+}
+
 static std::filesystem::path cache_dir() {
-    if (const char* set = std::getenv("LAPSE_CACHE")) return set;
+    if (const char* set = setting("LAPSE_CACHE")) return set;
 #ifdef _WIN32
-    if (const char* local = std::getenv("LOCALAPPDATA")) return std::filesystem::path(local) / "lapse" / "cache";
-    if (const char* profile = std::getenv("USERPROFILE")) return std::filesystem::path(profile) / ".cache" / "lapse";
+    if (const char* local = setting("LOCALAPPDATA")) return std::filesystem::path(local) / "lapse" / "cache";
+    if (const char* profile = setting("USERPROFILE")) return std::filesystem::path(profile) / ".cache" / "lapse";
 #else
-    if (const char* xdg = std::getenv("XDG_CACHE_HOME")) return std::filesystem::path(xdg) / "lapse";
-    if (const char* home = std::getenv("HOME")) return std::filesystem::path(home) / ".cache" / "lapse";
+    if (const char* xdg = setting("XDG_CACHE_HOME")) return std::filesystem::path(xdg) / "lapse";
+    if (const char* home = setting("HOME")) return std::filesystem::path(home) / ".cache" / "lapse";
 #endif
     return std::filesystem::path(".") / ".cache" / "lapse";
 }
