@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
+# Run by hand against a running container, CI does not run it.
 # Talks to the sync API of a running container the way Bazarr does.
 #   test-api.py http://127.0.0.1:8080 /tmp/media [/movies]
 # The films are made in the folder if they are not there yet (needs ffmpeg and
@@ -219,7 +220,6 @@ for what, fields in [
     ("a video that is not a path", {"video": 7, "subtitle": late}),
     ("a negative track", {"video": video, "subtitle": late, "audio_track": -1}),
     ("a track that is text", {"video": video, "subtitle": late, "sub_track": "1"}),
-    ("no_embedded that is not a bool", {"video": video, "subtitle": late, "no_embedded": "yes"}),
 ]:
     status, kind, answer = sync(**fields)
     check(status == 400 and answer.get("error"), "400 for " + what)

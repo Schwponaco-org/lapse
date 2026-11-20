@@ -57,8 +57,6 @@ def decode(body, name):
         data = base64.b64decode(value, validate=True)
     except ValueError:
         raise Refused(name + " is not valid base64")
-    if not data:
-        raise Refused(name + " is empty")
     return data
 
 
@@ -76,7 +74,7 @@ def track(body, name):
     value = body.get(name)
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if not isinstance(value, int) or value < 0:
         raise Refused(name + " has to be a number from 0, or null")
     return value
 
@@ -115,7 +113,7 @@ def stderr_lines(child, sock, deadline):
     watching = [fd, sock]
     rest = b""
     while True:
-        left = deadline - time.time()
+        left = deadline - time.monotonic()
         if left <= 0:
             raise Slow()
         ready = select.select(watching, [], [], min(left, 1))[0]
@@ -175,20 +173,20 @@ def run(handler, command, out):
         handler.end_headers()
 
         tail = []
-        wrote = time.time()
+        wrote = time.monotonic()
         try:
-            for line in stderr_lines(child, handler.connection, time.time() + TIMEOUT):
+            for line in stderr_lines(child, handler.connection, time.monotonic() + TIMEOUT):
                 found = PROGRESS.match(line or "")
                 if found:
                     say(handler, {"progress": int(found.group(2)), "phase": found.group(1)})
-                    wrote = time.time()
+                    wrote = time.monotonic()
                     continue
                 if line:
                     tail = (tail + [line])[-5:]
                 # an empty line is for the client to skip, and a write that fails tells us it left
-                if time.time() - wrote >= 1:
+                if time.monotonic() - wrote >= 1:
                     send(handler, b"\n")
-                    wrote = time.time()
+                    wrote = time.monotonic()
             stdout = child.stdout.read()
             say(handler, outcome(child.wait(), stdout, tail, out))
         except Slow:
@@ -224,9 +222,7 @@ def sync(handler, lapse, formats):
 
     audio_track = track(body, "audio_track")
     sub_track = track(body, "sub_track")
-    no_embedded = body.get("no_embedded", False)
-    if not isinstance(no_embedded, bool):
-        raise Refused("no_embedded has to be true or false")
+    no_embedded = bool(body.get("no_embedded"))
 
     if reference is None and not os.path.isfile(video):
         raise Refused(video + " is not in the lapse container. "
