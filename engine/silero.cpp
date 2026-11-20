@@ -21,6 +21,10 @@
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
     typedef HMODULE library_handle;
+#elif defined(__APPLE__)
+    #include <dlfcn.h>
+    #include <mach-o/dyld.h>
+    typedef void* library_handle;
 #else
     #include <dlfcn.h>
     typedef void* library_handle;
@@ -31,6 +35,7 @@
 #include <filesystem>
 #include <vector>
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 
 static library_handle library = nullptr;
@@ -63,11 +68,17 @@ static std::filesystem::path binary_dir() {
         if (!dir.empty()) return dir;
     }
 #else
-    Dl_info info;
-    if (dladdr((void*)&binary_dir, &info) && info.dli_fname) {
-        std::filesystem::path dir = std::filesystem::path(info.dli_fname).parent_path();
-        if (!dir.empty()) return dir;
-    }
+    // The real file, not argv[0] as typed, so PATH and symlinks find what sits beside it
+    std::error_code ec;
+    std::filesystem::path exe;
+#ifdef __APPLE__
+    char buffer[4096];
+    uint32_t size = sizeof(buffer);
+    if (_NSGetExecutablePath(buffer, &size) == 0) exe = std::filesystem::canonical(buffer, ec);
+#else
+    exe = std::filesystem::canonical("/proc/self/exe", ec);
+#endif
+    if (!ec && !exe.parent_path().empty()) return exe.parent_path();
 #endif
     return std::filesystem::path(".");
 }
