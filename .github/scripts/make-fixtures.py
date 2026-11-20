@@ -106,6 +106,8 @@ moved = sorted(((a + 16 * 60 * 1000, b + 16 * 60 * 1000), (a, b)) if 6 * 60 * 10
                for a, b in jcues if a < 22 * 60 * 1000)
 write_srt("concat_moved.srt", [m[0] for m in moved])
 write_srt("concat_moved_truth.srt", [m[1] for m in moved])
+# the second half sits twenty minutes out, further than a slice looks
+write_srt("concat_far_half.srt", [(a + 20 * 60 * 1000, b + 20 * 60 * 1000) if a >= EP else (a, b) for a, b in jcues])
 
 # timed for 24 fps and played at 25, with a cut on top of the drift
 RATIO = 25 / 24
