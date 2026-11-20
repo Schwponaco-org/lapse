@@ -132,7 +132,7 @@ If Bazarr is installed directly on Linux, Windows or macOS, run the `lapse` prog
 
 4. Tell Bazarr where it is. In Settings, Subtitles, Processing, **Audio Synchronization**, set **Synchronization Engine** to LAPSE and either:
 
-   - put the unpacked folder on your `PATH` and leave **LAPSE Executable Path** empty, or
+   - put the unpacked folder on your `PATH` (or a symlink to `lapse` in a folder that is, such as `/usr/local/bin`) and leave **LAPSE Executable Path** empty, or
    - fill in **LAPSE Executable Path** with the full path, such as `/opt/lapse/lapse` or `C:\lapse\lapse.exe`.
 
    Leave **LAPSE URL** empty. Press **Test** to see the version, then save.
