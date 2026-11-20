@@ -211,6 +211,18 @@ if ! echo "$output" | grep -q '"reference":"none".*"written":false'; then
     fail "expected a json line saying nothing was written"
 fi
 
+echo "== --dry-run writes nothing and says so"
+cp pristine.srt dry.srt
+for how in "reference.srt dry.srt --force" "--shift 500 dry.srt"; do
+    run $how --dry-run --json
+    if ! echo "$output" | grep -q '"written":false'; then
+        fail "$how --dry-run said it wrote the file"
+    fi
+done
+if [ -f dry.srt.bak ] || ! cmp -s dry.srt pristine.srt; then
+    fail "--dry-run touched the file"
+fi
+
 echo "== an existing backup is never overwritten"
 echo "the original" > guarded.srt.bak
 cp pristine.srt guarded.srt

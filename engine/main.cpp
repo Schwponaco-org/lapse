@@ -718,7 +718,7 @@ int run(int argc, const char *argv[]) {
         card.offsets.assign(1, card.offset);
         card.cues = (int)read_subtitle(input_path).size();
         card.verdict = "solid";
-        card.written = true;
+        card.written = !dry_run;
         card.unchanged = card.offset == 0 && output_path == input_path;
         card.output = output_path;
         if (!dry_run && !card.unchanged) {
@@ -1056,7 +1056,7 @@ int run(int argc, const char *argv[]) {
         card.parts = (int)card.splits.size() + 1;
 
         if (!settle(verdict)) { report(card); return 3; }
-        card.written = true;
+        card.written = !dry_run;
 
         std::vector<int> ends;
         card.snapped = snap_cues(cues, cuts, slope, snap_window, offsets, mapping, ends);
@@ -1077,7 +1077,7 @@ int run(int argc, const char *argv[]) {
         card.offsets.assign(1, card.offset);
 
         if (!settle(verdict)) { report(card); return 3; }
-        card.written = true;
+        card.written = !dry_run;
 
         std::vector<int> offsets(1, (int)std::lround(intercept * 1000.0));
         std::vector<int> mapping(cues.size(), 0);
