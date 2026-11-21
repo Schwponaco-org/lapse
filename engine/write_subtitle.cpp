@@ -72,20 +72,41 @@ static std::string load_file(const char* path) {
     return load_text(path, &came_as);
 }
 
-// temp file then rename, so a throw halfway leaves the old file whole
-static void save_file(const char* output_path, const std::string& text) {
-    std::string temp_path = std::string(output_path) + ".tmp";
+// temp file then rename, so a throw halfway leaves the old file whole. A full
+// disk only shows when the file is closed, and renaming what got written by
+// then would leave the subtitle cut short
+static void save_bytes(const char* output_path, const std::string& data) {
+    // a link stays a link, the file it points at is the one that gets written
+    std::error_code ec;
+    std::filesystem::path target = output_path;
+    if (std::filesystem::is_symlink(target, ec)) {
+        std::filesystem::path real = std::filesystem::canonical(target, ec);
+        if (!ec) target = real;
+    }
+
+    std::filesystem::path temp_path = target;
+    temp_path += ".tmp";
     std::ofstream out(temp_path, std::ios::binary);
     if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
+    out.write(data.data(), (std::streamsize)data.size());
+    out.close();
+    if (!out) {
+        std::filesystem::remove(temp_path, ec);
+        throw std::runtime_error("Cannot write subtitle, is the disk full? " + std::string(output_path));
+    }
 
+    // the new file would get the default mode, which opens up a private one
+    std::filesystem::file_status was = std::filesystem::status(target, ec);
+    if (std::filesystem::exists(was)) std::filesystem::permissions(temp_path, was.permissions(), ec);
+    std::filesystem::rename(temp_path, target);
+}
+
+static void save_file(const char* output_path, const std::string& text) {
     std::string wanted = text;
     if (was_asked && came_as == Charset::Legacy && asked_for != Charset::Latin1)
         wanted = make_utf8(wanted);
 
-    std::string bytes = encode(wanted, was_asked ? asked_for : came_as);
-    out.write(bytes.data(), bytes.size());
-    out.close();
-    std::filesystem::rename(temp_path, output_path);
+    save_bytes(output_path, encode(wanted, was_asked ? asked_for : came_as));
 }
 
 static std::string ms_to_ts(int ms, char ms_sep) {
@@ -288,15 +309,6 @@ static void write_sub_lines(const char* input_path, const char* output_path, con
             cue++;
         }
     });
-}
-
-static void save_bytes(const char* output_path, const std::string& data) {
-    std::string temp_path = std::string(output_path) + ".tmp";
-    std::ofstream out(temp_path, std::ios::binary);
-    if (!out) throw std::runtime_error("Cannot write subtitle: " + std::string(output_path));
-    out.write(data.data(), (std::streamsize)data.size());
-    out.close();
-    std::filesystem::rename(temp_path, output_path);
 }
 
 static void write_sup(const char* input_path, const char* output_path, const Shift& shift) {

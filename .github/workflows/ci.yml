@@ -98,6 +98,18 @@ jobs:
             exit 1
           fi
 
+      - name: Check Silero is found through a symlink and through the PATH
+        run: |
+          mkdir -p linkbin && ln -sf "$PWD/stage/lapse" linkbin/lapse
+          for found in "$(linkbin/lapse --vad 2>/dev/null)" \
+                       "$(PATH="$PWD/stage:$PATH" lapse --vad 2>/dev/null)" \
+                       "$(PATH="$PWD/linkbin:$PATH" lapse --vad 2>/dev/null)"; do
+            if [ "$found" != "silero" ]; then
+              echo "Silero was not found when lapse was started by symlink or from the PATH"
+              exit 1
+            fi
+          done
+
       - name: Does it actually sync things correctly
         if: runner.os == 'Linux'
         run: .github/scripts/accuracy.sh stage/lapse
@@ -128,6 +140,8 @@ jobs:
         with:
           path: ort-musl
           key: ort-${{ matrix.name }}-${{ env.ORT_VERSION }}-${{ hashFiles('.github/scripts/fetch-onnxruntime.sh') }}
+          # the source tarball is gone from GitHub too, so keep using the library built before
+          restore-keys: ort-${{ matrix.name }}-${{ env.ORT_VERSION }}-
 
       - name: Build and test inside Alpine
         run: |

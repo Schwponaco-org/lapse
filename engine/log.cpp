@@ -17,6 +17,7 @@
 #include <iostream>
 #include <streambuf>
 #include <mutex>
+#include <cstdlib>
 #ifdef _WIN32
     #include <io.h>
     #define isatty _isatty
@@ -42,6 +43,11 @@ bool on_a_terminal() {
     static bool yes = isatty(fileno(stderr)) != 0;
     return yes;
 }
+
+bool wanted() {
+    const char* set = std::getenv("LAPSE_PROGRESS");
+    return !quiet || (set && *set);
+}
 }
 
 std::ostream& say() {
@@ -54,7 +60,7 @@ std::ostream& say() {
 }
 
 void progress(const char* what, int done, int total) {
-    if (quiet || total <= 0) return;
+    if (!wanted() || total <= 0) return;
     int percent = (int)((long long)done * 100 / total);
 
     std::lock_guard<std::mutex> hold(one_at_a_time);
@@ -70,7 +76,7 @@ void progress(const char* what, int done, int total) {
 void progress_done() {
     std::lock_guard<std::mutex> hold(one_at_a_time);
     last_tenth = -1;
-    if (quiet || !half_a_line) return;
+    if (!wanted() || !half_a_line) return;
     std::cerr << '\n';
     half_a_line = false;
 }

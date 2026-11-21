@@ -58,6 +58,7 @@ static double fps_from_length(const std::string& sub_path, const std::string& ot
     auto [ours, _o] = process_spans(read_subtitle(sub_path));
     auto [theirs, _t] = process_spans(read_subtitle(other_path));
     set_sub_fps(0);
+    set_threads(0);
     if (ours.empty() || theirs.empty()) return 0;
 
     double we_run = ours.back().second - ours.front().first;
@@ -160,14 +161,21 @@ static bool number(const char* text, double& into) {
 // Listening to a film is the slow part by a mile, so the speech we found gets
 // written down. Every other subtitle track for the same film then starts from
 // the answer instead of decoding the whole thing again
+// a variable set to nothing counts as not set, the way XDG says, or the cache
+// lands in whatever folder we were started from
+static const char* setting(const char* name) {
+    const char* value = std::getenv(name);
+    return (value && *value) ? value : nullptr;
+}
+
 static std::filesystem::path cache_dir() {
-    if (const char* set = std::getenv("LAPSE_CACHE")) return set;
+    if (const char* set = setting("LAPSE_CACHE")) return set;
 #ifdef _WIN32
-    if (const char* local = std::getenv("LOCALAPPDATA")) return std::filesystem::path(local) / "lapse" / "cache";
-    if (const char* profile = std::getenv("USERPROFILE")) return std::filesystem::path(profile) / ".cache" / "lapse";
+    if (const char* local = setting("LOCALAPPDATA")) return std::filesystem::path(local) / "lapse" / "cache";
+    if (const char* profile = setting("USERPROFILE")) return std::filesystem::path(profile) / ".cache" / "lapse";
 #else
-    if (const char* xdg = std::getenv("XDG_CACHE_HOME")) return std::filesystem::path(xdg) / "lapse";
-    if (const char* home = std::getenv("HOME")) return std::filesystem::path(home) / ".cache" / "lapse";
+    if (const char* xdg = setting("XDG_CACHE_HOME")) return std::filesystem::path(xdg) / "lapse";
+    if (const char* home = setting("HOME")) return std::filesystem::path(home) / ".cache" / "lapse";
 #endif
     return std::filesystem::path(".") / ".cache" / "lapse";
 }
@@ -239,8 +247,11 @@ static void save_spans(const std::filesystem::path& path, const std::vector<std:
         out << spans[i].first << ' ' << spans[i].second << ' ' << (i < (int)weights.size() ? weights[i] : 1.0f) << '\n';
 
     out.close();
+    // a disk that filled up leaves the list cut short, and a short list would
+    // be read back as all the speech in the film from then on
     std::error_code ec;
-    std::filesystem::rename(partial, path, ec);
+    if (!out) std::filesystem::remove(partial, ec);
+    else std::filesystem::rename(partial, path, ec);
 }
 
 
@@ -261,6 +272,8 @@ static std::vector<int> heard_words(const std::string& video, int stream, const 
     if (!saved.empty() && !words.empty()) {
         std::ofstream out(saved);
         for (int at : words) out << at << '\n';
+        out.close();
+        if (!out) std::filesystem::remove(saved, ec);
     }
     return words;
 }
@@ -457,7 +470,9 @@ static std::string escaped(const std::string& s) {
 
 static void report(const Report& r) {
     if (!as_json && r.mode == "shift") {
-        say() << "Moved every line by " << r.offset << "ms -> " << r.output << '\n';
+        say() << "Moved every line by " << r.offset << "ms";
+        if (r.ratio != 1.0) say() << " and stretched it by " << r.ratio;
+        say() << " -> " << r.output << '\n';
         return;
     }
     if (!as_json) {
@@ -506,18 +521,20 @@ static void report(const Report& r) {
 }
 
 void usage() {
-    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME] [--from video] [--min-shift ms] [--whisper model]\n";
+    std::cerr << "Usage: lapse <video_or_subtitle> [subtitle] [auto|ols|nosplit|split] [penalty] [--output <path>] [--no-backup] [--no-sidecar] [--no-embedded] [--full-scan] [--no-cache] [--force] [--json] [--quiet] [--dry-run] [--strict] [--confidence N] [--audio-track N] [--sub-track N] [--fps N] [--snap [ms]] [--encoding NAME] [--from video] [--min-shift ms] [--whisper model] [--threads N]\n";
     std::cerr << "       --confidence N   how far the answer has to stand out before the original is overwritten (default " << sure_sigma << ")\n";
     std::cerr << "       --encoding NAME  write the result as utf8, utf8-bom, utf16le, utf16be or latin1 instead of whatever came in\n";
     std::cerr << "       --snap [ms]      pull a cue start onto the picture cut it lands next to, within ms (default " << SNAP_WINDOW_MS << ")\n";
     std::cerr << "       --from video     the subtitle is in sync with this video, move it to the first one by their sound\n";
     std::cerr << "       --min-shift ms   leave the file alone when nothing in it would move by this much\n";
     std::cerr << "       --whisper model  only trust speech whisper-cli hears words in, model is a ggml file like ggml-base.en.bin\n";
+    std::cerr << "       --threads N      listen with at most N threads, default every core up to 8\n";
     std::cerr << "       lapse --version\n";
     std::cerr << "       lapse --formats\n";
     std::cerr << "       lapse --vad\n";
     std::cerr << "       lapse --undo <subtitle>\n";
     std::cerr << "       lapse --shift <ms> <subtitle>   move every line by ms, earlier when it is negative\n";
+    std::cerr << "       lapse --shift <ms> --ratio R <subtitle>   stretch every time by R first, so a line at t lands at t * R + ms\n";
     std::cerr << "       lapse --batch   read one job per line from stdin, same arguments as above, one json reply per line\n";
 }
 
@@ -574,6 +591,7 @@ int run(int argc, const char *argv[]) {
     sure_sigma = SURE_SIGMA;
     keep_output_charset();
     set_sub_fps(0);
+    end_moves({});
 
     std::vector<std::string> args;
     std::string output_path;
@@ -593,6 +611,7 @@ int run(int argc, const char *argv[]) {
     std::string whisper_model;
     double fps = 0;
     double shift_ms = 0;
+    double shift_ratio = 1.0;
     bool shifting = false;
 
     for (int i = 1; i < argc; i++) {
@@ -690,11 +709,28 @@ int run(int argc, const char *argv[]) {
                 return -1;
             }
             shifting = true;
+        } else if (arg == "--threads") {
+            double got;
+            if (i + 1 >= argc || !number(argv[++i], got) || got < 1 || got > 64) {
+                std::cerr << "--threads wants a number from 1 to 64\n";
+                return -1;
+            }
+            set_threads((int)got);
+        } else if (arg == "--ratio") {
+            if (i + 1 >= argc || !number(argv[++i], shift_ratio) || shift_ratio < 0.5 || shift_ratio > 2.0) {
+                std::cerr << "--ratio wants a number between 0.5 and 2\n";
+                return -1;
+            }
         } else if (arg == "--force") {
             force = true;
         } else {
             args.push_back(arg);
         }
+    }
+
+    if (shift_ratio != 1.0 && !shifting) {
+        std::cerr << "--ratio goes with --shift\n";
+        return -1;
     }
 
     if (shifting) {
@@ -714,15 +750,16 @@ int run(int argc, const char *argv[]) {
         card.mode = "shift";
         card.reference = "none";
         card.offset = (int)std::lround(shift_ms);
+        card.ratio = shift_ratio;
         card.offsets.assign(1, card.offset);
         card.cues = (int)read_subtitle(input_path).size();
         card.verdict = "solid";
-        card.written = true;
-        card.unchanged = card.offset == 0 && output_path == input_path;
+        card.written = !dry_run;
+        card.unchanged = card.offset == 0 && shift_ratio == 1.0 && output_path == input_path;
         card.output = output_path;
         if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
-            write_subtitle(input_path, output_path, 0, shift_ms / 1000.0);
+            write_subtitle(input_path, output_path, shift_ratio - 1.0, shift_ms / 1000.0);
         }
         report(card);
         return 0;
@@ -974,7 +1011,11 @@ int run(int argc, const char *argv[]) {
         card.sigma = sigma_after(in, offsets, ref_spans, ref_weights, ref_coverage);
         card.agreement = agreement_of(measured, want);
         Verdict verdict = judge(card.sigma, margin, agree_count(measured, want));
-        if (verdict == Verdict::Solid && contradicted(measured, offsets)) verdict = Verdict::Unsure;
+        // a slice only looks MAX_OFFSET_MS either way, so it says nothing against a piece further out than that
+        std::vector<Chunk> able;
+        for (size_t i = 0; i < measured.size(); i++)
+            if (std::abs(want[i]) <= MAX_OFFSET_MS) able.push_back(measured[i]);
+        if (verdict == Verdict::Solid && contradicted(able, offsets)) verdict = Verdict::Unsure;
         return verdict;
     };
 
@@ -1055,7 +1096,7 @@ int run(int argc, const char *argv[]) {
         card.parts = (int)card.splits.size() + 1;
 
         if (!settle(verdict)) { report(card); return 3; }
-        card.written = true;
+        card.written = !dry_run;
 
         std::vector<int> ends;
         card.snapped = snap_cues(cues, cuts, slope, snap_window, offsets, mapping, ends);
@@ -1076,7 +1117,7 @@ int run(int argc, const char *argv[]) {
         card.offsets.assign(1, card.offset);
 
         if (!settle(verdict)) { report(card); return 3; }
-        card.written = true;
+        card.written = !dry_run;
 
         std::vector<int> offsets(1, (int)std::lround(intercept * 1000.0));
         std::vector<int> mapping(cues.size(), 0);
@@ -1180,14 +1221,15 @@ int run(int argc, const char *argv[]) {
         bool drifts = sloped >= MIN_AGREEING + 1 && std::abs(drift) > 1e-5;
         bool distant = second_part(slices, offset);
         auto look_far = [&]() {
-            if (!distant && flat + 2 <= (int)slices.size())
+            if (!distant)
                 distant = second_part(chunk_offsets(spans, ref_spans, ref_weights, 16, ref_coverage, CONCAT_SEARCH_MS), offset);
             return distant;
         };
 
         if (flat >= MIN_AGREEING && !(drifts && sloped >= flat + 2) && !look_far()) {
             choice = "shifted";
-        } else if (drifts) {
+        } else if (drifts && (flat < MIN_AGREEING || sloped >= flat + 2)) {
+            // most slices agree on one offset, so a far part explains the slight slope better than a drift
             choice = "drifting";
             seen = 1.0 + drift;
             ratio = snap_ratio(seen);
@@ -1220,7 +1262,7 @@ int run(int argc, const char *argv[]) {
         card.margin = margin;
         card.sigma = sigma;
 
-        if (choice == "recut") {
+        auto recut = [&]() {
             auto [file_spans, file_mapping] = process_spans(timestamps, true, false);
             double worst_sigma = 99.0;
             std::vector<int> joined = concat_offsets(file_spans, ref_spans, ref_weights, ref_coverage, &worst_sigma);
@@ -1234,7 +1276,13 @@ int run(int argc, const char *argv[]) {
                 card.agreement = backing ? 1.0 : 0.0;
                 return save(joined, file_mapping, judge(worst_sigma, 1.0, backing));
             }
-        }
+
+            card.mode = "auto/recut";
+            std::vector<int> offsets = split_alignment(file_spans, ref_spans, ref_weights, p, offset);
+            return save(offsets, file_mapping, judge_parts(offsets, file_spans, margin, slices));
+        };
+
+        if (choice == "recut") return recut();
 
         auto shifted = [&]() {
             card.mode = "auto/shifted";
@@ -1288,7 +1336,7 @@ int run(int argc, const char *argv[]) {
 
             if (sigma2 < sigma + 1.0) {
                 say() << "auto: the stretch does not beat the single offset, dropping it\n";
-                return shifted();
+                return look_far() ? recut() : shifted();
             }
 
             card.mode = "auto/drifting";
@@ -1308,6 +1356,13 @@ int run(int argc, const char *argv[]) {
 
 
             if (verdict != Verdict::Nothing) {
+                // the slices before the stretch could not see a part sitting far out, so look again now it is undone
+                if (second_part(chunk_offsets(scaled, ref_spans, ref_weights, 16, ref_coverage, CONCAT_SEARCH_MS), shift)) {
+                    say() << "auto: part of the stretched file sits far from the rest, splitting it over the whole range\n";
+                    std::vector<int> offsets = split_alignment(scaled, ref_spans, ref_weights, p, shift);
+                    card.mode = "auto/drifting+recut";
+                    return save(offsets, mapping, judge_parts(offsets, scaled, margin2, after), ratio - 1.0);
+                }
                 std::vector<int> tidied = split_alignment(scaled, ref_spans, ref_weights, p, shift,
                                                           REFINE_WINDOW_MS, REFINE_STEP_MS);
                 if (worth_splitting(tidied, shift)) {
@@ -1321,12 +1376,7 @@ int run(int argc, const char *argv[]) {
             return save_ols(ratio - 1.0, shift / 1000.0, verdict);
         }
 
-        {
-            auto [file_spans, file_mapping] = process_spans(timestamps, true, false);
-            card.mode = "auto/recut";
-            std::vector<int> offsets = split_alignment(file_spans, ref_spans, ref_weights, p, offset);
-            return save(offsets, file_mapping, judge_parts(offsets, file_spans, margin, slices));
-        }
+        return recut();
 
     } else {
         std::cerr << "Unknown mode: " << mode << ". Use auto, ols, nosplit or split.\n";

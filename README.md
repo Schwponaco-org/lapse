@@ -186,6 +186,7 @@ The options can go anywhere on the line.
 | `--snap [ms]` | Move line starts and ends onto picture cuts close by. Default 120 ms |
 | `--from <video>` | The subtitle fits this video. Move it to the first one by their sound |
 | `--whisper <model>` | Only trust the speech whisper.cpp hears words in |
+| `--threads N` | Listen to the video with at most `N` threads. The default is every core, up to 8 |
 | `--json` | Print one line of JSON on stdout and everything else on stderr |
 | `--quiet` | Print only errors |
 
@@ -194,6 +195,7 @@ And a few that do one thing and stop:
 | Command | What it does |
 |---|---|
 | `lapse --shift <ms> <subtitle>` | Move every line by `ms`, earlier when it is negative. No video is needed, and `--output`, `--no-backup`, `--encoding`, `--fps` and `--dry-run` work as usual |
+| `lapse --shift <ms> --ratio <R> <subtitle>` | Stretch every time by `R` and then move it by `ms`, so a line at `t` lands at `t * R + ms`. Two lines you know the right times for give both: `R` is how far apart they should be over how far apart they are, and `ms` is where the first should be minus its time times `R` |
 | `lapse --undo <subtitle>` | Put the `.bak` back and delete it |
 | `lapse --version` | Print the version |
 | `lapse --formats` | List the subtitle extensions this copy reads and writes |
@@ -238,6 +240,8 @@ The other exit codes: 2 for a subtitle with fewer than 10 lines to go on (it sti
  "margin":0.12,"sigma":12.3,"agreement":0.75,"verdict":"solid","coverage":1,
  "cues":1578,"ignored_cues":1,"parts":1,"snapped":0,"written":true,"unchanged":false,"output":"...","splits":[],"offsets":[22]}
 ```
+
+Set `LAPSE_PROGRESS=1` to get the progress lines on stderr as well, such as `Listening to the audio 40%`.
 
 `mode` says what LAPSE decided the file needed. `ols`, `nosplit` and `split` mean you asked for that mode. Everything under `auto` is what it worked out by itself:
 
@@ -396,6 +400,48 @@ What you change in the web interface is saved in the database and wins over the 
 | `WEB` | `1` | Set to `0` to run without the web interface |
 | `WEB_PORT` | `8080` | Port inside the container |
 
+### Syncing for other programs
+
+The web port also takes one subtitle at a time from another program, which is how Bazarr can use LAPSE from its own container, as the [Bazarr guide](docs/bazarr.md) shows. Run it with `SCAN=0` so it never goes through the library by itself, and mount the media at the same path Bazarr sees, read only is enough:
+
+```yaml
+services:
+  lapse:
+    image: ghcr.io/schwponaco-org/lapse:latest
+    restart: always
+    ports:
+      - 8080:8080
+    volumes:
+      - ./data:/data
+      - /mnt/media:/mnt/media:ro
+    environment:
+      - SCAN=0
+      - PUID=1000
+      - PGID=1000
+```
+
+There is no login, so keep the port on your own network. Results are cached under `/data/cache`, like the rest of the container's work.
+
+`GET /api/version` answers `{"version": "2.5.0"}`.
+
+`POST /api/sync` takes a JSON body:
+
+| Field | |
+|---|---|
+| `video` | Path to the video, the same one the caller sees. `null` when `reference` is used |
+| `subtitle`, `filename` | The subtitle as base64, and its file name. The extension says which format it is |
+| `reference`, `reference_filename` | Another subtitle, as base64, to line up against instead of the video. The video is not looked at then |
+| `audio_track`, `sub_track`, `no_embedded` | `--audio-track`, `--sub-track` and `--no-embedded`. Optional |
+
+A body that cannot be used gets `400` and `{"error": "..."}`. A video that is not in the container gets `404` and the same kind of answer. Anything else is `200` with `application/x-ndjson`, one JSON object per line as the sync goes along. When nothing has been sent for a second an empty line is, so skip those. It shows the connection is alive, and it is how a caller that left is noticed:
+
+```
+{"progress": 40, "phase": "Listening to the audio"}
+{"done": {...}, "subtitle": "<base64>"}
+```
+
+`done` is the `--json` line of the sync, and `subtitle` is the result as base64, or `null` when LAPSE did not write one (`unsure`, `nothing`, or too few lines). A sync that failed ends in `{"error": "..."}` instead. If the caller hangs up, the sync is stopped straight away. Nothing is written beside the media or kept after the answer, and several syncs can run at once.
+
 ### Settings
 
 | Variable | Default | What it does |
@@ -405,6 +451,7 @@ What you change in the web interface is saved in the database and wins over the 
 | `PUID` / `PGID` | unset | Run as this user and group |
 | `MODE` | `auto` | `auto`, `nosplit`, `ols` or `split` |
 | `PENALTY` | `6` | Split penalty, only used in split mode |
+| `SCAN` | `1` | Set to `0` to leave the library alone: no scan on start, no watching for new files and no rescans. The container then only answers [requests from other programs](#syncing-for-other-programs). Rescans you ask for in the web interface still run, and cache cleanup still runs every `SCAN_INTERVAL` |
 | `SCAN_INTERVAL` | `900` | Seconds between full rescans. `0` turns them off |
 | `MIN_CONFIDENCE` | `0` | Put the original back when a result stands out less than this, on the same scale as `CONFIDENCE`. `0` keeps everything |
 | `MAX_ATTEMPTS` | `3` | How many times a failing pair is tried before it is left alone |
@@ -533,6 +580,7 @@ A file named `.txt`, or with no extension, is opened and read before it is turne
 ## More documentation
 
 - [docs/pipeline-integration.md](docs/pipeline-integration.md) is for running `lapse` from Bazarr, Sonarr, Radarr or any other tool that can run a command when a file arrives.
+- [docs/bazarr.md](docs/bazarr.md) is a guide to setting up LAPSE as the sync engine in Bazarr, with Docker or without.
 - [docs/benchmarks.md](docs/benchmarks.md) has the test against alass and ffsubsync on 39 feature films picked to be hard to sync, with the method and the result for every film. It covers LAPSE 2.0.0 and 2.5.0.
 
 ---

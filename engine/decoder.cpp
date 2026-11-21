@@ -33,6 +33,16 @@ static const int64_t PROBE_MS = 180000;
 
 static const int64_t PIECE_MS = 180000;
 
+// 0 is every core, up to 8. A box that transcodes as well wants to keep some
+static int wanted_threads = 0;
+
+void set_threads(int n) { wanted_threads = std::max(0, n); }
+
+int worker_threads() {
+    if (wanted_threads > 0) return wanted_threads;
+    return std::clamp((int)std::thread::hardware_concurrency(), 1, 8);
+}
+
 AVFormatContext* open_file(const char* filename) {
         AVFormatContext *pFormatContext = avformat_alloc_context();
     if (!pFormatContext) {
@@ -154,7 +164,7 @@ AVCodecContext* open_audio_decoder(const AVFormatContext* pFormatContext, int au
     }
     // This to get value from AVCodecParameters to the AVCodecContext so avcodec_open2 can work with it
     avcodec_parameters_to_context(dec_ctx, pFormatContext->streams[audio_stream_index]->codecpar);
-    dec_ctx->thread_count = 0;   // let ffmpeg use every core it wants
+    dec_ctx->thread_count = wanted_threads ? 1 : 0;   // 0 lets ffmpeg take every core, a counted crew gets one each
 
     int ret = avcodec_open2(dec_ctx, NULL, NULL);
     if (ret < 0) {
@@ -621,10 +631,23 @@ static std::vector<float> analyse(const std::vector<int16_t>& pcm, bool silero) 
 }
 
 
-static SwrContext* open_mix(const AVCodecContext* dec, int kind, int centre, int left, int right) {
+// swr resamples every channel it is handed before it mixes them, so the centre
+// or the front pair go in on their own. picked has to outlive the context
+static SwrContext* open_mix(const AVCodecContext* dec, int kind, int centre, int left, int right, int* picked) {
     AVChannelLayout mono = AV_CHANNEL_LAYOUT_MONO;
     AVChannelLayout in = dec->ch_layout;
     if (in.nb_channels <= 0) return nullptr;
+
+    int used = (kind == 0) ? 1 : 2;
+    picked[0] = (kind == 0) ? centre : left;
+    picked[1] = right;
+    if (kind != 1) {
+        for (int i = 0; i < used; i++)
+            if (picked[i] < 0 || picked[i] >= in.nb_channels) return nullptr;
+        // only the count, or FFmpeg 5 warns that the layout does not match the channels used
+        in.order = AV_CHANNEL_ORDER_UNSPEC;
+        in.u.mask = 0;
+    }
 
     SwrContext* swr = nullptr;
     if (swr_alloc_set_opts2(&swr, &mono, AV_SAMPLE_FMT_S16, RATE,
@@ -635,17 +658,14 @@ static SwrContext* open_mix(const AVCodecContext* dec, int kind, int centre, int
     av_opt_set_int(swr, "phase_shift", 8, 0);
 
     if (kind != 1) {
+        AVChannelLayout layout;
+        av_channel_layout_default(&layout, used);
         std::vector<double> matrix(in.nb_channels, 0.0);
-        if (kind == 0 && centre >= 0 && centre < in.nb_channels) {
-            matrix[centre] = 1.0;
-        } else if (kind == 2 && left >= 0 && right >= 0 && left < in.nb_channels && right < in.nb_channels) {
-            matrix[left] = 0.5;
-            matrix[right] = 0.5;
-        } else {
-            swr_free(&swr);
-            return nullptr;
-        }
-        if (swr_set_matrix(swr, matrix.data(), in.nb_channels) < 0) {
+        for (int i = 0; i < used; i++) matrix[i] = 1.0 / used;
+
+        // uch is what FFmpeg 5 calls uchl
+        bool set = av_opt_set_chlayout(swr, "uchl", &layout, 0) >= 0 || av_opt_set_int(swr, "uch", used, 0) >= 0;
+        if (!set || swr_set_channel_mapping(swr, picked) < 0 || swr_set_matrix(swr, matrix.data(), in.nb_channels) < 0) {
             swr_free(&swr);
             return nullptr;
         }
@@ -684,7 +704,8 @@ static std::vector<int16_t> decode_range(const std::string& path, int stream_ind
     AVCodecContext* dec = open_audio_decoder(fmt, stream_index);
     if (!dec) { avformat_close_input(&fmt); return pcm; }
 
-    SwrContext* swr = open_mix(dec, mix, centre, left, right);
+    int picked[2];
+    SwrContext* swr = open_mix(dec, mix, centre, left, right, picked);
     if (!swr) { avcodec_free_context(&dec); avformat_close_input(&fmt); return pcm; }
 
     keep_only(fmt, stream_index);
@@ -707,6 +728,7 @@ static std::vector<int16_t> decode_range(const std::string& path, int stream_ind
     std::vector<int16_t> scratch;
     bool started = false;
     bool done = false;
+    int channels = dec->ch_layout.nb_channels, rate = dec->sample_rate, format = dec->sample_fmt;
 
     auto drain = [&]() {
         while (!done) {
@@ -718,6 +740,17 @@ static std::vector<int16_t> decode_range(const std::string& path, int stream_ind
                       : (double)av_rescale_q(pts, tb, millis) - base;
 
             if (at >= 0 && at >= (double)to_ms) { done = true; av_frame_unref(frame); break; }
+
+            // a TV recording drops from 5.1 to stereo for the adverts, and swr
+            // would go on reading channels the frame no longer has
+            if (frame->ch_layout.nb_channels != channels || frame->sample_rate != rate || frame->format != format) {
+                channels = frame->ch_layout.nb_channels;
+                rate = frame->sample_rate;
+                format = frame->format;
+                swr_free(&swr);
+                swr = open_mix(dec, mix, centre, left, right, picked);
+                if (!swr) swr = open_mix(dec, 1, -1, -1, -1, picked);
+            }
 
             scratch.clear();
             pour(swr, frame, scratch);
@@ -808,7 +841,7 @@ std::vector<float> speech_profile(AVFormatContext* fmt, AVCodecContext* dec_ctx,
         int64_t probe_at = (int64_t)(duration_ms * 0.35);
         std::vector<double> scores(mixes.size(), 0.0);
         std::vector<std::thread> probes;
-        for (size_t m = 0; m < mixes.size(); m++)
+        for (size_t m = 0; m < mixes.size(); m++) {
             probes.emplace_back([&, m]() {
                 std::vector<int16_t> part = decode_range(path, audio_stream_index, mixes[m], centre, left, right,
                                                          probe_at, probe_at + PROBE_MS);
@@ -816,7 +849,10 @@ std::vector<float> speech_profile(AVFormatContext* fmt, AVCodecContext* dec_ctx,
                 if (got.empty() && silero) got = analyse(part, false);
                 scores[m] = profile_score(got);
             });
-        for (auto& t : probes) t.join();
+            if ((int)probes.size() < worker_threads() && m + 1 < mixes.size()) continue;
+            for (auto& t : probes) t.join();
+            probes.clear();
+        }
 
         double best = -1;
         for (size_t m = 0; m < mixes.size(); m++) {
@@ -829,10 +865,7 @@ std::vector<float> speech_profile(AVFormatContext* fmt, AVCodecContext* dec_ctx,
     int pieces = (int)(((int64_t)duration_ms + PIECE_MS - 1) / PIECE_MS);
     if (pieces < 1) pieces = 1;
 
-    int hands = (int)std::thread::hardware_concurrency();
-    if (hands < 1) hands = 1;
-    if (hands > 8) hands = 8;
-    if (hands > pieces) hands = pieces;
+    int hands = std::min(worker_threads(), pieces);
 
     auto ends_at = [&](int j) {
         if (j < pieces - 1) return (j + 1) * PIECE_MS;

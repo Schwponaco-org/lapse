@@ -14,6 +14,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 #include "transcribe.h"
+#include "decoder.h"
 #include "log.h"
 
 #include <chrono>
@@ -49,7 +50,7 @@ std::vector<int> spoken_words(const std::string& wav, const std::string& model) 
     }
 
     const char* cli = std::getenv("LAPSE_WHISPER_CLI");
-    int threads = std::clamp((int)std::thread::hardware_concurrency(), 1, 8);
+    int threads = worker_threads();
     std::string out = (std::filesystem::temp_directory_path() /
         ("lapse-words-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))).string();
 

@@ -44,6 +44,7 @@ CACHE_DAYS     = int(os.environ.get("CACHE_DAYS", "30"))
 CACHE_DIR      = os.environ.get("LAPSE_CACHE") or os.path.join(os.path.dirname(DB_PATH) or ".", "cache")
 WEB            = os.environ.get("WEB", "1") == "1"
 WEB_PORT       = int(os.environ.get("WEB_PORT", "8080"))
+SCAN           = os.environ.get("SCAN", "1") == "1"
 
 MEDIA_ROOTS = [p.strip() for p in MEDIA_ROOT.split(",") if p.strip()]
 
@@ -835,7 +836,7 @@ def main():
     print("Engine reads:", " ".join(sorted(ENGINE_FORMATS)))
     print("Library:", ", ".join(MEDIA_ROOTS))
 
-    observer = start_watching()
+    observer = start_watching() if SCAN else None
 
     server = None
     if WEB:
@@ -846,14 +847,18 @@ def main():
         except OSError as e:
             print("Could not open the web interface:", e)
 
-    for root in MEDIA_ROOTS:
-        if not os.path.isdir(root):
-            print("Not mounted, nothing to scan there:", root)
-            continue
-        run_scan(conn, root, verbose=True)
+    if SCAN:
+        for root in MEDIA_ROOTS:
+            if not os.path.isdir(root):
+                print("Not mounted, nothing to scan there:", root)
+                continue
+            run_scan(conn, root, verbose=True)
     last_scan = time.time()
 
-    print("Watching for new files...")
+    if SCAN:
+        print("Watching for new files...")
+    else:
+        print("SCAN=0, not looking through the library, only answering requests")
     while running:
         if paused(conn):
             settle(5)
@@ -866,8 +871,9 @@ def main():
 
         interval = int(setting(conn, "scan_interval", SCAN_INTERVAL))
         if running and interval and time.time() - last_scan > interval:
-            for root in MEDIA_ROOTS:
-                run_scan(conn, root)
+            if SCAN:
+                for root in MEDIA_ROOTS:
+                    run_scan(conn, root)
             prune_cache()
             last_scan = time.time()
 

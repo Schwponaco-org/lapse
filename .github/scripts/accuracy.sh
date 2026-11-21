@@ -66,6 +66,12 @@ ffmpeg -v error -y -i audio.wav -c:a pcm_s24le audio24.wav
 build audio24.wav deep.mkv      -c:a flac -sample_fmt s32
 ffmpeg -v error -y -i plain.mkv -c:v mpeg4 -c:a mp3 clip.avi
 ffmpeg -v error -y -i aac51.mp4 -c copy -output_ts_offset 3600 -muxdelay 0 late.ts
+# a recording that drops from 5.1 to stereo for the adverts and back
+ffmpeg -v error -y -i audio.wav -t 60 -ar 48000 -af "pan=5.1|FC=c0|FL=0.3*c0|FR=0.3*c0" -c:a ac3 surround.ac3
+ffmpeg -v error -y -ss 60 -t 32 -i audio.wav -ar 48000 -ac 2 -c:a ac3 adverts.ac3
+ffmpeg -v error -y -ss 92 -i audio.wav -ar 48000 -af "pan=5.1|FC=c0|FL=0.3*c0|FR=0.3*c0" -c:a ac3 rest.ac3
+cat surround.ac3 adverts.ac3 rest.ac3 > switching.ac3
+ffmpeg -v error -y -i switching.ac3 -c copy switching.ts
 build concat_audio.wav joined.mkv -c:a flac
 ffmpeg -v error -y -i joined.mkv -i concat_truth.srt -map 0 -map 1 -c copy -c:s srt tracked.mkv
 
@@ -129,6 +135,7 @@ check "opus mono mkv"         mono.mkv   shifted.srt truth.srt
 check "24 bit flac, s32"      deep.mkv   shifted.srt truth.srt
 check "mpeg4 mp3 avi"         clip.avi   shifted.srt truth.srt
 check "mpegts starting at 1h" late.ts    shifted.srt truth.srt
+check "5.1 that drops to stereo" switching.ts shifted.srt truth.srt
 
 echo "== the shift itself"
 check "already correct"       plain.mkv  truth.srt   truth.srt
@@ -140,6 +147,8 @@ check "a part was cut out"    joined.mkv concat_gap.srt concat_truth.srt
 check "a long part was cut out" joined.mkv concat_long.srt concat_truth.srt
 check "two parts were cut out"  joined.mkv concat_three.srt concat_truth.srt
 check "a short part far out"  joined.mkv concat_far.srt concat_truth.srt split
+check "a part moved far on"   joined.mkv concat_moved.srt concat_moved_truth.srt
+check "a long part far out"   joined.mkv concat_far_half.srt concat_truth.srt split
 check "subtitle restarts"     joined.mkv concat_ep.srt  concat_truth.srt
 
 echo "== drift with a cut in it"
@@ -149,6 +158,7 @@ check "drift and a long cut"  joined.mkv drift_long.srt concat_truth.srt
 echo "== modes"
 check "nosplit"               plain.mkv  shifted.srt truth.srt nosplit
 check "split"                 plain.mkv  shifted.srt truth.srt split
+check "on one thread"         aac51.mp4  shifted.srt truth.srt --threads 1
 
 echo "== a VobSub against a subtitle"
 cp vobsub.idx work.idx
@@ -177,6 +187,16 @@ else
     fails=$((fails + 1))
 fi
 
+# a file size limit stands in for a disk that fills up while the cache is written
+rm -rf "$LAPSE_CACHE"
+(trap '' XFSZ; ulimit -f 1; "$LAPSE" joined.mkv concat_gap.srt --dry-run --no-embedded > /dev/null 2>&1) || true
+if ls "$LAPSE_CACHE" | grep -q '\.spans$'; then
+    echo "  a cache cut short is dropped FAIL it was kept, $(wc -c < "$LAPSE_CACHE"/*.spans) bytes"
+    fails=$((fails + 1))
+else
+    echo "  a cache cut short is dropped ok"
+fi
+
 rm -rf "$LAPSE_CACHE"
 first=$("$LAPSE" tracked.mkv concat_gap.srt --dry-run --json 2> /dev/null || true)
 again=$("$LAPSE" tracked.mkv concat_gap.srt --dry-run 2>&1 || true)
@@ -187,6 +207,22 @@ elif echo "$again" | grep -q "Reusing the subtitle track"; then
     echo "  track timings are reused     ok"
 else
     echo "  track timings are reused     FAIL second run read the track again"
+    fails=$((fails + 1))
+fi
+
+echo "== batch mode"
+# keyframes at uneven times read as picture cuts, so --snap moves the ends of lines
+cuts=$(python3 -c "import random; random.seed(1); t = [round(1 + i * 1.6 + random.random(), 1) for i in range(90)]; print(','.join(map(str, t)))")
+build audio.wav cut.mkv -c:a flac -g 1000 -sc_threshold 0 -force_key_frames "$cuts"
+cp shifted.srt work.srt
+replies=$(printf 'cut.mkv work.srt --snap 1000 --force --no-backup --no-embedded\n--shift 0 truth.srt --output moved.srt\n' | "$LAPSE" --batch 2> /dev/null || true)
+if ! echo "$replies" | grep -q '"snapped":[1-9]'; then
+    echo "  snapping in a batch          FAIL nothing was snapped to the cuts"
+    fails=$((fails + 1))
+elif cmp -s truth.srt moved.srt; then
+    echo "  jobs keep to themselves      ok"
+else
+    echo "  jobs keep to themselves      FAIL --shift 0 moved the ends --snap set in the job before"
     fails=$((fails + 1))
 fi
 
