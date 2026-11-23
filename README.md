@@ -16,15 +16,16 @@ The browser version is experimental. It is the same engine built for WebAssembly
 
 ## How it compares
 
-LAPSE 2.5.0 was tested against alass and ffsubsync on 39 feature films that were picked because they are hard to sync.
+LAPSE 2.5.0 was tested against alass and ffsubsync on 39 feature films that were picked because they are hard to sync. The table shows films synced out of 39. Partial means some segments of a split file landed and some did not.
 
-| Films synced out of 39 | LAPSE 2.5.0 | alass | ffsubsync |
-|---|:---:|:---:|:---:|
-| Shifted or drifting subtitle | **37** | 31 | 33 |
-| Subtitle cut in several places, splitting turned on | **37** | 28 | 18 |
-| Time for a first run on all 39 films | **373 s** | 514 s | 656 s |
+| Test | LAPSE 2.5.0 | alass | ffsubsync |
+| ---- | :---------: | :---: | :-------: |
+| Normal file (shift or drift) | **37** | 31 | 33 |
+| Split file, the tool decides by itself | **34** +2 partial | n/a | n/a |
+| Split file, splitting turned on | **37** +1 partial | 28 +1 partial | 18 +1 partial |
+| First run, all 39 films | **373.3s** | 514.1s | 656.3s |
 
-LAPSE also synced 34 of the cut files when it had to find the cuts by itself. The full results are in [docs/benchmarks.md](docs/benchmarks.md).
+The full results are in [docs/benchmarks.md](docs/benchmarks.md).
 
 ---
 
