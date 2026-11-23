@@ -79,7 +79,10 @@ def make_media():
     work = tempfile.mkdtemp()
     run("espeak-ng", "-w", work + "/spoken.wav", "-s", "150",
         "The quick brown fox jumps over the lazy dog near the river bank.")
-    run("ffmpeg", "-y", "-i", work + "/spoken.wav", "-ar", "16000", "-ac", "1", work + "/line.wav")
+    # cut the silence off both ends like accuracy.sh does, or the cues run on past the speech
+    trim = "silenceremove=start_periods=1:start_threshold=-40dB:detection=peak"
+    run("ffmpeg", "-y", "-i", work + "/spoken.wav", "-ar", "16000", "-ac", "1",
+        "-af", "%s,areverse,%s,areverse" % (trim, trim), work + "/line.wav")
     spoken = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
                              work + "/line.wav"], capture_output=True, text=True, check=True).stdout
     length = int(float(spoken) * 1000)
