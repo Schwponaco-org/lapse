@@ -34,7 +34,6 @@ The full results are in [docs/benchmarks.md](docs/benchmarks.md).
 - **[Jellyfin plugin](https://github.com/Schwponaco-org/lapse-jellyfin-plugin).** Syncs subtitles from inside Jellyfin, by hand or for a whole library on a schedule.
 - **[Docker](#docker).** Watches your media library, pairs every subtitle with its video and keeps them in sync. It has a web page where you can see and undo what it did.
 - **[AutoSubSync](https://github.com/denizsafak/AutoSubSync).** A desktop app for Windows, macOS and Linux. Drop in a video and a subtitle and pick lapse as the sync tool. It downloads LAPSE and keeps it up to date for you.
-- **[Bazarr](docs/bazarr.md).** Bazarr can use LAPSE to sync the subtitles it downloads.
 - **The `lapse` program.** Run it on one file, or on a whole list of them. See [Install](#install) and [Quick start](#quick-start).
 - **[Terminal interface](https://github.com/Schwponaco-org/lapse-tui).** Runs the `lapse` you have installed, for a server over ssh. Linux and macOS.
 
@@ -168,7 +167,6 @@ Sound effects in brackets, music notes and the credit lines subtitle sites add a
 | [Docker](docs/docker.md) | The web interface, all settings, translation and how files are paired |
 | [Subtitle formats](docs/formats.md) | Every format LAPSE reads and writes |
 | [Using LAPSE in your own program](docs/integration.md) | Calling `lapse` from a script or an app, or over HTTP |
-| [Bazarr](docs/bazarr.md) | Setting up LAPSE as the sync tool in Bazarr |
 | [How it works](docs/how-it-works.md) | What LAPSE does with the sound and the subtitle |
 | [Building](docs/building.md) | Building from source |
 | [Benchmarks](docs/benchmarks.md) | LAPSE against alass and ffsubsync on 39 hard films |

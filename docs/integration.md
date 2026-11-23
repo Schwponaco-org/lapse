@@ -1,6 +1,6 @@
 # Using LAPSE in your own program
 
-This page is for people who want to call LAPSE from a script, an app or a media tool. The Jellyfin plugin, AutoSubSync and the Bazarr integration all work this way.
+This page is for people who want to call LAPSE from a script, an app or a media tool. The Jellyfin plugin and AutoSubSync both work this way.
 
 There are two ways to do it:
 
@@ -109,7 +109,7 @@ The full list is in [docs/command-line.md](command-line.md).
 
 ## Over HTTP
 
-The Docker image can take one subtitle at a time over HTTP. You send the subtitle and the path to the video, and you get the synced subtitle back. Nothing is written next to your media. This is how Bazarr uses LAPSE.
+The Docker image can take one subtitle at a time over HTTP. You send the subtitle and the path to the video, and you get the synced subtitle back. Nothing is written next to your media.
 
 How to set up the container for it, and the full request and answer, are in [docs/docker.md](docker.md#syncing-for-other-programs).
 

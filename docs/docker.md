@@ -37,7 +37,7 @@ What you change in the web interface is saved in the database and wins over the 
 
 ## Syncing for other programs
 
-The web port also takes one subtitle at a time from another program, which is how Bazarr can use LAPSE from its own container, as the [Bazarr guide](bazarr.md) shows. Run it with `SCAN=0` so it never goes through the library by itself, and mount the media at the same path Bazarr sees, read only is enough:
+The web port also takes one subtitle at a time from another program running in its own container. Run it with `SCAN=0` so it never goes through the library by itself, and mount the media at the same path the other program sees, read only is enough:
 
 ```yaml
 services:
