@@ -110,7 +110,7 @@ int parse_timestamp(const std::string& line, size_t from) {
         parts.pop_back();
         if (digits == 2) frac *= 10;
         else if (digits == 1) frac *= 100;
-        else for (int d = digits; d > 3; d--) frac /= 10;
+        else for (int d = std::min(digits, 9); d > 3; d--) frac /= 10;
     }
 
     if (parts.size() < 2 || parts.size() > 3) return -1;
@@ -131,6 +131,8 @@ bool sub_frames(const std::string& line, long long& a, long long& b, size_t& tex
     if (one == std::string::npos || one + 1 >= line.size() || line[one + 1] != '{') return false;
     size_t two = line.find('}', one + 2);
     if (two == std::string::npos) return false;
+
+    if (one == 1 || two == one + 2) return false;
 
     a = atoll(line.substr(1, one - 1).c_str());
     b = atoll(line.substr(one + 2, two - one - 2).c_str());
@@ -163,7 +165,9 @@ double sub_fps(const std::string& text) {
         long long a, b;
         size_t text_from;
         if (!sub_frames(line, a, b, text_from)) break;
-        double fps = atof(trim(line.substr(text_from)).c_str());
+        std::string rate = trim(line.substr(text_from));
+        std::replace(rate.begin(), rate.end(), ',', '.');
+        double fps = atof(rate.c_str());
         if (a <= 1 && b <= 1 && fps >= 10 && fps <= 120) return fps;
         break;
     }
@@ -172,7 +176,7 @@ double sub_fps(const std::string& text) {
 
 int frames_to_ms(long long frame, double fps) {
     if (frame < 0 || fps <= 0) return -1;
-    long long ms = (long long)(frame * 1000.0 / fps + 0.5);
+    double ms = frame * 1000.0 / fps + 0.5;
     if (ms > MAX_TIME_MS) return -1;
     return (int)ms;
 }
@@ -180,6 +184,16 @@ int frames_to_ms(long long frame, double fps) {
 // What the first few hundred lines give away. Only the shapes nothing else
 // shares, since the point is a file that was named wrong and getting it wrong
 // twice would be worse than not trying
+static bool ttml_root(const std::string& line) {
+    for (std::string tag : {"<tt", "<tt:tt"}) {
+        for (size_t at = line.find(tag); at != std::string::npos; at = line.find(tag, at + 1)) {
+            size_t after = at + tag.size();
+            if (after == line.size() || isspace((unsigned char)line[after]) || line[after] == '>') return true;
+        }
+    }
+    return false;
+}
+
 static std::string looks_like(const std::string& text) {
     std::istringstream ss(text);
     std::string line;
@@ -193,7 +207,7 @@ static std::string looks_like(const std::string& text) {
         looked++;
 
         if (only.rfind("WEBVTT", 0) == 0) return ".vtt";
-        if (only.find("<tt ") != std::string::npos || only.find("<tt:tt ") != std::string::npos) return ".ttml";
+        if (ttml_root(only)) return ".ttml";
         if (only.rfind("Dialogue:", 0) == 0 || only.rfind("[Script Info]", 0) == 0) return ".ass";
         if (line.find("-->") != std::string::npos && parse_timestamp(line, 0) >= 0) return ".srt";
 
@@ -576,7 +590,10 @@ int stl_zero(const std::string& data, int fps) {
     int h, m, s, f;
     if (sscanf(data.substr(256, 8).c_str(), "%2d%2d%2d%2d", &h, &m, &s, &f) != 4) return 0;
     int zero = ((h * 60 + m) * 60 + s) * 1000 + f * 1000 / fps;
-    if (data.size() >= 1024 + 128 && stl_ms((const unsigned char*)data.data() + 1024 + 5, fps) < zero) return 0;
+    for (size_t at = 1024; at + 128 <= data.size(); at += 128) {
+        const unsigned char* b = (const unsigned char*)data.data() + at;
+        if (!b[15]) return stl_ms(b + 5, fps) < zero ? 0 : zero;
+    }
     return zero;
 }
 
@@ -585,7 +602,7 @@ bool spruce_line(const std::string& line, SpruceLine& got) {
     if (sscanf(line.c_str(), " %n%d:%d:%d:%d%n , %n%d:%d:%d:%d%n ,%n", &p[0], &h[0], &m[0], &s[0], &got.frames[0], &p[1],
                &p[2], &h[1], &m[1], &s[1], &got.frames[1], &p[3], &p[4]) != 8 || !p[4]) return false;
     for (int i = 0; i < 2; i++) {
-        if (h[i] < 0 || h[i] > 23 || m[i] < 0 || m[i] > 59 || s[i] < 0 || s[i] > 59 || got.frames[i] < 0 || got.frames[i] > 59) return false;
+        if (h[i] < 0 || h[i] > 23 || m[i] < 0 || m[i] > 59 || s[i] < 0 || s[i] > 59 || got.frames[i] < 0 || got.frames[i] > 29) return false;
         got.seconds[i] = (h[i] * 60 + m[i]) * 60 + s[i];
         got.at[i] = p[2 * i];
         got.len[i] = p[2 * i + 1] - p[2 * i];
@@ -657,12 +674,14 @@ std::vector<SccLine> scc_lines(const std::string& text) {
             ms = (h * 3600LL + m * 60LL + s) * 1000 + f * 33LL;
         if (ms >= 0 && ms <= MAX_TIME_MS) {
             SccLine got;
-            got.at = pos;
-            got.len = std::min(line.find_first_not_of("0123456789:;"), line.size());
+            size_t from = std::min(line.find_first_not_of(" \t"), line.size());
+            size_t stop = std::min(line.find_first_not_of("0123456789:;", from), line.size());
+            got.at = pos + from;
+            got.len = stop - from;
             got.ms = (int)ms;
             got.sep = sep;
 
-            std::istringstream words(line.substr(std::min(got.len, line.size())));
+            std::istringstream words(line.substr(stop));
             std::string word;
             while (words >> word) {
                 unsigned v = (unsigned)strtoul(word.c_str(), nullptr, 16) & 0x7f7f;
@@ -714,8 +733,8 @@ bool sbv_time_line(const std::string& line) {
         else return false;
     }
     if (commas != 1) return false;
-    if (line.size() < 5) return false;
-    return true;
+    size_t comma = line.find(',');
+    return parse_timestamp(line.substr(0, comma), 0) >= 0 && parse_timestamp(line, comma + 1) >= 0;
 }
 
 std::vector<std::pair<int, int>> read_sbv(const char* filename) {
@@ -775,6 +794,25 @@ bool idx_delay_line(const std::string& line, int& delay) {
     if (h < 0 || m < 0 || s < 0 || ms < 0 || total > MAX_TIME_MS) total = 0;
     delay = (int)(sign * total);
     return true;
+}
+
+bool idx_track_line(const std::string& line, int& pick, bool& wanted) {
+    if (line.rfind("langidx:", 0) == 0) {
+        pick = atoi(line.c_str() + 8);
+        return true;
+    }
+    size_t at = line.rfind("index:");
+    if (line.rfind("id:", 0) != 0 || at == std::string::npos) return false;
+    wanted = atoi(line.c_str() + at + 6) == pick;
+    return true;
+}
+
+std::filesystem::path vobsub_data(const char* idx) {
+    std::filesystem::path sub = std::filesystem::path(idx).replace_extension(".sub");
+    std::error_code ec;
+    if (std::filesystem::exists(sub, ec)) return sub;
+    std::filesystem::path upper = std::filesystem::path(idx).replace_extension(".SUB");
+    return std::filesystem::exists(upper, ec) ? upper : sub;
 }
 
 int spu_stop_ms(const unsigned char* spu, size_t n) {
@@ -848,12 +886,14 @@ std::vector<std::pair<int,int>> read_idx(const char* filename) {
     std::string line {};
     std::istringstream read_file(load_text(filename));
 
-    std::ifstream bin(std::filesystem::path(filename).replace_extension(".sub"), std::ios::binary);
-    int delay = 0;
+    std::ifstream bin(vobsub_data(filename), std::ios::binary);
+    int delay = 0, pick = 0;
+    bool wanted = true;
 
     while (getline(read_file, line)) {
         size_t vf, vl;
-        if (idx_delay_line(line, delay) || !idx_time_line(line, vf, vl)) continue;
+        if (idx_track_line(line, pick, wanted) || idx_delay_line(line, delay)) continue;
+        if (!wanted || !idx_time_line(line, vf, vl)) continue;
 
         if (!room(starts.size())) break;
 
@@ -905,6 +945,16 @@ bool sync_start(const std::string& text, size_t from, size_t to, size_t& val_fro
     return true;
 }
 
+int sync_ms(const std::string& text, size_t from, size_t len) {
+    long long ms = strtoll(text.substr(from, len).c_str(), nullptr, 10);
+    return ms > MAX_TIME_MS ? -1 : (int)ms;
+}
+
+void nbsp_to_space(std::string& text) {
+    for (size_t at = ifind(text, "&nbsp", 0); at != std::string::npos; at = ifind(text, "&nbsp", at))
+        text.replace(at, text.compare(at + 5, 1, ";") == 0 ? 6 : 5, " ");
+}
+
 bool smi_blank(const std::string& body) {
     std::string flat;
     bool in_tag = false;
@@ -913,8 +963,8 @@ bool smi_blank(const std::string& body) {
         if (body[i] == '>') { in_tag = false; continue; }
         if (!in_tag) flat += body[i];
     }
-    std::string t = trim(flat);
-    return t.empty() || t == "&nbsp;" || t == "&NBSP;";
+    nbsp_to_space(flat);
+    return trim(flat).empty();
 }
 
 std::vector<std::pair<int,int>> read_smi(const char* filename) {
@@ -929,7 +979,7 @@ std::vector<std::pair<int,int>> read_smi(const char* filename) {
         if (tag_end == std::string::npos) break;
 
         size_t vf, vl;
-        int ms = sync_start(text, open, tag_end, vf, vl) ? atoi(text.substr(vf, vl).c_str()) : -1;
+        int ms = sync_start(text, open, tag_end, vf, vl) ? sync_ms(text, vf, vl) : -1;
 
         size_t next = ifind(text, "<sync", tag_end + 1);
         size_t content_end = (next == std::string::npos) ? text.size() : next;
@@ -965,16 +1015,22 @@ static double tick_rate = 1, frame_rate = 30;
 
 void ttml_rates(const std::string& text) {
     size_t from, len;
-    tick_rate = ttml_attr(text, 0, text.size(), "ttp:tickRate", from, len) ? atof(text.substr(from, len).c_str()) : 1;
-    frame_rate = ttml_attr(text, 0, text.size(), "ttp:frameRate", from, len) ? atof(text.substr(from, len).c_str()) : 30;
+    bool has_tick = ttml_attr(text, 0, text.size(), "ttp:tickRate", from, len);
+    tick_rate = has_tick ? atof(text.substr(from, len).c_str()) : 1;
+    bool has_frames = ttml_attr(text, 0, text.size(), "ttp:frameRate", from, len);
+    frame_rate = has_frames ? atof(text.substr(from, len).c_str()) : 30;
 
     double a = 1, b = 1;
     if (ttml_attr(text, 0, text.size(), "ttp:frameRateMultiplier", from, len))
         sscanf(text.substr(from, len).c_str(), "%lf %lf", &a, &b);
     if (a > 0 && b > 0) frame_rate = frame_rate * a / b;
 
-    if (tick_rate <= 0) tick_rate = 1;
     if (frame_rate <= 0) frame_rate = 30;
+    if (!has_tick && has_frames) {
+        double sub = ttml_attr(text, 0, text.size(), "ttp:subFrameRate", from, len) ? atof(text.substr(from, len).c_str()) : 1;
+        tick_rate = frame_rate * (sub > 0 ? sub : 1);
+    }
+    if (tick_rate <= 0) tick_rate = 1;
 }
 
 int ttml_time_ms(const std::string& v) {
@@ -1011,7 +1067,8 @@ std::string ttml_time(int ms, const std::string& like) {
     char buf[32];
     if (std::count(like.begin(), like.end(), ':') == 3) {
         int s = ms / 1000;
-        int f = std::min((int)std::ceil(frame_rate) - 1, (int)std::lround(ms % 1000 * frame_rate / 1000.0));
+        int f = (int)std::lround(ms % 1000 * frame_rate / 1000.0);
+        if (f >= (int)std::ceil(frame_rate)) { s++; f = 0; }
         snprintf(buf, sizeof(buf), "%02d:%02d:%02d:%02d", s / 3600, s / 60 % 60, s % 60, f);
     } else {
         snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%03d", ms / 3600000, ms / 60000 % 60, ms / 1000 % 60, ms % 1000);
@@ -1028,10 +1085,36 @@ size_t ttml_p(const std::string& text, size_t from) {
     return std::string::npos;
 }
 
+int TtmlParents::offset_at(const std::string& text, size_t at) {
+    for (size_t lt = text.find('<', seen); lt < at; lt = text.find('<', lt + 1)) {
+        size_t from = lt + 1 + (text[lt + 1] == '/');
+        std::string name = text.substr(from, text.find_first_of(" \t\r\n/>", from) - from);
+        size_t colon = name.find(':');
+        if (colon != std::string::npos) name.erase(0, colon + 1);
+        if (name != "div" && name != "body") continue;
+
+        size_t tag_end = text.find('>', lt);
+        if (tag_end == std::string::npos) break;
+        if (from > lt + 1) {
+            if (!begins.empty()) begins.pop_back();
+            continue;
+        }
+        if (text[tag_end - 1] == '/') continue;
+
+        size_t bf, bl;
+        int begin = ttml_attr(text, lt, tag_end, "begin", bf, bl) ? ttml_time_ms(text.substr(bf, bl)) : 0;
+        int outer = begins.empty() ? 0 : begins.back();
+        begins.push_back(std::min(MAX_TIME_MS, outer + std::max(begin, 0)));
+    }
+    seen = at;
+    return begins.empty() ? 0 : begins.back();
+}
+
 std::vector<std::pair<int,int>> read_ttml(const char* filename) {
     std::vector<std::pair<int,int>> timestamps;
     std::string text = load_text(filename);
     size_t pos = 0;
+    TtmlParents parents;
     ttml_rates(text);
 
     while (true) {
@@ -1052,6 +1135,9 @@ std::vector<std::pair<int,int>> read_ttml(const char* filename) {
             if (start_ms >= 0 && dur >= 0) end_ms = start_ms + dur;
         }
 
+        int offset = parents.offset_at(text, open);
+        if (start_ms >= 0) start_ms += offset;
+        if (end_ms >= 0) end_ms += offset;
         keep(timestamps, start_ms, end_ms);
     }
     return timestamps;

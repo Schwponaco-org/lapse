@@ -242,7 +242,8 @@ static void peaks_from(const std::vector<double>& curve, int lag, int want, std:
         Hit h;
         h.offset = (tops[n].first - lag) * G;
         h.z = (tops[n].second - mid) / spread;
-        h.runner = (top > 0 && n + 1 < (int)tops.size()) ? (tops[n + 1].second - mid) / top : 0.0;
+        double rival = n > 0 ? top : (tops.size() > 1 ? tops[1].second - mid : 0.0);
+        h.runner = top > 0 ? rival / top : 0.0;
         if (h.runner < 0) h.runner = 0;
         out.push_back(h);
     }
@@ -365,15 +366,16 @@ int align_refine(const std::vector<std::pair<int,int>>& cues, int off, int reach
 
     int best = off;
     double top = -1e300;
-    for (int d = -reach_ms; d <= reach_ms; d += 5) {
-        double s = align_score(cues, off + d);
-        if (s > top) { top = s; best = off + d; }
-    }
+    auto consider = [&](int at) {
+        double s = align_score(cues, at);
+        if (s > top + 1e-9 || (s >= top - 1e-9 && std::abs(at - off) < std::abs(best - off))) {
+            top = std::max(top, s);
+            best = at;
+        }
+    };
+    for (int d = -reach_ms; d <= reach_ms; d += 5) consider(off + d);
     int coarse = best;
-    for (int d = -6; d <= 6; d++) {
-        double s = align_score(cues, coarse + d);
-        if (s > top) { top = s; best = coarse + d; }
-    }
+    for (int d = -6; d <= 6; d++) consider(coarse + d);
     return best;
 }
 

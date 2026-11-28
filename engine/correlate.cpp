@@ -608,7 +608,7 @@ std::vector<int> split_alignment(const std::vector<std::pair<int,int>>& read_srt
         std::vector<uint16_t> to(scores.size(), 0);
 
 
-        int gap = read_srt[n].first - read_srt[n-1].second;
+        int gap = std::max(0, read_srt[n].first - read_srt[n-1].second);
         float cost = hinted(read_srt[n - 1].second + base_offset, read_srt[n].first + base_offset) ? p / 2 : p;
         double s_max = -std::numeric_limits<double>::infinity();
         int s_max_at = 0;

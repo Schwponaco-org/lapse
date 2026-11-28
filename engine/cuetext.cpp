@@ -19,8 +19,8 @@
 
 // brackets a sound effect gets written in. the wide ones are three bytes in
 // utf-8 so they are matched as strings
-static const char* open_bracket[]  = {"[", "(", "\xef\xbc\x88", "\xe3\x80\x90", "\xe3\x80\x8c", "<<"};
-static const char* close_bracket[] = {"]", ")", "\xef\xbc\x89", "\xe3\x80\x91", "\xe3\x80\x8d", ">>"};
+static const char* open_bracket[]  = {"[", "(", "\xef\xbc\x88", "\xe3\x80\x90", "<<"};
+static const char* close_bracket[] = {"]", ")", "\xef\xbc\x89", "\xe3\x80\x91", ">>"};
 
 // nothing here is ever spoken out loud
 static const char* note_marks[] = {"\xe2\x99\xaa", "\xe2\x99\xab", "\xe2\x99\xac", "\xe2\x99\xa9", "#", "*", "~"};
@@ -33,19 +33,20 @@ static bool starts_with(const std::string& s, const char* what) {
     return s.compare(0, strlen(what), what) == 0;
 }
 
-static bool ends_with(const std::string& s, const char* what) {
-    size_t n = strlen(what);
-    return s.size() >= n && s.compare(s.size() - n, n, what) == 0;
+static bool tag_at(const std::string& s, size_t i) {
+    if (i + 1 >= s.size() || s.find('>', i) == std::string::npos) return false;
+    return isalpha((unsigned char)s[i + 1]) || s[i + 1] == '/';
 }
 
 // drops <i>, {\an8} and the rest so what is left is the words
 static std::string strip_markup(const std::string& in) {
     std::string out;
     int angle = 0, brace = 0;
-    for (char c : in) {
-        if (c == '<') { angle++; continue; }
+    for (size_t i = 0; i < in.size(); i++) {
+        char c = in[i];
+        if (c == '<' && tag_at(in, i)) { angle++; continue; }
         if (c == '>') { if (angle) angle--; continue; }
-        if (c == '{') { brace++; continue; }
+        if (c == '{' && in.find('}', i) != std::string::npos) { brace++; continue; }
         if (c == '}') { if (brace) brace--; continue; }
         if (!angle && !brace) out += c;
     }
@@ -54,7 +55,7 @@ static std::string strip_markup(const std::string& in) {
 
 static std::string strip_dashes(const std::string& in) {
     std::string out = in;
-    while (!out.empty() && (out[0] == '-' || out[0] == ' ' || out[0] == '\t')) out.erase(0, 1);
+    while (!out.empty() && (out[0] == '-' || out[0] == '/' || out[0] == ' ' || out[0] == '\t')) out.erase(0, 1);
     return trim(out);
 }
 
@@ -72,23 +73,33 @@ static bool only_notes(const std::string& s) {
     return letters == 0;
 }
 
-static bool junk_line(const std::string& raw) {
+static bool junk_line(const std::string& raw, int& open) {
     std::string s = strip_dashes(strip_markup(raw));
     if (s.empty()) return true;
     if (only_notes(s)) return true;
 
-    for (int b = 0; b < (int)(sizeof(open_bracket) / sizeof(*open_bracket)); b++) {
-        if (starts_with(s, open_bracket[b]) && ends_with(s, close_bracket[b])) return true;
-        // "[door slams]" with the closing bracket lost somewhere is still not speech
-        if (starts_with(s, open_bracket[b]) && s.find(close_bracket[b]) == std::string::npos) return true;
+    while (true) {
+        if (open < 0) {
+            for (int b = 0; b < (int)(sizeof(open_bracket) / sizeof(*open_bracket)); b++)
+                if (starts_with(s, open_bracket[b])) { open = b; s.erase(0, strlen(open_bracket[b])); break; }
+            if (open < 0) break;
+        }
+        size_t close = s.find(close_bracket[open]);
+        if (close == std::string::npos) return true;
+        s = trim(s.substr(close + strlen(close_bracket[open])));
+        open = -1;
+        if (s.empty()) return true;
     }
 
     size_t colon = s.find(':');
     if (colon != std::string::npos && trim(s.substr(colon + 1)).empty()) {
         std::string who = trim(s.substr(0, colon));
-        bool shouty = !who.empty();
-        for (char c : who) if (c >= 'a' && c <= 'z') shouty = false;
-        if (shouty) return true;
+        bool upper = false, lower = false;
+        for (char c : who) {
+            if (c >= 'a' && c <= 'z') lower = true;
+            if (c >= 'A' && c <= 'Z') upper = true;
+        }
+        if (upper && !lower) return true;
     }
     return false;
 }
@@ -96,8 +107,15 @@ static bool junk_line(const std::string& raw) {
 static bool credit(const std::string& text) {
     std::string low;
     for (char c : text) low += (char)tolower((unsigned char)c);
-    for (const char* m : credit_marks)
-        if (low.find(m) != std::string::npos) return true;
+    for (const char* m : credit_marks) {
+        size_t n = strlen(m);
+        for (size_t at = low.find(m); at != std::string::npos; at = low.find(m, at + 1)) {
+            if (m[0] != '.') return true;
+            bool name_before = at > 0 && isalnum((unsigned char)low[at - 1]);
+            bool word_ends = at + n == low.size() || !isalnum((unsigned char)low[at + n]);
+            if (name_before && word_ends) return true;
+        }
+    }
     return false;
 }
 
@@ -106,15 +124,16 @@ bool is_junk_cue(const std::string& text) {
 
     std::string line;
     bool any_real = false;
+    int open = -1;
     for (size_t i = 0; i <= text.size(); i++) {
         if (i == text.size() || text[i] == '\n') {
-            if (!trim(line).empty() && !junk_line(line)) any_real = true;
+            if (!trim(line).empty() && !junk_line(line, open)) any_real = true;
             line.clear();
         } else if (text[i] != '\r') {
             line += text[i];
         }
     }
-    return !any_real;
+    return !any_real && open < 0;
 }
 
 static bool srt_time_line(const std::string& line) {
@@ -221,6 +240,24 @@ static std::vector<std::string> sub_cue_text(const std::string& path) {
     return out;
 }
 
+static std::string without_tags(const std::string& body) {
+    std::string flat;
+    bool in_tag = false;
+    for (size_t i = 0; i < body.size(); i++) {
+        if (body[i] == '<') {
+            size_t stop = body.find_first_of(" \t\r\n/>", i + 1);
+            std::string name = body.substr(i + 1, stop - i - 1);
+            for (char& c : name) c = (char)tolower((unsigned char)c);
+            if (name == "br" || name.ends_with(":br")) flat += '\n';
+            in_tag = true;
+            continue;
+        }
+        if (body[i] == '>') { in_tag = false; continue; }
+        if (!in_tag) flat += body[i];
+    }
+    return flat;
+}
+
 static std::vector<std::string> ttml_cue_text(const std::string& path) {
     std::vector<std::string> out;
     std::string text = load_text(path);
@@ -231,19 +268,43 @@ static std::vector<std::string> ttml_cue_text(const std::string& path) {
         if (open == std::string::npos) break;
         size_t tag_end = text.find('>', open);
         if (tag_end == std::string::npos) break;
+        if (text[tag_end - 1] == '/') {
+            out.push_back("");
+            pos = tag_end + 1;
+            continue;
+        }
 
         std::string closing = "</" + text.substr(open + 1, text.find_first_of(" \t\r\n/>", open) - open - 1) + ">";
         size_t close = text.find(closing, tag_end);
         std::string body = (close == std::string::npos) ? "" : text.substr(tag_end + 1, close - tag_end - 1);
         pos = (close == std::string::npos) ? tag_end + 1 : close + closing.size();
 
-        std::string flat;
-        bool in_tag = false;
-        for (size_t i = 0; i < body.size(); i++) {
-            if (body[i] == '<') { in_tag = true; continue; }
-            if (body[i] == '>') { in_tag = false; continue; }
-            if (!in_tag) flat += body[i];
-        }
+        out.push_back(without_tags(body));
+    }
+    return out;
+}
+
+static std::vector<std::string> smi_cue_text(const std::string& path) {
+    std::vector<std::string> out;
+    std::string text = load_text(path);
+    size_t pos = 0;
+
+    while (true) {
+        size_t open = ifind(text, "<sync", pos);
+        if (open == std::string::npos) break;
+        size_t tag_end = text.find('>', open);
+        if (tag_end == std::string::npos) break;
+        pos = tag_end + 1;
+
+        size_t vf, vl;
+        bool timed = sync_start(text, open, tag_end, vf, vl) && sync_ms(text, vf, vl) >= 0;
+        size_t next = ifind(text, "<sync", tag_end + 1);
+        size_t content_end = (next == std::string::npos) ? text.size() : next;
+        std::string body = text.substr(tag_end + 1, content_end - tag_end - 1);
+        if (!timed || smi_blank(body)) continue;
+
+        std::string flat = without_tags(body);
+        nbsp_to_space(flat);
         out.push_back(flat);
     }
     return out;
@@ -307,6 +368,7 @@ std::vector<std::string> read_cue_text(const std::string& path) {
     if (kind == ".ttml" || kind == ".dfxp") return ttml_cue_text(path);
     if (kind == ".stl") return stl_cue_text(path);
     if (kind == ".scc") return scc_cue_text(path);
+    if (kind == ".smi") return smi_cue_text(path);
     return srt_cue_text(path);
 }
 
@@ -320,7 +382,7 @@ std::vector<std::pair<int,int>> drop_junk_cues(const std::vector<std::pair<int,i
     int gone = 0;
     int real = 0;
     for (size_t i = 0; i < kept.size(); i++) {
-        if (kept[i].second <= kept[i].first) continue;
+        if (kept[i].second == kept[i].first) continue;
         if (is_junk_cue(text[i])) { kept[i] = {0, 0}; gone++; }
         else real++;
     }

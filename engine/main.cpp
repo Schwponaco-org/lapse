@@ -22,6 +22,9 @@
 #include <sstream>
 #include <filesystem>
 #include <climits>
+#include <chrono>
+#include <random>
+#include <numeric>
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
@@ -100,8 +103,8 @@ static int snap_cues(const std::vector<std::pair<int,int>>& cues, const std::vec
     for (size_t i = 0; i < cues.size(); i++) {
         if (cues[i].second <= cues[i].first) continue;
 
-        int start = (int)(cues[i].first * (1.0 + slope)) + per_cue[i];
-        int end   = (int)(cues[i].second * (1.0 + slope)) + per_cue[i];
+        int start = (int)std::lround(cues[i].first * (1.0 + slope)) + per_cue[i];
+        int end   = (int)std::lround(cues[i].second * (1.0 + slope)) + per_cue[i];
 
         int cut = nearest_cut(cuts, start);
         if (cut < 0) continue;
@@ -117,22 +120,22 @@ static int snap_cues(const std::vector<std::pair<int,int>>& cues, const std::vec
 
     std::vector<int> begins;
     for (size_t i = 0; i < cues.size(); i++)
-        if (cues[i].second > cues[i].first) begins.push_back((int)(cues[i].first * (1.0 + slope)) + per_cue[i]);
+        if (cues[i].second > cues[i].first) begins.push_back((int)std::lround(cues[i].first * (1.0 + slope)) + per_cue[i]);
     std::sort(begins.begin(), begins.end());
 
     ends.assign(cues.size(), 0);
     for (size_t i = 0; i < cues.size(); i++) {
         if (cues[i].second <= cues[i].first) continue;
 
-        int start = (int)(cues[i].first * (1.0 + slope)) + per_cue[i];
-        int end   = (int)(cues[i].second * (1.0 + slope)) + per_cue[i];
+        int start = (int)std::lround(cues[i].first * (1.0 + slope)) + per_cue[i];
+        int end   = (int)std::lround(cues[i].second * (1.0 + slope)) + per_cue[i];
 
         int cut = nearest_cut(cuts, end);
         if (cut < 0) continue;
 
         int by = cut - end;
         if (by == 0 || std::abs(by) > window || cut - start < 500) continue;
-        auto next = std::upper_bound(begins.begin(), begins.end(), end);
+        auto next = std::lower_bound(begins.begin(), begins.end(), end);
         if (by > 0 && next != begins.end() && *next < cut) continue;
 
         ends[i] = by;
@@ -153,7 +156,7 @@ static int snap_cues(const std::vector<std::pair<int,int>>& cues, const std::vec
 static bool number(const char* text, double& into) {
     char* stopped = nullptr;
     double got = std::strtod(text, &stopped);
-    if (stopped == text || !stopped || *stopped) return false;
+    if (stopped == text || !stopped || *stopped || !std::isfinite(got)) return false;
     into = got;
     return true;
 }
@@ -255,6 +258,12 @@ static void save_spans(const std::filesystem::path& path, const std::vector<std:
 }
 
 
+static std::string temp_file(const std::string& ending) {
+    long long now = (long long)std::chrono::steady_clock::now().time_since_epoch().count();
+    std::string name = "lapse-" + std::to_string(now) + "-" + std::to_string(std::random_device{}()) + ending;
+    return (std::filesystem::temp_directory_path() / name).string();
+}
+
 static const double SURE_SIGMA = 8.0;
 static std::vector<int> heard_words(const std::string& video, int stream, const std::filesystem::path& cache, const std::string& model) {
     std::filesystem::path saved = cache.empty() ? cache : std::filesystem::path(cache.string() + "." + std::filesystem::path(model).stem().string() + ".words");
@@ -262,10 +271,13 @@ static std::vector<int> heard_words(const std::string& video, int stream, const 
     std::ifstream in(saved);
     int w;
     while (in >> w) words.push_back(w);
-    if (!words.empty()) return words;
-
     std::error_code ec;
-    std::string wav = (std::filesystem::temp_directory_path() / ("lapse-" + std::to_string(std::hash<std::string>()(video)) + ".wav")).string();
+    if (!words.empty()) {
+        std::filesystem::last_write_time(saved, std::filesystem::file_time_type::clock::now(), ec);
+        return words;
+    }
+
+    std::string wav = temp_file(".wav");
     if (audio_to_wav(video.c_str(), stream, wav)) words = spoken_words(wav, model);
     std::filesystem::remove(wav, ec);
 
@@ -462,8 +474,12 @@ static std::string escaped(const std::string& s) {
     for (char c : s) {
         if (c == '"' || c == '\\') { out += '\\'; out += c; }
         else if (c == '\n') out += "\\n";
-        else if ((unsigned char)c < 0x20) continue;
-        else out += c;
+        else if ((unsigned char)c >= 0x20) out += c;
+        else {
+            char code[8];
+            snprintf(code, sizeof(code), "\\u%04x", (unsigned char)c);
+            out += code;
+        }
     }
     return out;
 }
@@ -591,6 +607,7 @@ int run(int argc, const char *argv[]) {
     sure_sigma = SURE_SIGMA;
     keep_output_charset();
     set_sub_fps(0);
+    set_threads(0);
     end_moves({});
 
     std::vector<std::string> args;
@@ -608,6 +625,7 @@ int run(int argc, const char *argv[]) {
     int snap_window = 0;
     std::string from_video;
     int min_shift = 1;
+    bool recode = false;
     std::string whisper_model;
     double fps = 0;
     double shift_ms = 0;
@@ -640,6 +658,7 @@ int run(int argc, const char *argv[]) {
                 return -1;
             }
             force_output_charset(how);
+            recode = true;
         } else if (arg == "--fps") {
             double got;
             if (i + 1 >= argc || !number(argv[++i], got) || got < 10 || got > 120) { usage(); return -1; }
@@ -755,7 +774,7 @@ int run(int argc, const char *argv[]) {
         card.cues = (int)read_subtitle(input_path).size();
         card.verdict = "solid";
         card.written = !dry_run;
-        card.unchanged = card.offset == 0 && shift_ratio == 1.0 && output_path == input_path;
+        card.unchanged = card.offset == 0 && shift_ratio == 1.0 && output_path == input_path && !recode;
         card.output = output_path;
         if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
@@ -765,6 +784,14 @@ int run(int argc, const char *argv[]) {
         return 0;
     }
 
+    struct Scratch {
+        std::string path;
+        ~Scratch() {
+            std::error_code ec;
+            if (!path.empty()) std::filesystem::remove(path, ec);
+        }
+    } scratch;
+
     if (args.size() == 1 && !is_subtitle(args[0])) {
         std::string got = embedded_text(args[0].c_str(), sub_track);
         if (got.empty()) {
@@ -772,6 +799,10 @@ int run(int argc, const char *argv[]) {
             return 1;
         }
         std::string put = args[0].substr(0, extension_at(args[0])) + ".lapse.srt";
+        if (dry_run) {
+            put = temp_file(".srt");
+            scratch.path = put;
+        }
         std::ofstream file(put, std::ios::binary);
         if (!file) {
             std::cerr << "Cannot write " << put << '\n';
@@ -801,6 +832,11 @@ int run(int argc, const char *argv[]) {
     }
     float p = (float)typed;
 
+    if (mode != "auto" && mode != "ols" && mode != "nosplit" && mode != "split") {
+        std::cerr << "Unknown mode: " << mode << ". Use auto, ols, nosplit or split.\n";
+        return -1;
+    }
+
     if (!is_subtitle(input_path)) {
         std::cerr << "Unsupported subtitle format: " << input_path << '\n';
         return 1;
@@ -826,7 +862,9 @@ int run(int argc, const char *argv[]) {
         std::string which = frames_in ? input_path : ref_path;
         double used = sub_fps(load_text(which));
         if (used <= 0 && is_subtitle(ref_path)) {
-            used = fps_from_length(which, which == ref_path ? input_path : ref_path);
+            std::string other = which == ref_path ? input_path : ref_path;
+            used = sub_fps(load_text(other));
+            if (used <= 0) used = fps_from_length(which, other);
             set_sub_fps(used);
         }
         if (used <= 0) {
@@ -998,11 +1036,16 @@ int run(int argc, const char *argv[]) {
         return want;
     };
     auto expected_from = [&](const std::vector<int>& offsets, const std::vector<std::pair<int,int>>& in, const std::vector<Chunk>& measured) {
+        auto middle = [&](int i) { return (in[i].first + in[i].second) / 2.0; };
+        std::vector<int> order(in.size());
+        std::iota(order.begin(), order.end(), 0);
+        std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return middle(a) < middle(b); });
+
         std::vector<double> want;
         for (auto& c : measured) {
-            int at = 0;
-            while (at + 1 < (int)in.size() && (in[at].first + in[at].second) / 2.0 < c.time) at++;
-            want.push_back(offsets[at]);
+            size_t at = 0;
+            while (at + 1 < order.size() && middle(order[at]) < c.time) at++;
+            want.push_back(offsets[order[at]]);
         }
         return want;
     };
@@ -1070,6 +1113,15 @@ int run(int argc, const char *argv[]) {
         return true;
     };
 
+    auto keep_timing = [&](std::vector<int>& offsets) {
+        offsets.assign(offsets.size(), 0);
+        card.offset = 0;
+        card.offsets.assign(1, 0);
+        card.splits.clear();
+        card.parts = 1;
+        card.unchanged = false;
+    };
+
     auto save = [&](const std::vector<int>& offs, const std::vector<int>& map, Verdict verdict, double slope = 0.0) {
         card.ratio = 1.0 + slope;
 
@@ -1102,6 +1154,7 @@ int run(int argc, const char *argv[]) {
         card.snapped = snap_cues(cues, cuts, slope, snap_window, offsets, mapping, ends);
         end_moves(ends);
         card.unchanged = ends.empty() && still(offsets, slope);
+        if (card.unchanged && recode) keep_timing(offsets);
 
         if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
@@ -1125,6 +1178,10 @@ int run(int argc, const char *argv[]) {
         card.snapped = snap_cues(cues, cuts, slope, snap_window, offsets, mapping, ends);
         end_moves(ends);
         card.unchanged = ends.empty() && still(offsets, slope);
+        if (card.unchanged && recode) {
+            keep_timing(offsets);
+            intercept = 0;
+        }
 
         if (!dry_run && !card.unchanged) {
             if (make_backup) backup_file(input_path.c_str());
@@ -1378,9 +1435,6 @@ int run(int argc, const char *argv[]) {
 
         return recut();
 
-    } else {
-        std::cerr << "Unknown mode: " << mode << ". Use auto, ols, nosplit or split.\n";
-        return -1;
     }
 
     return 0;
@@ -1388,17 +1442,22 @@ int run(int argc, const char *argv[]) {
 
 static std::vector<std::string> split_job(const std::string& line) {
     std::vector<std::string> tokens;
-    std::string cur;
-    bool quoted = false;
-    for (char c : line) {
-        if (c == '"') { quoted = !quoted; continue; }
-        if ((c == ' ' || c == '\t' || c == '\r') && !quoted) {
-            if (!cur.empty()) { tokens.push_back(cur); cur.clear(); }
-            continue;
+    size_t i = 0;
+    while ((i = line.find_first_not_of(" \t\r", i)) != std::string::npos) {
+        std::string token;
+        if (line[i] == '"') {
+            for (i++; i < line.size() && line[i] != '"'; i++) {
+                if (line[i] == '\\' && i + 1 < line.size() && line[i + 1] == '"') i++;
+                token += line[i];
+            }
+            i++;
+        } else {
+            size_t end = line.find_first_of(" \t\r", i);
+            token = line.substr(i, end - i);
+            i = end;
         }
-        cur += c;
+        tokens.push_back(token);
     }
-    if (!cur.empty()) tokens.push_back(cur);
     return tokens;
 }
 

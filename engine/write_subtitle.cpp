@@ -17,6 +17,7 @@
 #include "srt_parser.h"
 #include <cmath>
 #include <functional>
+#include <tuple>
 
 
 void backup_file(const char* path) {
@@ -103,7 +104,7 @@ static void save_bytes(const char* output_path, const std::string& data) {
 
 static void save_file(const char* output_path, const std::string& text) {
     std::string wanted = text;
-    if (was_asked && came_as == Charset::Legacy && asked_for != Charset::Latin1)
+    if (was_asked && came_as == Charset::Legacy)
         wanted = make_utf8(wanted);
 
     save_bytes(output_path, encode(wanted, was_asked ? asked_for : came_as));
@@ -159,8 +160,8 @@ static void rewrite_lines(const std::string& text, const char* output_path, cons
     bool ends_clean = !text.empty() && text.back() == '\n';
     std::istringstream ss(text);
     std::string out, line;
-    const char* eol = "\n";
     while (std::getline(ss, line)) {
+        const char* eol = "\n";
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
             eol = "\r\n";
@@ -318,6 +319,7 @@ static void write_sup(const char* input_path, const char* output_path, const Shi
     size_t n = data.size();
     size_t pos = 0;
     int cue = -1;
+    bool open = false;
 
     while (pos + 13 <= n) {
         if (b[pos] != 'P' || b[pos + 1] != 'G') break;
@@ -328,9 +330,11 @@ static void write_sup(const char* input_path, const char* output_path, const Shi
         if (payload + size > n) break;
 
         bool show = type == 0x16 && size >= 11 && b[payload + 10] > 0;
-        if (show) cue++;
+        if (show) { cue++; open = true; }
 
         int new_ms = shift.apply((int)(pts / 90), cue);
+        if (type == 0x16 && !show && open && cue < (int)shift.ends.size()) new_ms += shift.ends[cue];
+        if (type == 0x16 && !show) open = false;
         if (new_ms < 0) new_ms = 0;
         unsigned int new_pts = (unsigned int)new_ms * 90;
         b[pos+2] = (unsigned char)(new_pts >> 24);
@@ -406,16 +410,22 @@ static std::string ms_to_idx_ts(int ms) {
 
 static void write_idx(const char* input_path, const char* output_path, const Shift& shift) {
     int cue = 0;
-    int delay = 0;
+    int delay = 0, pick = 0;
+    bool wanted = true;
     rewrite_lines(load_file(input_path), output_path, [&](std::string& line) {
         size_t vf, vl;
-        if (!idx_delay_line(line, delay) && idx_time_line(line, vf, vl)) {
+        if (!idx_track_line(line, pick, wanted) && !idx_delay_line(line, delay) && idx_time_line(line, vf, vl)) {
             int ms = idx_time_ms(line.substr(vf, vl));
-            if (ms >= 0)
-                line = line.substr(0, vf) + ms_to_idx_ts(shift.apply(ms + delay, cue) - delay) + line.substr(vf + vl);
-            cue++;
+            int moved = shift.apply(ms + delay, wanted ? cue : std::max(cue - 1, 0)) - delay;
+            if (ms >= 0) line = line.substr(0, vf) + ms_to_idx_ts(moved) + line.substr(vf + vl);
+            if (wanted) cue++;
         }
     });
+    if (std::filesystem::path(output_path) != std::filesystem::path(input_path)) {
+        std::error_code ec;
+        std::filesystem::copy_file(vobsub_data(input_path), std::filesystem::path(output_path).replace_extension(".sub"),
+                                   std::filesystem::copy_options::overwrite_existing, ec);
+    }
 }
 
 static void write_smi(const char* input_path, const char* output_path, const Shift& shift) {
@@ -424,6 +434,7 @@ static void write_smi(const char* input_path, const char* output_path, const Shi
     size_t pos = 0;
     size_t written = 0;
     int cue = -1;
+    bool shown = false;
 
     while (true) {
         size_t open = ifind(text, "<sync", pos);
@@ -432,17 +443,18 @@ static void write_smi(const char* input_path, const char* output_path, const Shi
         if (tag_end == std::string::npos) break;
 
         size_t vf, vl;
-        bool has_start = sync_start(text, open, tag_end, vf, vl);
+        bool has_start = sync_start(text, open, tag_end, vf, vl) && sync_ms(text, vf, vl) >= 0;
 
         size_t next = ifind(text, "<sync", tag_end + 1);
         size_t content_end = (next == std::string::npos) ? text.size() : next;
         std::string body = text.substr(tag_end + 1, content_end - tag_end - 1);
         bool show = has_start && !smi_blank(body);
-        if (show) cue++;
+        if (show) { cue++; shown = true; }
 
         if (has_start) {
-            int ms = atoi(text.substr(vf, vl).c_str());
-            int new_ms = shift.apply(ms, cue);
+            int new_ms = shift.apply(sync_ms(text, vf, vl), cue);
+            if (!show && shown && cue < (int)shift.ends.size()) new_ms += shift.ends[cue];
+            if (!show) shown = false;
             if (new_ms < 0) new_ms = 0;
             out += text.substr(written, vf - written);
             out += std::to_string(new_ms);
@@ -462,6 +474,7 @@ static void write_ttml(const char* input_path, const char* output_path, const Sh
     size_t pos = 0;
     size_t written = 0;
     int cue = 0;
+    TtmlParents parents;
     ttml_rates(text);
 
     while (true) {
@@ -475,20 +488,24 @@ static void write_ttml(const char* input_path, const char* output_path, const Sh
         if (ttml_attr(text, open, tag_end, "begin", bf, bl)) {
             int start_ms = ttml_time_ms(text.substr(bf, bl));
 
-            size_t ef, el;
+            size_t ef, el, df, dl;
             bool has_end = ttml_attr(text, open, tag_end, "end", ef, el);
-            int end_ms = has_end ? ttml_time_ms(text.substr(ef, el)) : 0;
+            bool has_dur = !has_end && ttml_attr(text, open, tag_end, "dur", df, dl);
+            int end_ms = has_end ? ttml_time_ms(text.substr(ef, el)) : has_dur ? ttml_time_ms(text.substr(df, dl)) : 0;
+            if (has_dur && end_ms >= 0) end_ms += start_ms;
 
-            if (start_ms >= 0 && (!has_end || end_ms >= 0)) {
-                auto [a, b] = shift.both(start_ms, has_end ? end_ms : start_ms, cue);
-                out += text.substr(written, bf - written);
-                out += ttml_time(a, text.substr(bf, bl));
-                written = bf + bl;
-
-                if (has_end) {
-                    out += text.substr(written, ef - written);
-                    out += ttml_time(b, text.substr(ef, el));
-                    written = ef + el;
+            if (start_ms >= 0 && (!(has_end || has_dur) || end_ms >= 0)) {
+                int offset = parents.offset_at(text, open);
+                auto [a, b] = shift.both(start_ms + offset, (has_end || has_dur) ? end_ms + offset : start_ms + offset, cue);
+                std::vector<std::tuple<size_t, size_t, std::string>> edits;
+                edits.push_back({bf, bl, ttml_time(std::max(0, a - offset), text.substr(bf, bl))});
+                if (has_end) edits.push_back({ef, el, ttml_time(std::max(0, b - offset), text.substr(ef, el))});
+                if (has_dur) edits.push_back({df, dl, ttml_time(b - a, text.substr(df, dl))});
+                std::sort(edits.begin(), edits.end());
+                for (auto& [at, len, value] : edits) {
+                    out += text.substr(written, at - written);
+                    out += value;
+                    written = at + len;
                 }
             }
         }
@@ -502,7 +519,8 @@ static void write_ttml(const char* input_path, const char* output_path, const Sh
 static std::string scc_tc(int ms, char sep) {
     if (ms < 0) ms = 0;
     int s = ms / 1000;
-    int f = std::min(29, (ms % 1000 + 16) / 33);
+    int f = (ms % 1000 + 16) / 33;
+    if (f > 29) { s++; f = 0; }
     char buf[16];
     snprintf(buf, sizeof(buf), "%02d:%02d:%02d%c%02d", s / 3600, s / 60 % 60, s % 60, sep, f);
     return buf;
@@ -519,7 +537,7 @@ static void write_scc(const char* input_path, const char* output_path, const Shi
     int cue = -1;
     for (auto& l : lines) {
         if (l.show) cue++;
-        int belongs = l.load ? std::min(cue + 1, shows - 1) : cue;
+        int belongs = l.load ? std::min(cue + 1, shows - 1) : std::max(cue, 0);
         int at = shift.apply(l.ms, belongs);
         if (l.hide && !l.load && cue >= 0 && cue < (int)shift.ends.size()) at += shift.ends[cue];
         out += text.substr(written, l.at - written);

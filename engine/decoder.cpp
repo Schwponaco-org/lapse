@@ -21,6 +21,7 @@
 #include "silero.h"
 #include "srt_parser.h"
 #include <algorithm>
+#include <cctype>
 
 static const int RATE = SILERO_RATE;
 static const int FRAME_SAMPLES = RATE / 100;
@@ -32,6 +33,7 @@ static const int64_t PRIME_MS = 3000;
 static const int64_t PROBE_MS = 180000;
 
 static const int64_t PIECE_MS = 180000;
+static const double MIN_GAP_MS = 250;
 
 // 0 is every core, up to 8. A box that transcodes as well wants to keep some
 static int wanted_threads = 0;
@@ -98,6 +100,10 @@ static double measure_fps(AVFormatContext* fmt, int stream) {
     return fps;
 }
 
+static bool moving_picture(const AVStream* s) {
+    return s->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && !(s->disposition & AV_DISPOSITION_ATTACHED_PIC);
+}
+
 // MicroDVD subtitles count frames instead of time, so the video has to tell us
 // how long a frame lasts. Zero when the file has no video in it
 double probe_fps(const char* filename) {
@@ -108,7 +114,7 @@ double probe_fps(const char* filename) {
     if (avformat_find_stream_info(fmt, nullptr) >= 0) {
         int video = -1;
         for (int i = 0; i < (int)fmt->nb_streams; i++) {
-            if (fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) { video = i; break; }
+            if (moving_picture(fmt->streams[i])) { video = i; break; }
         }
 
         if (video >= 0) {
@@ -222,13 +228,23 @@ static std::string packet_text(AVPacket* p, AVCodecID id) {
         s = s.substr(at);
     }
 
+    bool ass = id == AV_CODEC_ID_ASS || id == AV_CODEC_ID_SSA;
+    bool drawing = false;
     std::string out;
     for (size_t i = 0; i < s.size(); i++) {
-        if (s[i] == '\\' && i + 1 < s.size() && (s[i+1] == 'N' || s[i+1] == 'n')) { out += '\n'; i++; }
+        size_t close = ass && s[i] == '{' ? s.find('}', i) : std::string::npos;
+        if (close != std::string::npos) {
+            for (size_t tag = s.find("\\p", i); tag < close; tag = s.find("\\p", tag + 2))
+                if (isdigit((unsigned char)s[tag + 2])) drawing = s[tag + 2] != '0';
+            i = close;
+        }
+        else if (s[i] == '\\' && i + 1 < s.size() && (s[i+1] == 'N' || s[i+1] == 'n')) { out += '\n'; i++; }
         else if (s[i] == '|' && id == AV_CODEC_ID_MICRODVD) out += '\n';
-        else if (s[i] != '\r') out += s[i];
+        else if (s[i] != '\r' && !drawing) out += s[i];
     }
-    return out;
+    size_t first = out.find_first_not_of(" \n");
+    if (first == std::string::npos) return "";
+    return out.substr(first, out.find_last_not_of(" \n") + 1 - first);
 }
 
 static int pgs_objects(const AVPacket* p) {
@@ -307,7 +323,7 @@ std::vector<std::pair<int, int>> embedded_spans(AVFormatContext* fmt, int wanted
 
     for (int index : candidates) {
         std::vector<std::pair<int, int>> spans = read_subtitle_stream(fmt, index);
-        if (spans.size() >= 50) {
+        if (spans.size() >= 50 || (wanted >= 0 && spans.size() >= MIN_CUES)) {
             say() << "Using embedded subtitle track " << index << " with " << spans.size() << " cues\n";
             return spans;
         }
@@ -352,7 +368,7 @@ std::vector<int> picture_cuts(const char* filename) {
 
     int video = -1;
     for (int i = 0; i < (int)fmt->nb_streams; i++)
-        if (fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) { video = i; break; }
+        if (moving_picture(fmt->streams[i])) { video = i; break; }
 
     if (video < 0) {
         avformat_close_input(&fmt);
@@ -417,16 +433,17 @@ std::string embedded_text(const char* filename, int wanted) {
     for (int i = 0; i < (int)fmt->nb_streams; i++) {
         AVStream* s = fmt->streams[i];
         if (s->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE) continue;
-        if (!text_subtitle(s->codecpar->codec_id)) continue;
+        if (!text_subtitle(s->codecpar->codec_id) && !bitmap_subtitle(s->codecpar->codec_id)) continue;
         if (wanted >= 0) {
             if (seen++ == wanted) { index = i; break; }
             continue;
         }
+        if (!text_subtitle(s->codecpar->codec_id)) continue;
         if (s->disposition & AV_DISPOSITION_FORCED) continue;
         if (index < 0) index = i;
         if (s->disposition & AV_DISPOSITION_DEFAULT) { index = i; break; }
     }
-    if (index < 0) { avformat_close_input(&fmt); return ""; }
+    if (index < 0 || !text_subtitle(fmt->streams[index]->codecpar->codec_id)) { avformat_close_input(&fmt); return ""; }
 
     AVCodecID id = fmt->streams[index]->codecpar->codec_id;
     AVRational tb = fmt->streams[index]->time_base;
@@ -769,6 +786,8 @@ static std::vector<int16_t> decode_range(const std::string& path, int stream_ind
                         started = true;
                     }
                 } else {
+                    double gap = at - (from_ms + pcm.size() * 1000.0 / RATE);
+                    if (at >= 0 && gap > MIN_GAP_MS && gap <= PIECE_MS) pcm.resize(pcm.size() + (size_t)(gap * RATE / 1000.0), 0);
                     pcm.insert(pcm.end(), scratch.begin(), scratch.end());
                 }
             }

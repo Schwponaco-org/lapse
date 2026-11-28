@@ -89,7 +89,10 @@ Starting `lapse` loads onnxruntime and the speech model each time. For a list of
 video1.mkv subs1.srt
 video2.mkv subs2.srt --output synced2.srt
 "a path with spaces.mkv" subs3.srt
+"a \"quoted\" name.mkv" subs4.srt
 ```
+
+Wrap a path in double quotes when it has spaces in it. Inside the quotes `\"` is a `"` in the path, and anything else is read as it is, a backslash too.
 
 You get exactly one line of JSON back on stdout per job, in the same order. A job that failed before it could report gets `{"error":true}`, so you can always match answers to jobs line by line.
 

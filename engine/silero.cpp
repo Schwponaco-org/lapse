@@ -122,7 +122,10 @@ static library_handle load_runtime() {
 #endif
 
     const char* forced = std::getenv("LAPSE_ONNXRUNTIME");
-    if (forced) return load_from(forced);
+    if (forced) {
+        library_handle handle = load_from(forced);
+        if (handle) return handle;
+    }
 
     std::filesystem::path dir = binary_dir();
     for (const char* name : names) {
@@ -150,8 +153,9 @@ static std::filesystem::path find_model() {
     paths.push_back("silero_vad.onnx");
 
     for (const std::filesystem::path& path : paths) {
+        std::error_code ec;
         std::ifstream file(path, std::ios::binary);
-        if (file.good()) return path;
+        if (std::filesystem::is_regular_file(path, ec) && file.good()) return path;
     }
     return {};
 }

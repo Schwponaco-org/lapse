@@ -250,7 +250,9 @@ if(ZLIB_FOUND)
     target_link_libraries(lapse PRIVATE ZLIB::ZLIB)
 endif()
 
-if(NOT MSVC)
+if(MSVC)
+    target_compile_options(lapse PRIVATE /utf-8)
+else()
     target_compile_options(lapse PRIVATE -fno-math-errno)
 endif()
 

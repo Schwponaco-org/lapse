@@ -145,7 +145,7 @@ echo 'video2.mkv subs2.srt ols' >> jobs.txt
 ./lapse --batch < jobs.txt
 ```
 
-Every line gets exactly one line of JSON back, in the order the jobs came in, whether the job worked or not. A job that failed before it could report gets `{"error":true}`. `--json` is implied. Paths with spaces in them need double quotes.
+Every line gets exactly one line of JSON back, in the order the jobs came in, whether the job worked or not. A job that failed before it could report gets `{"error":true}`. `--json` is implied. Paths with spaces in them need double quotes. Inside double quotes `\"` stands for a `"` in the path, and every other character, a lone backslash too, is taken as it is. Words without quotes are taken as they are.
 
 ## Moving a subtitle to another release
 
@@ -184,9 +184,9 @@ The cuts come from the keyframes the encoder already put in the file, so finding
 
 ## Encodings
 
-A subtitle is written back in the encoding it came in, whether that is UTF-8, UTF-8 with a BOM, UTF-16 or an old codepage. `--encoding` writes it in the one you name instead, which is a quick way to get a library of mixed files down to one encoding. `utf16` is taken as `utf16le`, and `iso-8859-1` and `cp1252` as `latin1`.
+A subtitle is written back in the encoding it came in, whether that is UTF-8, UTF-8 with a BOM, UTF-16 or an old codepage. `--encoding` writes it in the one you name instead, which is a quick way to get a library of mixed files down to one encoding. The file is written in that encoding even when nothing in it had to move. `utf16` is taken as `utf16le`, and `iso-8859-1` and `cp1252` as `latin1`.
 
-LAPSE cannot tell one old codepage from another, so a codepage file converted to UTF-8 is read as ISO-8859-1. That is right for Western European languages. Cyrillic and CJK files come out as valid UTF-8 with the wrong letters. A character ISO-8859-1 does not have becomes `?`. `.sup` files have no text, so `--encoding` does nothing to them.
+When a file in an old codepage is converted, LAPSE works out which codepage it is from the letters in it. It knows Windows-1252 for Western European languages, Windows-1250 and ISO-8859-2 for Polish, Czech, Slovak, Hungarian, Croatian and Romanian, and Windows-1251 for Cyrillic. A file with only a line or two of accented text can still be guessed wrong. CJK codepages are not recognised and come out with the wrong letters. With `--encoding latin1`, a character Windows-1252 does not have becomes `?`. `.sup` files have no text, so `--encoding` does nothing to them.
 
 ## The cache
 

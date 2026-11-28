@@ -332,6 +332,149 @@ if ! cmp -s squeezed.srt reference.srt; then
     fail "--ratio 1.25 did not stretch the file back onto the reference"
 fi
 
+echo "== --encoding still rewrites a file that needs no shift"
+cp reference.srt recoded.srt
+run --shift 0 recoded.srt --encoding utf8-bom --no-backup --json
+printf '\357\273\277' > recoded.want
+cat reference.srt >> recoded.want
+if ! cmp -s recoded.srt recoded.want; then
+    fail "--encoding utf8-bom was ignored because nothing had to move"
+fi
+if echo "$output" | grep -q '"unchanged":true'; then
+    fail "a file that was written again in another encoding was reported as unchanged"
+fi
+
+echo "== --encoding under --min-shift rewrites the file but keeps its timing"
+cp reference.srt nudged.srt
+run --shift 30 nudged.srt --no-backup
+cp nudged.srt nudged.was
+run reference.srt nudged.srt --min-shift 80 --encoding utf8-bom --force --no-backup --json
+printf '\357\273\277' > nudged.want
+cat nudged.was >> nudged.want
+if ! cmp -s nudged.srt nudged.want; then
+    fail "a file under --min-shift was moved when it only had to be written in another encoding"
+fi
+if ! echo "$output" | grep -q '"offset_ms":0,' || echo "$output" | grep -q '"unchanged":true'; then
+    fail "a file written again in another encoding at its old timing was reported wrong"
+fi
+
+echo "== an old codepage file is read in the codepage it was written in"
+printf '1\015\01200:00:01,000 --> 00:00:02,000\015\012Nie wiem, co si\352 sta\263o.\015\012Mo\277esz mi powiedzie\346, gdzie jest \243ukasz?\015\012\015\012' > polish.srt
+printf '1\015\01200:00:01,000 --> 00:00:02,000\015\012Nie wiem, co si\304\231 sta\305\202o.\015\012Mo\305\274esz mi powiedzie\304\207, gdzie jest \305\201ukasz?\015\012\015\012' > polish.want
+printf '1\015\01200:00:01,000 --> 00:00:02,000\015\012\330ekl jsem ti, \236e to nep\371jde.\015\012Pro\350 jsi mi to ne\370ekla d\370\355v?\015\012\015\012' > czech.srt
+printf '1\015\01200:00:01,000 --> 00:00:02,000\015\012\305\230ekl jsem ti, \305\276e to nep\305\257jde.\015\012Pro\304\215 jsi mi to ne\305\231ekla d\305\231\303\255v?\015\012\015\012' > czech.want
+printf '1\015\01200:00:01,000 --> 00:00:02,000\015\012\337 \355\345 \347\355\340\376, \367\362\356 \361\353\363\367\350\353\356\361\374.\015\012\322\373 \354\345\355\377 \361\353\373\370\350\370\374?\015\012\015\012' > russian.srt
+printf '1\015\01200:00:01,000 --> 00:00:02,000\015\012\320\257 \320\275\320\265 \320\267\320\275\320\260\321\216, \321\207\321\202\320\276 \321\201\320\273\321\203\321\207\320\270\320\273\320\276\321\201\321\214.\015\012\320\242\321\213 \320\274\320\265\320\275\321\217 \321\201\320\273\321\213\321\210\320\270\321\210\321\214?\015\012\015\012' > russian.want
+printf '1\015\01200:00:01,000 --> 00:00:02,000\015\012Det koster 5 \200, sagde hun \223nej\224.\015\012Vi ses p\345 mandag.\015\012\015\012' > western.srt
+printf '1\015\01200:00:01,000 --> 00:00:02,000\015\012Det koster 5 \342\202\254, sagde hun \342\200\234nej\342\200\235.\015\012Vi ses p\303\245 mandag.\015\012\015\012' > western.want
+for name in polish czech russian western; do
+    run --shift 0 $name.srt --encoding utf8 --no-backup
+    if ! cmp -s $name.srt $name.want; then
+        fail "the $name file came out with the wrong letters"
+    fi
+done
+printf '1\015\01200:00:01,000 --> 00:00:02,000\015\012Det koster 5 \200, sagde hun \223nej\224.\015\012Vi ses p\345 mandag.\015\012\015\012' > western.srt
+cp western.srt western.was
+run --shift 0 western.srt --encoding latin1 --no-backup
+if ! cmp -s western.srt western.was; then
+    fail "--encoding latin1 changed a file that was Windows-1252 already"
+fi
+
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *)
+        echo "== a batch job with a double quote in its path"
+        mkdir -p "batch dir"
+        cp pristine.srt 'batch dir/say "hi".srt'
+        set +e
+        output=$(printf '%s\n' '--shift -4200 "batch dir/say \"hi\".srt" --no-backup' | "$LAPSE" --batch 2>&1)
+        set -e
+        if ! cmp -s 'batch dir/say "hi".srt' reference.srt; then
+            fail "the batch job did not find the file with a quote in its name"
+        fi
+        ;;
+esac
+
+echo "== TTML that counts from where its body and div begin"
+{
+    printf '<?xml version="1.0" encoding="utf-8"?>\n<tt xmlns="http://www.w3.org/ns/ttml">\n<body begin="1s"><div begin="2s">\n'
+    for i in $(seq 0 39); do
+        start=$((5000 + i * 7000 + SHIFT - 3000))
+        printf '<p begin="%s" end="%s">line %d</p>\n' "$(timestamp $start | tr , .)" "$(timestamp $((start + 3000)) | tr , .)" "$i"
+    done
+    printf '</div></body></tt>\n'
+} > nested.ttml
+run reference.srt nested.ttml --force --no-backup --json
+if ! echo "$output" | grep -q -- '"offset_ms":-4200'; then
+    fail "the begin of the div was not added to its cues"
+fi
+if ! grep -q '<p begin="00:00:02.000" end="00:00:05.000">line 0</p>' nested.ttml; then
+    fail "the TTML was not written back relative to its div"
+fi
+
+echo "== TTML with its root tag on a line of its own and no extension we know"
+{
+    printf '<?xml version="1.0" encoding="utf-8"?>\n<tt\n  xmlns="http://www.w3.org/ns/ttml">\n<body><div>\n'
+    for i in $(seq 0 39); do
+        start=$((5000 + i * 7000 + SHIFT))
+        printf '<p begin="%s" end="%s">line %d</p>\n' "$(timestamp $start | tr , .)" "$(timestamp $((start + 3000)) | tr , .)" "$i"
+    done
+    printf '</div></body></tt>\n'
+} > rootless.xml
+run --shift -$SHIFT rootless.xml --no-backup
+if [ "$status" != "$SOLID" ] || ! grep -q '<p begin="00:00:05.000" end="00:00:08.000">line 0</p>' rootless.xml; then
+    fail "a TTML file named .xml with <tt on its own line was not read"
+fi
+
+echo "== a bracket that never closes is not a sound effect"
+for i in $(seq 0 39); do
+    start=$((5000 + i * 7000 + SHIFT))
+    text="line $i"
+    [ $((i % 3)) = 0 ] && text="(whispering
+so nobody hears"
+    [ $((i % 3)) = 1 ] && text="[door
+slams]"
+    printf "%d\n%s --> %s\n%s\n\n" $((i + 1)) "$(timestamp $start)" "$(timestamp $((start + 3000)))" "$text"
+done > brackets.srt
+run reference.srt brackets.srt --json --dry-run
+if ! echo "$output" | grep -q '"ignored_cues":13,'; then
+    fail "expected the 13 [door slams] cues to be ignored and the open brackets kept"
+fi
+
+echo "== SAMI sound effects are left out like in every other format"
+{
+    printf '<SAMI><BODY>\n'
+    for i in $(seq 0 39); do
+        start=$((5000 + i * 7000 + SHIFT))
+        printf '<SYNC Start=%d><P Class=ENCC>line %d<br>more\n<SYNC Start=%d><P Class=ENCC>&nbsp;\n' $start $i $((start + 3000))
+        if [ $((i % 4)) = 0 ]; then
+            printf '<SYNC Start=%d><P Class=ENCC>[Music]&nbsp;\n<SYNC Start=%d><P Class=ENCC>&nbsp;\n' $((start + 3500)) $((start + 5000))
+        fi
+    done
+    printf '</BODY></SAMI>\n'
+} > effects.smi
+run reference.srt effects.smi --json --dry-run
+if ! echo "$output" | grep -q '"ignored_cues":10,'; then
+    fail "expected the 10 [Music] cues in the SAMI file to be ignored"
+fi
+
+echo "== a cue out of order does not tear the file apart in split mode"
+for i in $(seq 0 59); do
+    start=$((5000 + i * 6000 + i * i * 37 % 2500))
+    end=$((start + 1500 + i * 53 % 1500))
+    if [ $((i % 10)) = 5 ]; then
+        start=$((last - 500))
+        end=$((start + 2000))
+    fi
+    last=$start
+    printf "%d\n%s --> %s\nline %d\n\n" $((i + 1)) "$(timestamp $start)" "$(timestamp $end)" $i >> unordered-ref.srt
+    printf "%d\n%s --> %s\nline %d\n\n" $((i + 1)) "$(timestamp $((start + SHIFT)))" "$(timestamp $((end + SHIFT)))" $i >> unordered.srt
+done
+run unordered-ref.srt unordered.srt split --json --dry-run
+if ! echo "$output" | grep -q '"offsets":\[-4200\]'; then
+    fail "expected one part moved by -4200"
+fi
+
 echo "== a subtitle reached through a link is written where the link points"
 mkdir -p real
 cp pristine.srt real/linked.srt
