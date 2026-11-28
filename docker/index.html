@@ -554,6 +554,7 @@ function drawFolders() {
 
 function drawRows() {
   const rows = visible();
+  const ticked = new Set(picked());
   $("shown").textContent = rows.length + " of " + data.jobs.length;
   $("all").checked = false;
 
@@ -564,7 +565,7 @@ function drawRows() {
 
   $("rows").innerHTML = rows.map(job => `
     <tr>
-      <td><input type="checkbox" value="${job.id}"></td>
+      <td><input type="checkbox" value="${job.id}" ${ticked.has(job.id) ? "checked" : ""}></td>
       <td>
         <div class="file">${safe(basename(job.srt_path))}</div>
         <div class="path">${safe(job.srt_path)}</div>
@@ -852,7 +853,8 @@ $("resync").onclick = () => {
 
 $("translate").onclick = () => {
   const ids = picked();
-  const language = ($("language").value || $("language").placeholder).trim();
+  const language = ($("language").value || data.translate.targets[0] || "").trim();
+  if (!language) return alert("Say which language to translate into");
   if (ids.length) send("/api/translate", { ids, language });
 };
 

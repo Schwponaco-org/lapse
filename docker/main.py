@@ -17,7 +17,6 @@ import json
 import os
 import re
 import queue
-import shutil
 import signal
 import sqlite3
 import subprocess
@@ -46,7 +45,7 @@ WEB            = os.environ.get("WEB", "1") == "1"
 WEB_PORT       = int(os.environ.get("WEB_PORT", "8080"))
 SCAN           = os.environ.get("SCAN", "1") == "1"
 
-MEDIA_ROOTS = [p.strip() for p in MEDIA_ROOT.split(",") if p.strip()]
+MEDIA_ROOTS = [os.path.normpath(p.strip()) for p in MEDIA_ROOT.split(",") if p.strip()]
 
 SWITCHES = [
     ("NO_BACKUP", "--no-backup"),
@@ -86,19 +85,6 @@ ENGINE_FORMATS = {".srt", ".ass", ".ssa", ".vtt"}
 
 SKIP_DIRS = {"@eaDir", "#recycle", "#snapshot", "lost+found", ".Trash", "@Recycle"}
 
-LANGUAGE_WORDS = {
-    "en", "eng", "english", "da", "dan", "dansk", "danish", "sv", "swe", "swedish",
-    "no", "nor", "nb", "norwegian", "fi", "fin", "finnish", "is", "isl", "icelandic",
-    "de", "ger", "deu", "german", "fr", "fre", "fra", "french", "es", "spa", "spanish",
-    "it", "ita", "italian", "nl", "dut", "nld", "dutch", "pt", "por", "portuguese",
-    "pl", "pol", "polish", "ru", "rus", "russian", "cs", "ces", "czech", "tr", "tur",
-    "turkish", "ar", "ara", "arabic", "zh", "chi", "chinese", "ja", "jpn", "japanese",
-    "ko", "kor", "korean", "hu", "hun", "hungarian", "ro", "ron", "romanian", "el",
-    "ell", "greek", "he", "heb", "hebrew", "hi", "hin", "hindi", "th", "tha", "thai",
-    "forced", "sdh", "cc", "hearing", "impaired", "full", "default", "sub", "subs",
-    "subtitle", "subtitles", "srt", "track",
-}
-
 jobs = queue.Queue()
 running = True
 ENGINE = {}
@@ -130,13 +116,25 @@ def engine_defaults():
     return options
 
 
+def changed_in_web(conn):
+    changed = setting(conn, "engine_changed", None)
+    if changed is not None:
+        return json.loads(changed)
+    defaults = engine_defaults()
+    return {key: value for key, value in json.loads(setting(conn, "engine", "{}")).items()
+            if key in defaults and defaults[key] != value}
+
+
 def engine_options(conn):
     options = engine_defaults()
-    options.update(json.loads(setting(conn, "engine", "{}")))
+    options.update(changed_in_web(conn))
     return options
 
 
 def save_engine(conn, options):
+    changed = changed_in_web(conn)
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('engine_changed', ?)",
+                 (json.dumps(changed),))
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('engine', ?)",
                  (json.dumps(options),))
     conn.commit()
@@ -149,8 +147,6 @@ def restorable():
 def engine_flags():
     flags = []
     for name, option in SWITCHES:
-        if option == "--no-backup" and restorable():
-            continue
         if ENGINE.get(name.lower()):
             flags.append(option)
     for name, option in VALUES:
@@ -299,8 +295,10 @@ def utf8(path):
 
 
 def blocked(path):
+    path = os.path.normpath(path)
     for prefix in EXCLUDED:
-        if path == prefix or path.startswith(prefix + os.sep):
+        prefix = os.path.normpath(prefix)
+        if path == prefix or path.startswith(prefix.rstrip(os.sep) + os.sep):
             return True
     return False
 
@@ -318,24 +316,20 @@ def ours(base):
     return bool(suffix) and base.endswith(suffix)
 
 
-def subtitle_tokens(base):
-    return normalize(base) - LANGUAGE_WORDS
-
-
 def episode_tag(name):
     match = re.search(r"[sS](\d{1,2})[ ._-]?[eE](\d{1,3})", name)
     if match:
         return (int(match.group(1)), int(match.group(2)))
-    match = re.search(r"(?<!\d)(\d{1,2})x(\d{2})(?!\d)", name)
+    match = re.search(r"(?<!\d)(\d{1,2})[xX](\d{2})(?!\d)", name)
     if match:
         return (int(match.group(1)), int(match.group(2)))
     return None
 
 
 def match_video(sbase, videos):
-    tokens = subtitle_tokens(sbase)
+    tokens = normalize(sbase)
     stag = episode_tag(sbase)
-    best, best_score = None, 0.0
+    best, best_score = None, (0.0, 0)
     usable = []
 
     for vbase, vpath in videos:
@@ -349,12 +343,13 @@ def match_video(sbase, videos):
         vtokens = normalize(vbase)
         if not vtokens:
             continue
-        score = len(vtokens & tokens) / len(vtokens)
+        shared = len(vtokens & tokens)
+        score = (shared / len(vtokens), shared)
         if score > best_score:
             best_score = score
             best = vpath
 
-    if best and best_score >= 0.5:
+    if best and best_score[0] >= 0.5:
         return best
     # Nothing lined up by name, but if only one video can belong to it anyway
     # then the subtitle is for that one
@@ -367,7 +362,7 @@ def scan(path):
     videos = {}
     subtitles = {}
 
-    if blocked(path):
+    if blocked(path) or SKIP_DIRS.intersection(path.split(os.sep)):
         return videos, subtitles
 
     for root, dirs, files in os.walk(path):
@@ -405,7 +400,7 @@ def ttml(path):
             head = file.read(65536)
     except OSError:
         return False
-    return any(tag.encode(code) in head for tag in ("<tt ", "<tt:tt ")
+    return any(re.search(r"<(tt:)?tt[\s>]", head.decode(code, "ignore"))
                for code in ("utf-8", "utf-16-le", "utf-16-be"))
 
 
@@ -481,13 +476,18 @@ def previous_job(conn, video_path, srt_path):
     return cur.fetchone()
 
 
+def replaced(row, mtime):
+    srt_mtime = row[2]
+    return mtime is not None and srt_mtime is not None and abs(mtime - srt_mtime) > 1
+
+
 def needs_work(row, mtime):
     if row is None:
         return True
 
-    status, attempts, srt_mtime = row
+    status, attempts, _ = row
     # Somebody replaced the subtitle since we last wrote it, so it is a new job
-    if mtime is not None and srt_mtime is not None and abs(mtime - srt_mtime) > 1:
+    if replaced(row, mtime):
         return True
     if status in ("done", "lowconf", "undone"):
         return False
@@ -505,7 +505,13 @@ def job_line(video_path, srt_path):
     if output:
         parts += ["--output", output]
 
-    return " ".join('"%s"' % p if re.search(r"\s", p) else p for p in parts)
+    return " ".join(quoted(part) for part in parts)
+
+
+def quoted(part):
+    if not re.search(r'[\s"]', part):
+        return part
+    return '"%s"' % part.replace('"', '\\"')
 
 
 def failed(conn, video_path, srt_path, attempts):
@@ -526,7 +532,7 @@ def run_batch(conn, batch):
         try:
             while todo:
                 video, subtitle, attempts = todo[0]
-                had_backup = os.path.exists(subtitle + ".bak")
+                original = contents(subtitle) if restorable() else None
                 clock = threading.Timer(TIMEOUT, force, [child])
                 clock.start()
                 try:
@@ -548,7 +554,7 @@ def run_batch(conn, batch):
                 if not values or values.get("error"):
                     failed(conn, video, subtitle, attempts)
                 else:
-                    finish(conn, video, subtitle, attempts, values, had_backup)
+                    finish(conn, video, subtitle, attempts, values, original)
         finally:
             with engine_lock:
                 engine = None
@@ -594,7 +600,9 @@ def count_tracks(video_path):
              "-show_entries", "stream=index", "-of", "csv=p=0", video_path],
             capture_output=True, text=True, timeout=60)
     except Exception:
-        return 0
+        return None
+    if result.returncode != 0:
+        return None
     found = 0
     for line in (result.stdout or "").splitlines():
         if line.strip():
@@ -607,12 +615,29 @@ def remember_tracks(conn, video_path):
                        (video_path,)).fetchone()
     if row is not None:
         return
+    tracks = count_tracks(video_path)
+    if tracks is None:
+        return
     conn.execute("INSERT OR REPLACE INTO video_tracks (video_path, tracks) VALUES (?, ?)",
-                 (video_path, count_tracks(video_path)))
+                 (video_path, tracks))
     conn.commit()
 
 
-def finish(conn, video_path, srt_path, attempts, values, had_backup=True):
+def contents(path):
+    try:
+        with open(path, "rb") as file:
+            return file.read()
+    except OSError:
+        return None
+
+
+def put_back(path, original):
+    with open(path + ".tmp", "wb") as file:
+        file.write(original)
+    os.replace(path + ".tmp", path)
+
+
+def finish(conn, video_path, srt_path, attempts, values, original=None):
     print("%s: %s offset=%sms sigma=%.1f agree=%.2f reference=%s" % (
         os.path.basename(srt_path), values.get("verdict"), values.get("offset_ms"),
         values.get("sigma", 0), values.get("agreement", 0), values.get("reference")))
@@ -639,21 +664,19 @@ def finish(conn, video_path, srt_path, attempts, values, had_backup=True):
         status = "lowconf"
 
     confidence = values.get("sigma")
-    if status == "done" and MIN_CONFIDENCE > 0 and confidence is not None \
-            and confidence < MIN_CONFIDENCE:
+    if status == "done" and not values.get("unchanged") and MIN_CONFIDENCE > 0 \
+            and confidence is not None and confidence < MIN_CONFIDENCE:
+        status = "lowconf"
         written_to = values.get("output")
-        if ENGINE.get("suffix") and written_to and written_to != srt_path:
-            os.remove(written_to)
-            print("Confidence %.2f is under %.2f, threw the result away: %s" % (confidence, MIN_CONFIDENCE, written_to))
-            status = "lowconf"
-        elif backup_path:
-            shutil.copy2(backup_path, srt_path)
-            print("Confidence %.2f is under %.2f, put the original back: %s" % (confidence, MIN_CONFIDENCE, srt_path))
-            status = "lowconf"
-
-    if ENGINE.get("no_backup") and restorable() and not had_backup and backup_path:
-        os.remove(backup_path)
-        backup_path = None
+        try:
+            if ENGINE.get("suffix") and written_to and written_to != srt_path:
+                os.remove(written_to)
+                print("Confidence %.2f is under %.2f, threw the result away: %s" % (confidence, MIN_CONFIDENCE, written_to))
+            elif original is not None:
+                put_back(srt_path, original)
+                print("Confidence %.2f is under %.2f, put the original back: %s" % (confidence, MIN_CONFIDENCE, srt_path))
+        except OSError as e:
+            print("Could not undo the result under %.2f for %s: %s" % (MIN_CONFIDENCE, srt_path, e))
 
     save_result(conn, video_path, srt_path, backup_path, values, attempts, status)
 
@@ -687,26 +710,30 @@ def run_scan(conn, path, verbose=False):
             print("Cannot keep a record of a name that is not UTF-8, rename it to have it synced:",
                   os.fsencode(subtitle).decode("utf-8", "replace"))
             continue
-        remember_tracks(conn, video)
+        if not ENGINE.get("dry_run"):
+            remember_tracks(conn, video)
         ext = os.path.splitext(subtitle)[1].lower()
         if ext not in ENGINE_FORMATS:
             unsupported += 1
             continue
         if translate.ours(conn, subtitle):
             continue
-        if '"' in video + subtitle or "\n" in video + subtitle:
-            print("Cannot hand the engine a path with a double quote or a line break in it:", subtitle)
+        if "\n" in video + subtitle:
+            print("Cannot hand the engine a path with a line break in it:", subtitle)
             continue
 
         row = previous_job(conn, video, subtitle)
-        if not needs_work(row, file_mtime(subtitle)):
+        mtime = file_mtime(subtitle)
+        if not needs_work(row, mtime):
             continue
 
         if not wait_stable(video) or not wait_stable(subtitle):
             print("Still being written, leaving it for the next scan:", subtitle)
             continue
 
-        attempts = (row[1] or 0) + 1 if row else 1
+        attempts = 1
+        if row and not replaced(row, mtime):
+            attempts = (row[1] or 0) + 1
         batch.append((video, subtitle, attempts))
 
     if unsupported:
@@ -794,7 +821,11 @@ def take_pending():
         except queue.Empty:
             break
     directories.discard(None)
-    return directories
+    found = set()
+    for path in sorted(directories):
+        if not any(path.startswith(parent.rstrip(os.sep) + os.sep) for parent in found):
+            found.add(path)
+    return found
 
 
 # The queue is what the loop sits and waits on, so put something in it to

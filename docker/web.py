@@ -116,8 +116,8 @@ def undo(conn, ids):
         mtime = os.path.getmtime(row["srt_path"]) if os.path.exists(row["srt_path"]) else None
         conn.execute("UPDATE sync_jobs SET status = 'undone', backup_path = NULL, srt_mtime = ? WHERE id = ?",
                      (mtime, job_id))
+        conn.commit()
         done += 1
-    conn.commit()
     return done
 
 
@@ -143,9 +143,16 @@ def wanted_ids(body):
 
 def job(conn, job_id):
     return conn.execute(
-        "SELECT id, video_path, srt_path, offset_ms, confidence FROM sync_jobs WHERE id = ?",
+        "SELECT id, video_path, srt_path, offset_ms, confidence, status FROM sync_jobs WHERE id = ?",
         (job_id,)
     ).fetchone()
+
+
+def current(conn, row):
+    suffix = json.loads(setting(conn, "engine", "{}")).get("suffix") or ""
+    base, ext = os.path.splitext(row["srt_path"])
+    synced = base + suffix + ext
+    return synced if suffix and os.path.isfile(synced) else row["srt_path"]
 
 
 def note_written(conn, row, path, offset, status="done"):
@@ -189,14 +196,17 @@ def shift(conn, ids, ms, mode):
         row = job(conn, job_id)
         if not row:
             continue
-        written = shift_file(row["srt_path"], ms, mode)
+        source = current(conn, row)
+        written = shift_file(source, ms, mode)
         offset = (row["offset_ms"] or 0) + ms
         if written == row["srt_path"]:
             conn.execute("UPDATE sync_jobs SET offset_ms = ?, srt_mtime = ?, status = 'done' WHERE id = ?",
                          (offset, os.path.getmtime(written), job_id))
+        elif written == source:
+            conn.execute("UPDATE sync_jobs SET offset_ms = ?, status = 'done' WHERE id = ?", (offset, job_id))
         else:
             note_written(conn, row, written, offset)
-    conn.commit()
+        conn.commit()
 
 
 def engine_json(text):
@@ -263,6 +273,11 @@ def sync_one(conn, row, reference, mode):
         raise RuntimeError((result.stderr or "").strip() or "lapse said nothing")
 
     written = values.get("output") or target
+    if values.get("unchanged"):
+        conn.execute("UPDATE sync_jobs SET offset_ms = 0, confidence = ?, status = 'done' WHERE id = ?",
+                     (values.get("sigma"), row["id"]))
+        return
+
     if not values.get("written") or not os.path.exists(written):
         conn.execute("UPDATE sync_jobs SET status = 'lowconf' WHERE id = ?", (row["id"],))
         return
@@ -295,16 +310,21 @@ def reference_sync(conn, ids, reference, everything, mode):
         raise RuntimeError("Every other track can only be lined up against a subtitle")
     if everything:
         folder = os.path.dirname(reference)
+        videos = set()
+        for job_id in ids:
+            row = job(conn, job_id)
+            if row:
+                videos.add(row["video_path"])
         ids = []
-        for row in conn.execute("SELECT id, srt_path FROM sync_jobs"):
-            if os.path.dirname(row["srt_path"]) == folder:
+        for row in conn.execute("SELECT id, srt_path, video_path FROM sync_jobs"):
+            if os.path.dirname(row["srt_path"]) == folder and row["video_path"] in videos:
                 ids.append(row["id"])
 
     for job_id in ids:
         row = job(conn, job_id)
         if row and row["srt_path"] != reference:
             sync_one(conn, row, reference, mode)
-    conn.commit()
+            conn.commit()
 
 
 def convert(conn, ids, want, drop):
@@ -312,11 +332,12 @@ def convert(conn, ids, want, drop):
         row = job(conn, job_id)
         if not row:
             continue
-        written = subs.convert(row["srt_path"], want, drop)
-        note_written(conn, row, written, row["offset_ms"])
-        if drop:
+        source = current(conn, row)
+        written = subs.convert(source, want, drop)
+        note_written(conn, row, written, row["offset_ms"], row["status"])
+        if drop and source == row["srt_path"]:
             conn.execute("DELETE FROM sync_jobs WHERE id = ?", (job_id,))
-    conn.commit()
+        conn.commit()
 
 
 def films(conn, count_embedded):
@@ -356,19 +377,16 @@ def queue_translations(conn, ids, language):
         raise RuntimeError("Say which language to translate into")
     if not translate.ready():
         raise RuntimeError("No translation provider is set up")
-    if not ids:
-        return 0
-
-    marks = ",".join("?" * len(ids))
-    rows = conn.execute("SELECT srt_path FROM sync_jobs WHERE id IN (%s)" % marks, ids).fetchall()
-    for row in rows:
-        source = row["srt_path"]
+    for job_id in ids:
+        row = job(conn, job_id)
+        if not row:
+            continue
+        source = current(conn, row)
         output = translate.named(source, language)
-        if translate.ours(conn, output) and os.path.exists(output):
+        if translate.made_from(conn, output) == source and os.path.exists(output):
             continue
         translate.remember(conn, source, output, language, "waiting", "")
         waiting.put((source, language))
-    return len(rows)
 
 
 def worker():
@@ -390,11 +408,12 @@ def act(path, body):
             row = job(conn, int(body.get("id", 0)))
             if not row:
                 raise RuntimeError("That file is not on record any more")
+            source = current(conn, row)
             try:
-                cues = subs.preview(row["srt_path"])
+                cues = subs.preview(source)
             except RuntimeError:
                 cues = []    # a format the preview cannot read is still one the engine can move
-            return {"path": row["srt_path"], "cues": cues}
+            return {"path": source, "cues": cues}
         elif path == "/api/shift":
             shift(conn, wanted_ids(body), int(body.get("ms", 0)), output_mode(body))
         elif path == "/api/neighbours":
@@ -416,12 +435,15 @@ def act(path, body):
             save_setting(conn, "scan_interval", max(0, int(body.get("seconds", 0))))
         elif path == "/api/engine":
             saved = json.loads(setting(conn, "engine", "{}"))
+            changed = json.loads(setting(conn, "engine_changed", "{}"))
             for key, value in (body.get("engine") or {}).items():
-                if key in saved:
+                if key in saved and saved[key] != value:
                     saved[key] = value
+                    changed[key] = value
+            save_setting(conn, "engine_changed", json.dumps(changed))
             save_setting(conn, "engine", json.dumps(saved))
         elif path == "/api/excluded":
-            paths = [p.strip() for p in body.get("paths", []) if isinstance(p, str) and p.strip()]
+            paths = [os.path.normpath(p.strip()) for p in body.get("paths", []) if isinstance(p, str) and p.strip()]
             save_setting(conn, "excluded", json.dumps(sorted(set(paths))))
         elif path == "/api/undo":
             undo(conn, wanted_ids(body))

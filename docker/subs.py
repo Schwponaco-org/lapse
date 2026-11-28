@@ -30,6 +30,71 @@ def kind(path):
     return ext
 
 
+WESTERN = ("æøåé", "åäöé", "äöüß", "éèàçêâîôûëïùœ", "áéíóúñü", "àèéìòù", "ãõáéíóúâêôçà", "ëïéèöó")
+CENTRAL = ("ąćęłńóśźż", "áčďéěíňóřšťúůýž", "áäčďéíľňóôšťúýž", "áéíóöőúüű", "čćđšž", "ăâîşţ")
+
+CODEPAGES = {"cp1252": WESTERN, "cp1250": CENTRAL, "iso-8859-2": CENTRAL, "cp1251": (None,)}
+
+
+def letter(c):
+    if c.isascii():
+        return c.isalpha()
+    return ("\xc0" <= c <= "\u024f" and c not in "×÷") or "\u0400" <= c <= "\u04ff"
+
+
+def fit(text, language):
+    total = 0
+    for i, c in enumerate(text):
+        if c < "\x80":
+            continue
+        before = i > 0 and letter(text[i - 1])
+        after = i + 1 < len(text) and letter(text[i + 1])
+        if not letter(c):
+            if c < "\xa0" or (before and after):
+                total -= 5
+            elif c in "¿¡" and after:
+                total += 3
+        elif not language:
+            latin = (before and text[i - 1] < "\x80") or (after and text[i + 1] < "\x80")
+            word = (before and text[i - 1] >= "\u0400") or (after and text[i + 1] >= "\u0400")
+            if latin or c < "\u0400":
+                total -= 1
+            elif word:
+                total += 3
+        elif before and after and text[i - 1] >= "\x80" and text[i + 1] >= "\x80":
+            total -= 1
+        else:
+            total += 3 if c.lower() in language else -1
+    return total
+
+
+def codepage(raw):
+    best, most = "cp1252", None
+    for page, languages in CODEPAGES.items():
+        try:
+            text = raw.decode(page)
+        except UnicodeDecodeError:
+            continue
+        points = max(fit(text, language) for language in languages)
+        if most is None or points > most:
+            best, most = page, points
+    return best
+
+
+def utf16(raw):
+    look = raw[:4096]
+    if len(look) < 16:
+        return None
+    total = len(look) // 2
+    even = look[0::2].count(0)
+    odd = look[1::2].count(0)
+    if odd > total * 3 // 10 and even < total // 20:
+        return "utf-16-le"
+    if even > total * 3 // 10 and odd < total // 20:
+        return "utf-16-be"
+    return None
+
+
 def charset(path):
     with open(path, "rb") as file:
         raw = file.read()
@@ -37,15 +102,18 @@ def charset(path):
         return "utf-8-sig"
     if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
         return "utf-16"
+    found = utf16(raw)
+    if found:
+        return found
     try:
         raw.decode("utf-8")
         return "utf-8"
     except UnicodeDecodeError:
-        return "cp1252"
+        return codepage(raw)
 
 
 def read(path):
-    with open(path, "r", encoding=charset(path), errors="surrogateescape", newline="") as file:
+    with open(path, "r", encoding=charset(path), errors="replace", newline="") as file:
         return file.readlines()
 
 
@@ -67,7 +135,7 @@ def from_ms(ms, dot):
 
 
 def from_ms_ass(ms):
-    ms = max(0, ms)
+    ms = (max(0, ms) + 5) // 10 * 10
     hours, ms = divmod(ms, 3600000)
     minutes, ms = divmod(ms, 60000)
     seconds, ms = divmod(ms, 1000)
@@ -134,7 +202,7 @@ def ass_cues(lines):
         if start is None or end is None:
             continue
         text = re.sub(r"\{[^}]*\}", "", ",".join(fields[9:]).rstrip("\r\n"))
-        cues.append((start, end, re.split(r"\\[Nn]", text)))
+        cues.append((start, end, [part for part in re.split(r"\\[Nn]", text) if part]))
     return cues
 
 
@@ -221,7 +289,7 @@ def convert(path, want, drop):
         raise RuntimeError("Cannot write that format: " + str(want))
 
     target = os.path.splitext(path)[0] + want
-    if target == path:
+    if target == path or (os.path.exists(target) and os.path.samefile(target, path)):
         raise RuntimeError(os.path.basename(path) + " is " + want + " already")
 
     cues = cues_of(path)

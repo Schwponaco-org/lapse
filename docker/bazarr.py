@@ -74,7 +74,7 @@ def track(body, name):
     value = body.get(name)
     if value is None:
         return None
-    if not isinstance(value, int) or value < 0:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise Refused(name + " has to be a number from 0, or null")
     return value
 

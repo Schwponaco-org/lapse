@@ -23,7 +23,7 @@ if os.environ.get("WEB", "1") != "1":
 url = "http://127.0.0.1:%s/api/state" % os.environ.get("WEB_PORT", "8080")
 
 try:
-    with urllib.request.urlopen(url, timeout=5) as answer:
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url, timeout=5) as answer:
         sys.exit(0 if answer.status == 200 else 1)
 except Exception as e:
     print(e)

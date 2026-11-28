@@ -131,4 +131,44 @@ if docker logs $CONTAINER 2>&1 | tail -n +$((before + 1)) | grep -q "Syncing:"; 
 fi
 echo "nothing was done twice"
 
+web_check() {
+    docker run --rm --network container:$CONTAINER -v $DATA:/data -v $MEDIA:/media -v "$SCRIPTS:/scripts:ro" \
+        --entrypoint python3 $IMAGE /scripts/check-web.py "$1" || { docker logs $CONTAINER; exit 1; }
+}
+
+restart() {
+    docker stop $CONTAINER > /dev/null
+    docker rm $CONTAINER > /dev/null
+    docker run -d --name $CONTAINER -v $MEDIA:/media -v $DATA:/data \
+        -e PUID=1000 -e PGID=1000 -e SCAN_INTERVAL=0 "$@" $IMAGE > /dev/null
+    wait_for "Watching for new files..."
+}
+
+web_check reference
+web_check engine
+
+echo "== the environment changed after the first start"
+restart -e SNAP=40 -e MIN_SHIFT=7
+restart -e SNAP=80 -e MIN_SHIFT=7 -e MIN_CONFIDENCE=1000 -e MEDIA_ROOT=/media/
+flags=$(docker logs $CONTAINER 2>&1 | grep "Engine flags:")
+case "$flags" in
+    *"--snap 40 --min-shift 7"*) echo "$flags" ;;
+    *) echo "FAIL: the web interface has to keep snap 40 and the environment brings min-shift 7: $flags"; exit 1 ;;
+esac
+
+web_check backup
+if ! docker logs $CONTAINER 2>&1 | grep -qF "put the original back: /media/TV/Show/Season 01/Show.S01E02.da.srt"; then
+    echo "FAIL: the result under MIN_CONFIDENCE was not undone"
+    docker logs $CONTAINER
+    exit 1
+fi
+
+restart -e OUTPUT_SUFFIX=.synced -e MIN_CONFIDENCE=1000
+web_check suffix
+if [ "$(docker inspect -f '{{.State.Running}}' $CONTAINER)" != true ]; then
+    echo "FAIL: the container died"
+    docker logs $CONTAINER
+    exit 1
+fi
+
 echo "docker image looks good"

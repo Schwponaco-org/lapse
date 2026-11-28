@@ -223,6 +223,7 @@ for what, fields in [
     ("a video that is not a path", {"video": 7, "subtitle": late}),
     ("a negative track", {"video": video, "subtitle": late, "audio_track": -1}),
     ("a track that is text", {"video": video, "subtitle": late, "sub_track": "1"}),
+    ("a track that is true", {"video": video, "subtitle": late, "audio_track": True}),
 ]:
     status, kind, answer = sync(**fields)
     check(status == 400 and answer.get("error"), "400 for " + what)

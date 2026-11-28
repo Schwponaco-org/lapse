@@ -45,7 +45,7 @@ def ready():
 def named(path, language):
     base, ext = os.path.splitext(path)
     stem, tail = os.path.splitext(base)
-    if tail and 2 <= len(tail) - 1 <= 3:
+    if tail and 2 <= len(tail) - 1 <= 3 and tail[1:].isalpha():
         base = stem
     return "%s.%s%s" % (base, language, ext)
 
@@ -81,7 +81,7 @@ def put_lines(lines, wanted, translated):
     out = list(lines)
     for (number, original), replacement in zip(wanted, translated):
         line = lines[number]
-        ending = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else ""
+        ending = line[len(line.rstrip("\r\n")):]
         match = DIALOGUE.match(line.strip())
         if match:
             out[number] = match.group(1) + replacement + ending
@@ -165,15 +165,25 @@ def remember(conn, source, output, language, status, detail):
     conn.commit()
 
 
+def made_from(conn, path):
+    row = conn.execute("SELECT source_path FROM translations WHERE output_path = ? AND status = 'done'",
+                       (path,)).fetchone()
+    return row[0] if row else None
+
+
 def ours(conn, path):
-    return conn.execute("SELECT 1 FROM translations WHERE output_path = ? AND status = 'done'",
-                        (path,)).fetchone() is not None
+    return made_from(conn, path) is not None
 
 
 def work(conn, path, language):
     output = named(path, language)
-    if ours(conn, output) and os.path.exists(output):
-        return True
+    source = made_from(conn, output)
+    if source and os.path.exists(output):
+        if source == path:
+            return True
+        remember(conn, path, output, language, "failed",
+                 "%s is translated from %s already" % (os.path.basename(output), os.path.basename(source)))
+        return False
     try:
         detail = run(path, output, language)
         remember(conn, path, output, language, "done", detail)
